@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include <cmath>
 
-
 #define CHECK_CUDA(call) do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
@@ -102,99 +101,6 @@ __global__ void fill_full_result_kernel(
     }
 }
 
-void spgemm_transpose_product_manual(
-    void *A_buffer, int A_rows, int A_cols, int A_nnz,
-    void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
-{
-    size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
-    size_t A_col_idx_size = A_nnz * sizeof(int);
-    size_t A_val_size = A_nnz * sizeof(float);
-    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
-
-    void *dA_buffer;
-    CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
-    CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
-
-    char *dA_base = (char*)dA_buffer;
-    int *dA_row_ptr = (int*)dA_base;
-    int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
-    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
-
-    int *dC_row_nnz;
-    CHECK_CUDA(cudaMalloc(&dC_row_nnz, A_rows * sizeof(int)));
-    CHECK_CUDA(cudaMemset(dC_row_nnz, 0, A_rows * sizeof(int)));
-
-    int block_size = 256;
-    int grid_size = (A_rows + block_size - 1) / block_size;
-    
-    count_full_nnz_kernel<<<grid_size, block_size>>>(
-        dA_row_ptr, dA_col_idx, dA_val, A_rows, dC_row_nnz);
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    int *dC_row_ptr;
-    CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
-    CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
-
-    thrust::exclusive_scan(
-        thrust::device_ptr<int>(dC_row_nnz),
-        thrust::device_ptr<int>(dC_row_nnz + A_rows),
-        thrust::device_ptr<int>(dC_row_ptr + 1));
-
-    int C_nnz_result;
-    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, 
-                         sizeof(int), cudaMemcpyDeviceToHost));
-
-    int *dC_col_idx;
-    float *dC_val;
-    CHECK_CUDA(cudaMalloc(&dC_col_idx, C_nnz_result * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dC_val, C_nnz_result * sizeof(float)));
-
-    fill_full_result_kernel<<<grid_size, block_size>>>(
-        dA_row_ptr, dA_col_idx, dA_val, A_rows,
-        dC_row_ptr, dC_col_idx, dC_val);
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    // 去掉逐行排序，改成批量排序
-    // 注意：这里结果已经是按列号递增的（因为 j 递增遍历）
-    // 所以不需要排序！
-
-    size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
-    size_t C_col_idx_size = C_nnz_result * sizeof(int);
-    size_t C_val_size = C_nnz_result * sizeof(float);
-    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
-    size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
-
-    void *dC_buffer;
-    CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
-
-    char *dC_base = (char*)dC_buffer;
-    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, 
-                         cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx, 
-                         C_col_idx_size, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned, 
-                         dC_val, C_val_size, cudaMemcpyDeviceToDevice));
-
-    void *C_buffer = nullptr;
-    CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
-                         
-    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, 
-                         cudaMemcpyDeviceToHost));
-
-    *C_buffer_out = C_buffer;
-    *C_rows = A_rows;
-    *C_cols = A_rows;
-    *C_nnz = C_nnz_result;
-
-    cudaFree(dA_buffer);
-    cudaFree(dC_row_nnz);
-    cudaFree(dC_row_ptr);
-    cudaFree(dC_col_idx);
-    cudaFree(dC_val);
-    cudaFree(dC_buffer);
-}
-
 // ========== A x A 优化版本 ==========
 
 #define HASH_SIZE 4096
@@ -207,6 +113,7 @@ __device__ int hash_insert_or_add(
     int slot = key & (HASH_SIZE - 1);  // 改用位运算，更快
     
     for (int attempt = 0; attempt < HASH_SIZE; attempt++) {
+        //atomicCAS提取slot对应位置的key,如果是empty就写入key,返回值是老的key
         int old_key = atomicCAS(&hash_keys[slot], HASH_EMPTY, key);
         
         if (old_key == HASH_EMPTY || old_key == key) {
@@ -250,13 +157,14 @@ __global__ void count_self_nnz_hash_kernel(
     int A_rows, int A_cols,
     int *row_nnz)
 {
+    //定义共享hash表和值
     __shared__ int shared_hash_keys[HASH_SIZE];
     __shared__ float shared_hash_vals[HASH_SIZE];
     
     int i = blockIdx.x;
     if (i >= A_rows) return;
     
-    // 初始化
+    // 初始化, 一个线程处理一行
     for (int idx = threadIdx.x; idx < HASH_SIZE; idx += blockDim.x) {
         shared_hash_keys[idx] = HASH_EMPTY;
         shared_hash_vals[idx] = 0.0f;
@@ -379,6 +287,103 @@ __global__ void fill_self_result_hash_kernel(
         C_val[C_start + idx] = temp_vals[idx];
     }
 }
+
+// ========== A x A^T Host ==========
+
+void spgemm_transpose_product_manual(
+    void *A_buffer, int A_rows, int A_cols, int A_nnz,
+    void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
+{
+    size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
+    size_t A_col_idx_size = A_nnz * sizeof(int);
+    size_t A_val_size = A_nnz * sizeof(float);
+    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+
+    void *dA_buffer;
+    CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
+    CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+
+    char *dA_base = (char*)dA_buffer;
+    int *dA_row_ptr = (int*)dA_base;
+    int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
+    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+
+    int *dC_row_nnz;
+    CHECK_CUDA(cudaMalloc(&dC_row_nnz, A_rows * sizeof(int)));
+    CHECK_CUDA(cudaMemset(dC_row_nnz, 0, A_rows * sizeof(int)));
+
+    int block_size = 256;
+    int grid_size = (A_rows + block_size - 1) / block_size;
+    
+    count_full_nnz_kernel<<<grid_size, block_size>>>(
+        dA_row_ptr, dA_col_idx, dA_val, A_rows, dC_row_nnz);
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    int *dC_row_ptr;
+    CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
+
+    thrust::exclusive_scan(
+        thrust::device_ptr<int>(dC_row_nnz),
+        thrust::device_ptr<int>(dC_row_nnz + A_rows),
+        thrust::device_ptr<int>(dC_row_ptr + 1));
+
+    int C_nnz_result;
+    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, 
+                         sizeof(int), cudaMemcpyDeviceToHost));
+
+    int *dC_col_idx;
+    float *dC_val;
+    CHECK_CUDA(cudaMalloc(&dC_col_idx, C_nnz_result * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&dC_val, C_nnz_result * sizeof(float)));
+
+    fill_full_result_kernel<<<grid_size, block_size>>>(
+        dA_row_ptr, dA_col_idx, dA_val, A_rows,
+        dC_row_ptr, dC_col_idx, dC_val);
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    // 去掉逐行排序，改成批量排序
+    // 注意：这里结果已经是按列号递增的（因为 j 递增遍历）
+    // 所以不需要排序！
+
+    size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
+    size_t C_col_idx_size = C_nnz_result * sizeof(int);
+    size_t C_val_size = C_nnz_result * sizeof(float);
+    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
+    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
+
+    void *dC_buffer;
+    CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
+
+    char *dC_base = (char*)dC_buffer;
+    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, 
+                         cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx, 
+                         C_col_idx_size, cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned, 
+                         dC_val, C_val_size, cudaMemcpyDeviceToDevice));
+
+    void *C_buffer = nullptr;
+    CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
+                         
+    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, 
+                         cudaMemcpyDeviceToHost));
+
+    *C_buffer_out = C_buffer;
+    *C_rows = A_rows;
+    *C_cols = A_rows;
+    *C_nnz = C_nnz_result;
+
+    cudaFree(dA_buffer);
+    cudaFree(dC_row_nnz);
+    cudaFree(dC_row_ptr);
+    cudaFree(dC_col_idx);
+    cudaFree(dC_val);
+    cudaFree(dC_buffer);
+}
+
+// ========== A x A Host ==========
 
 void spgemm_self_product_manual(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
