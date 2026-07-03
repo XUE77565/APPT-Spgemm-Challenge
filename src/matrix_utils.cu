@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cstdlib>   // malloc/free
+#include <cctype>    // tolower
 
 struct MatrixMarketHeader {
     bool is_pattern;  // 是否为 pattern 格式
@@ -51,7 +52,18 @@ bool read_matrix_market(const char *filename, void **buffer_out,
         return false;
     }
 
-    // 跳过注释行
+    // 读第一行 banner，检测 pattern / symmetric（大小写不敏感）
+    char banner[1024];
+    if (!fgets(banner, sizeof(banner), fp)) {
+        fclose(fp);
+        return false;
+    }
+    std::string bs(banner);
+    for (char &ch : bs) ch = (char)tolower((unsigned char)ch);
+    bool is_pattern = (bs.find("pattern") != std::string::npos);
+    bool is_symmetric = (bs.find("symmetric") != std::string::npos);
+
+    // 跳过剩余注释行
     char line[1024];
     do {
         if (!fgets(line, sizeof(line), fp)) {
@@ -60,21 +72,51 @@ bool read_matrix_market(const char *filename, void **buffer_out,
         }
     } while (line[0] == '%');
 
-    // 读取维度
+    // 读取维度（symmetric 时 nz 只是下三角条目数，展开后会变大）
     int M, N, nz;
     sscanf(line, "%d %d %d", &M, &N, &nz);
 
-    // 计算总内存大小
+    // 读取三元组：pattern 无 value（隐含 1.0），symmetric 需镜像补全上三角
+    std::vector<std::vector<std::pair<int, float>>> rows_data(M);
+    for (int i = 0; i < nz; ++i) {
+        int r, c;
+        float v;
+        if (is_pattern) {
+            if (fscanf(fp, "%d %d", &r, &c) != 2) {
+                fclose(fp);
+                return false;
+            }
+            v = 1.0f;
+        } else {
+            if (fscanf(fp, "%d %d %f", &r, &c, &v) != 3) {
+                fclose(fp);
+                return false;
+            }
+        }
+        r -= 1;
+        c -= 1;
+        rows_data[r].push_back({c, v});
+        // symmetric 只存下三角，r != c 时补镜像项 (c, r)；对角线 r==c 只存一次
+        if (is_symmetric && r != c) {
+            rows_data[c].push_back({r, v});
+        }
+    }
+    fclose(fp);
+
+    // 展开后的实际 nnz
+    int actual_nnz = 0;
+    for (int i = 0; i < M; ++i) actual_nnz += (int)rows_data[i].size();
+
+    // 计算总内存大小（按展开后的 nnz）
     size_t row_ptr_size = (M + 1) * sizeof(int);
-    size_t col_idx_size = nz * sizeof(int);
-    size_t val_size = nz * sizeof(float);
+    size_t col_idx_size = actual_nnz * sizeof(int);
+    size_t val_size = actual_nnz * sizeof(float);
     size_t total_size = row_ptr_size + col_idx_size + val_size;
 
     // 分配单块连续普通 host memory
     void *buffer = malloc(total_size);
     if (!buffer) {
         fprintf(stderr, "malloc failed, size = %zu bytes\n", total_size);
-        fclose(fp);
         return false;
     }
 
@@ -83,20 +125,6 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     int *row_ptr = (int*)base;
     int *col_idx = (int*)(base + row_ptr_size);
     float *val = (float*)(base + row_ptr_size + col_idx_size);
-
-    // 读取三元组并转换为 CSR
-    std::vector<std::vector<std::pair<int, float>>> rows_data(M);
-    for (int i = 0; i < nz; ++i) {
-        int r, c;
-        float v;
-        if (fscanf(fp, "%d %d %f", &r, &c, &v) != 3) {
-            free(buffer);
-            fclose(fp);
-            return false;
-        }
-        rows_data[r - 1].push_back({c - 1, v});
-    }
-    fclose(fp);
 
     // 构建 CSR
     row_ptr[0] = 0;
@@ -118,7 +146,7 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     *val_out = val;
     *rows = M;
     *cols = N;
-    *nnz = nz;
+    *nnz = actual_nnz;
 
     return true;
 }

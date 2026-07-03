@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
     LOG_BOTH("Input A: %d x %d, nnz = %d, sparsity = %.2f%%\n",
              A_rows, A_cols, A_nnz, sparsity);
     
-    // 测试 1: C = A x A
+    // 测试 1: C = A x A cuSparse
     {
         LOG_BOTH("\n=== Computing C = A x A (cuSPARSE) ===\n");
 

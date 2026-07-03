@@ -127,31 +127,6 @@ __device__ int hash_insert_or_add(
     return -1;
 }
 
-// Bitonic sort in shared memory (for small arrays)
-__device__ void bitonic_sort_shared(
-    int *keys, float *vals, int n, int tid, int blockDim_x)
-{
-    // Bitonic sort 适合 power-of-2 大小，这里简化为冒泡排序
-    // 对于 nnz < 100 的场景够用了
-    
-    for (int i = 0; i < n; i++) {
-        for (int j = tid; j < n - 1; j += blockDim_x) {
-            if (keys[j] > keys[j + 1]) {
-                // Swap keys
-                int tmp_key = keys[j];
-                keys[j] = keys[j + 1];
-                keys[j + 1] = tmp_key;
-                
-                // Swap vals
-                float tmp_val = vals[j];
-                vals[j] = vals[j + 1];
-                vals[j + 1] = tmp_val;
-            }
-        }
-        __syncthreads();
-    }
-}
-
 __global__ void count_self_nnz_hash_kernel(
     const int *A_row_ptr, const int *A_col_idx, const float *A_val,
     int A_rows, int A_cols,
