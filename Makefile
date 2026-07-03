@@ -15,6 +15,9 @@ $(TARGET): $(OBJS)
 src/%.o: src/%.cu
 	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
 
+# 声明 .o 为中间文件,make 完成后会自动删除它们
+.INTERMEDIATE: $(OBJS)
+
 clean:
 	rm -f src/*.o $(TARGET) *.mtx
 	rm -rf results/*
