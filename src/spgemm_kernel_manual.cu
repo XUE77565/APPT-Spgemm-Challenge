@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cmath>
 
+
 #define CHECK_CUDA(call) do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
