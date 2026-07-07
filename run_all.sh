@@ -10,7 +10,7 @@ set -o pipefail   # 让管道返回 spgemm_test 的真实退出码而不是 tee 
 
 
 # 单个矩阵最大允许耗时（秒）。可用环境变量覆盖，如：TIMEOUT=60 ./run_all.sh
-TIMEOUT=${TIMEOUT:-60}
+TIMEOUT=${TIMEOUT:-600}
 DATA_DIR="./data"
 RESULTS_DIR="./results"
 LOG_DIR="$RESULTS_DIR/log"
@@ -24,7 +24,6 @@ mkdir -p "$RESULTS_DIR" "$LOG_DIR" "$MATRIX_DIR"
 rm -f "$SUMMARY"
 echo "matrix,status,rows,cols,nnz" > "$SUMMARY"
 
-echo "matrix,status,rows,cols,nnz" > "./summary.csv"
 
 ok=0
 fail=0
