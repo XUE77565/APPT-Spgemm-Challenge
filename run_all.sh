@@ -1,14 +1,17 @@
 #!/bin/bash
-# 跑全部矩阵的完整 SpGEMM benchmark，并统计成功/失败数量
+# 跑全部矩阵的完整 SpGEMM benchmark，统计成功/失败/超时数量
 # 判定依据：spgemm_test 的退出码
 #   0        -> 成功（读入 + 计算全部完成）
 #   非零      -> 失败（读入失败 / CUDA 错误 / 崩溃 segv/abort 等）
-# 关键：不能用 "| tee" 后查 $?（那会是 tee 的退出码，恒 0），必须用 pipefail 或直接重定向
+#   124/137   -> 超时（超过 TIMEOUT 秒被 kill，单独计数，跳过该矩阵继续下一个）
+# 关键：不能用 "| tee" 后查 $?（那会是 tee 的退出码，恒 0），必须用 pipefail 拿真实退出码
 
 set -o pipefail   # 让管道返回 spgemm_test 的真实退出码而不是 tee 的
 
+# 单个矩阵最大允许耗时（秒）。可用环境变量覆盖，如：TIMEOUT=60 ./run_all.sh
+TIMEOUT=${TIMEOUT:-60}
 DATA_DIR="./data"
-RESULTS_DIR="./results"
+RESULTS_DIR="./results/matrices"
 mkdir -p "$RESULTS_DIR"
 rm -f "$RESULTS_DIR"/*.csv
 
@@ -16,8 +19,10 @@ echo "matrix,status,rows,cols,nnz" > "$RESULTS_DIR/summary.csv"
 
 ok=0
 fail=0
+timeout_cnt=0
 total=0
 failed=""
+timedout=""
 
 for matrix_dir in "$DATA_DIR"/*/; do
     name=$(basename "$matrix_dir")
@@ -29,11 +34,10 @@ for matrix_dir in "$DATA_DIR"/*/; do
     fi
 
     total=$((total + 1))
-    echo "Processing $name ..."
+    echo "Processing $name ... (max ${TIMEOUT}s)"
 
     log="$RESULTS_DIR/${name}.log"
-    # 直接重定向拿真实退出码；同时 tee 到终端保持实时输出
-    ./spgemm_test "$mtx" 2>&1 | tee "$log"
+    timeout -k 10 "$TIMEOUT" ./spgemm_test "$mtx" 2>&1 | tee "$log"
     rc=$?
 
     # 从输出中解析 "Input A: <rows> x <cols>, nnz = <nnz>"
@@ -42,6 +46,11 @@ for matrix_dir in "$DATA_DIR"/*/; do
     if [ "$rc" -eq 0 ]; then
         ok=$((ok + 1))
         status="OK"
+    elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+        timeout_cnt=$((timeout_cnt + 1))
+        status="TIMEOUT"
+        timedout="${timedout}\n    ${name} (>${TIMEOUT}s)"
+        echo "  -> TIMEOUT (>${TIMEOUT}s), skipped"
     else
         fail=$((fail + 1))
         status="FAIL"
@@ -53,12 +62,16 @@ done
 
 echo ""
 echo "============================="
-echo "Total: $total"
-echo "OK:    $ok"
-echo "FAIL:  $fail"
+echo "Total:    $total"
+echo "OK:       $ok"
+echo "FAIL:     $fail"
+echo "TIMEOUT:  $timeout_cnt  (>${TIMEOUT}s 自动跳过)"
 echo "============================="
 if [ -n "$failed" ]; then
     echo -e "Failed:${failed}"
+fi
+if [ -n "$timedout" ]; then
+    echo -e "Timed out:${timedout}"
 fi
 echo ""
 echo "Summary: $RESULTS_DIR/summary.csv"

@@ -1,0 +1,16 @@
+Processing 598a ... (max 600s)
+Reading matrix from ./data/598a/598a.mtx...
+Input A: 110971 x 110971, nnz = 1483868, sparsity = 99.99%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 110971 x 110971, nnz = 7104683, sparsity = 99.94%
+Time: 52.725 ms
+Saved to results/598a/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 110971 x 110971, nnz = 7104635, sparsity = 99.94%
+Time: 70.472 ms
+Saved to results/598a/self_product_manual.mtx
+
+=== All tests completed ===
+Processing a2nnsnsl ... (max 600s)
