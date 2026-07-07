@@ -8,6 +8,8 @@
 #include <libgen.h>
 #include <cuda_runtime.h>
 
+#define TEST_READ 0
+
 static void ensure_directory(const char *path) {
     struct stat st = {0};
     if (stat(path, &st) == -1) {
@@ -77,6 +79,11 @@ int main(int argc, char **argv) {
     double sparsity = 100.0 * (1.0 - (double)A_nnz / ((double)A_rows * A_cols));
     LOG_BOTH("Input A: %d x %d, nnz = %d, sparsity = %.2f%%\n",
              A_rows, A_cols, A_nnz, sparsity);
+
+    if(TEST_READ){
+        return 0;//先测试读入函数是否正确
+    }
+
     
     // 测试 1: C = A x A cuSparse
     {
@@ -227,9 +234,10 @@ int main(int argc, char **argv) {
     }
 
     free(A_buffer);
-    fclose(log_file);
 
     LOG_BOTH("\n=== All tests completed ===\n");
 
+    //在LOG之后fclose,避免use-after-free
+    fclose(log_file);
     return 0;
 }

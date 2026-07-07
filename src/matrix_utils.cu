@@ -62,6 +62,7 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     for (char &ch : bs) ch = (char)tolower((unsigned char)ch);
     bool is_pattern = (bs.find("pattern") != std::string::npos);
     bool is_symmetric = (bs.find("symmetric") != std::string::npos);
+    bool is_complex = (bs.find("complex") != std::string::npos);
 
     // 跳过剩余注释行
     char line[1024];
@@ -87,6 +88,14 @@ bool read_matrix_market(const char *filename, void **buffer_out,
                 return false;
             }
             v = 1.0f;
+        } else if (is_complex) {
+            // complex 数据行是 "row col real imag"，这里只保留实部
+            float re, im;
+            if (fscanf(fp, "%d %d %f %f", &r, &c, &re, &im) != 4) {
+                fclose(fp);
+                return false;
+            }
+            v = re;
         } else {
             if (fscanf(fp, "%d %d %f", &r, &c, &v) != 3) {
                 fclose(fp);
