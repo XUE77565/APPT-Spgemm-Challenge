@@ -8,14 +8,23 @@
 
 set -o pipefail   # 让管道返回 spgemm_test 的真实退出码而不是 tee 的
 
+
 # 单个矩阵最大允许耗时（秒）。可用环境变量覆盖，如：TIMEOUT=60 ./run_all.sh
 TIMEOUT=${TIMEOUT:-60}
 DATA_DIR="./data"
-RESULTS_DIR="./results/matrices"
-mkdir -p "$RESULTS_DIR"
-rm -f "$RESULTS_DIR"/*.csv
+RESULTS_DIR="./results"
+LOG_DIR="$RESULTS_DIR/log"
+MATRIX_DIR="$RESULTS_DIR/matrices"
+SUMMARY="$RESULTS_DIR/summary.csv"
 
-echo "matrix,status,rows,cols,nnz" > "$RESULTS_DIR/summary.csv"
+# 清理上次的结果
+rm -rf "$RESULTS_DIR"/*
+
+mkdir -p "$RESULTS_DIR" "$LOG_DIR" "$MATRIX_DIR"
+rm -f "$SUMMARY"
+echo "matrix,status,rows,cols,nnz" > "$SUMMARY"
+
+echo "matrix,status,rows,cols,nnz" > "./summary.csv"
 
 ok=0
 fail=0
@@ -24,55 +33,56 @@ total=0
 failed=""
 timedout=""
 
-for matrix_dir in "$DATA_DIR"/*/; do
-    name=$(basename "$matrix_dir")
-    mtx="${matrix_dir}${name}.mtx"
+  for matrix_dir in "$DATA_DIR"/*/; do
+      name=$(basename "$matrix_dir")
+      mtx="${matrix_dir}${name}.mtx"
 
-    if [ ! -f "$mtx" ]; then
-        echo "Skipping $name (no .mtx file)"
-        continue
-    fi
+      if [ ! -f "$mtx" ]; then
+          echo "Skipping $name (no .mtx file)"
+          continue
+      fi
 
-    total=$((total + 1))
-    echo "Processing $name ... (max ${TIMEOUT}s)"
+      total=$((total + 1))
+      echo "Processing $name ... (max ${TIMEOUT}s)"
 
-    log="$RESULTS_DIR/${name}.log"
-    timeout -k 10 "$TIMEOUT" ./spgemm_test "$mtx" 2>&1 | tee "$log"
-    rc=$?
+      log="$LOG_DIR/${name}.log"
+      timeout -k 10 "$TIMEOUT" ./spgemm_test "$mtx" 2>&1 | tee "$log"
+      rc=$?
 
-    # 从输出中解析 "Input A: <rows> x <cols>, nnz = <nnz>"
-    read rows cols nnz <<< "$(grep -m1 'Input A:' "$log" | awk -F'[^0-9]+' '{print $2, $3, $4}')"
+      # 从输出中解析 "Input A: <rows> x <cols>, nnz = <nnz>"
+      read rows cols nnz <<< "$(grep -m1 'Input A:' "$log" | awk -F'[^0-9]+' '{print $2, $3, $4}')"
 
-    if [ "$rc" -eq 0 ]; then
-        ok=$((ok + 1))
-        status="OK"
-    elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-        timeout_cnt=$((timeout_cnt + 1))
-        status="TIMEOUT"
-        timedout="${timedout}\n    ${name} (>${TIMEOUT}s)"
-        echo "  -> TIMEOUT (>${TIMEOUT}s), skipped"
-    else
-        fail=$((fail + 1))
-        status="FAIL"
-        failed="${failed}\n    ${name} (rc=${rc})"
-    fi
+      if [ "$rc" -eq 0 ]; then
+          ok=$((ok + 1))
+          status="OK"
+      elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+          timeout_cnt=$((timeout_cnt + 1))
+          status="TIMEOUT"
+          timedout="${timedout}\n    ${name} (>${TIMEOUT}s)"
+          echo "  -> TIMEOUT (>${TIMEOUT}s), skipped"
+      else
+          fail=$((fail + 1))
+          status="FAIL"
+          failed="${failed}\n    ${name} (rc=${rc})"
+      fi
 
-    echo "${name},${status},${rows},${cols},${nnz}" >> "$RESULTS_DIR/summary.csv"
-done
+      echo "${name},${status},${rows},${cols},${nnz}" >> "$SUMMARY"
+  done
 
-echo ""
-echo "============================="
-echo "Total:    $total"
-echo "OK:       $ok"
-echo "FAIL:     $fail"
-echo "TIMEOUT:  $timeout_cnt  (>${TIMEOUT}s 自动跳过)"
-echo "============================="
-if [ -n "$failed" ]; then
-    echo -e "Failed:${failed}"
-fi
-if [ -n "$timedout" ]; then
-    echo -e "Timed out:${timedout}"
-fi
-echo ""
-echo "Summary: $RESULTS_DIR/summary.csv"
-echo "Per-matrix logs: $RESULTS_DIR/<name>.log"
+  echo ""
+  echo "============================="
+  echo "Total:    $total"
+  echo "OK:       $ok"
+  echo "FAIL:     $fail"
+  echo "TIMEOUT:  $timeout_cnt  (>${TIMEOUT}s 自动跳过)"
+  echo "============================="
+  if [ -n "$failed" ]; then
+      echo -e "Failed:${failed}"
+  fi
+  if [ -n "$timedout" ]; then
+      echo -e "Timed out:${timedout}"
+  fi
+  echo ""
+  echo "Summary: $SUMMARY"
+  echo "Per-matrix logs: $LOG_DIR/<name>.log"
+  echo "Matrix outputs:  $MATRIX_DIR/<name>/"

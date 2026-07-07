@@ -46,8 +46,10 @@ int main(int argc, char **argv) {
     std::string basename = get_basename(input_path);
     
     ensure_directory("results");
-    std::string result_dir = "results/" + basename;
+    ensure_directory("results/matrices");          // ← 新增中间层
+    std::string result_dir = "results/matrices/" + basename;
     ensure_directory(result_dir.c_str());
+
     
     std::string log_path = result_dir + "/performance.log";
     FILE *log_file = fopen(log_path.c_str(), "w");
