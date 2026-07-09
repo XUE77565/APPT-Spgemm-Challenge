@@ -387,6 +387,7 @@ void spgemm_self_product_manual(
     int grid_size = A_rows;
 
     dbg("manual: count kernel begin (grid=%d, A_rows=%d)\n", grid_size, A_rows);
+    //一行一个block
     count_self_nnz_hash_kernel<<<grid_size, block_size>>>(
         dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols,
         dC_row_nnz);

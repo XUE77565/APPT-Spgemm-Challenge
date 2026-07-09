@@ -6,13 +6,14 @@ LIBS = -lcusparse -lcublas
 TARGET = spgemm_test
 SRCS = src/main.cu src/matrix_utils.cu src/spgemm_kernel_cusparse.cu src/spgemm_kernel_manual.cu
 OBJS = $(SRCS:.cu=.o)
+HEADERS = $(wildcard include/*.h)   # 任何头文件改动都触发重编
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(NVCC) $(NVCC_FLAGS) -o $@ $^ $(LIBS)
 
-src/%.o: src/%.cu
+src/%.o: src/%.cu $(HEADERS)
 	$(NVCC) $(NVCC_FLAGS) $(INCLUDES) -c $< -o $@
 
 # 声明 .o 为中间文件,make 完成后会自动删除它们

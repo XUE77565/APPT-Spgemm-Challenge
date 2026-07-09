@@ -123,12 +123,15 @@ int main(int argc, char **argv) {
             int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
             float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
-            std::string output_path = result_dir + "/self_product.mtx";
-            dbg("T1 writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
-            write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
-                               C_val, C_rows, C_cols, C_nnz);
-            LOG_BOTH("Saved to %s\n", output_path.c_str());
-            dbg("T1 write done\n");
+            #if WRITE_MTX
+                std::string output_path = result_dir + "/self_product.mtx";
+                dbg("T1 writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
+                write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
+                                     C_val, C_rows, C_cols, C_nnz);
+                LOG_BOTH("Saved to  %s\n", output_path.c_str());
+                dbg("T1 write done\n");
+            #endif
+
 
             cudaFreeHost(C_buffer);
         }
@@ -236,12 +239,15 @@ int main(int argc, char **argv) {
         int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
         float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
-        std::string output_path = result_dir + "/self_product_manual.mtx";
-        dbg("T4 writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
-        write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
-                           C_val, C_rows, C_cols, C_nnz);
-        LOG_BOTH("Saved to %s\n", output_path.c_str());
-        dbg("T4 write done\n");
+        #if WRITE_MTX
+                    std::string output_path = result_dir + "/self_product_manual.mtx";
+            dbg("T4 writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
+            write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
+                                C_val, C_rows, C_cols, C_nnz);
+            LOG_BOTH("Saved to %s\n", output_path.c_str());
+            dbg("T4 write done\n");
+        #endif
+
 
         cudaFreeHost(C_buffer);
     }

@@ -7,7 +7,8 @@
 #include <cuda_runtime.h>
 
 #define TEST_READ 0
-#define DBG 0
+#define DBG 1
+#define WRITE_MTX 0
 
 // 调试日志：带“程序启动以来毫秒数”时间戳，写 stderr（无缓冲，立刻可见，
 // 即使被 timeout 杀掉也能看到最后一行）。每个翻译单元共享同一份 t0
