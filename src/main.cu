@@ -8,7 +8,6 @@
 #include <libgen.h>
 #include <cuda_runtime.h>
 
-#define TEST_READ 0
 
 static void ensure_directory(const char *path) {
     struct stat st = {0};
@@ -33,9 +32,11 @@ static std::string get_basename(const char *path) {
 
 int main(int argc, char **argv) {
 
+    dbg("main entry, initializing CUDA context...\n");
     cudaFree(0);
     cudaSetDevice(0);
     cudaDeviceSynchronize();
+    dbg("CUDA context ready\n");
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " <matrix.mtx>\n";
@@ -71,12 +72,14 @@ int main(int argc, char **argv) {
     int A_rows = 0, A_cols = 0, A_nnz = 0;
 
     LOG_BOTH("Reading matrix from %s...\n", input_path);
+    dbg("start read_matrix_market: %s\n", input_path);
     if (!read_matrix_market(input_path, &A_buffer, &A_row_ptr, &A_col_idx, &A_val,
                             &A_rows, &A_cols, &A_nnz)) {
         LOG_BOTH("Failed to read matrix\n");
         fclose(log_file);
         return EXIT_FAILURE;
     }
+    dbg("read done: %d x %d, nnz=%d\n", A_rows, A_cols, A_nnz);
 
     double sparsity = 100.0 * (1.0 - (double)A_nnz / ((double)A_rows * A_cols));
     LOG_BOTH("Input A: %d x %d, nnz = %d, sparsity = %.2f%%\n",
@@ -98,8 +101,10 @@ int main(int argc, char **argv) {
             int C_rows = 0, C_cols = 0, C_nnz = 0;
 
             auto start = std::chrono::high_resolution_clock::now();
+            dbg("T1 cuSPARSE self_product: start\n");
             spgemm_self_product(A_buffer, A_rows, A_cols, A_nnz,
                                &C_buffer, &C_rows, &C_cols, &C_nnz);
+            dbg("T1 cuSPARSE self_product: done (C_nnz=%d)\n", C_nnz);
             auto end = std::chrono::high_resolution_clock::now();
 
             std::chrono::duration<double, std::milli> elapsed = end - start;
@@ -119,9 +124,11 @@ int main(int argc, char **argv) {
             float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
             std::string output_path = result_dir + "/self_product.mtx";
+            dbg("T1 writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
             write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
                                C_val, C_rows, C_cols, C_nnz);
             LOG_BOTH("Saved to %s\n", output_path.c_str());
+            dbg("T1 write done\n");
 
             cudaFreeHost(C_buffer);
         }
@@ -207,8 +214,10 @@ int main(int argc, char **argv) {
         int C_rows = 0, C_cols = 0, C_nnz = 0;
 
         auto start = std::chrono::high_resolution_clock::now();
+        dbg("T4 manual self_product: start\n");
         spgemm_self_product_manual(A_buffer, A_rows, A_cols, A_nnz,
                                    &C_buffer, &C_rows, &C_cols, &C_nnz);
+        dbg("T4 manual self_product: done (C_nnz=%d)\n", C_nnz);
         auto end = std::chrono::high_resolution_clock::now();
 
         std::chrono::duration<double, std::milli> elapsed = end - start;
@@ -228,9 +237,11 @@ int main(int argc, char **argv) {
         float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
         std::string output_path = result_dir + "/self_product_manual.mtx";
+        dbg("T4 writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
         write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
                            C_val, C_rows, C_cols, C_nnz);
         LOG_BOTH("Saved to %s\n", output_path.c_str());
+        dbg("T4 write done\n");
 
         cudaFreeHost(C_buffer);
     }

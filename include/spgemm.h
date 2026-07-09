@@ -2,7 +2,34 @@
 #define SPGEMM_H
 
 #include <cstdio>
+#include <chrono>
+#include <cstdarg>
 #include <cuda_runtime.h>
+
+#define TEST_READ 0
+#define DBG 0
+
+// 调试日志：带“程序启动以来毫秒数”时间戳，写 stderr（无缓冲，立刻可见，
+// 即使被 timeout 杀掉也能看到最后一行）。每个翻译单元共享同一份 t0
+// （inline 函数的 static 局部变量在 C++ 中跨 TU 唯一）。
+// 由 DBG 宏控制：DBG=1 时打印；DBG=0 时 dbg(...) 展开为 ((void)0)，
+// 连格式字符串都不编译进二进制。实现函数命名为 dbg_impl，再用宏 dbg(...) 转发，
+// 避免宏与函数同名冲突。
+#if DBG
+inline void dbg(const char *fmt, ...) {
+    static auto t0 = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(now - t0).count();
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "[dbg %9.1f ms] ", ms);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fflush(stderr);
+}
+#else
+#define dbg(...) ((void)0)
+#endif
 
 // 读入 Matrix Market，返回单块连续 pinned memory
 bool read_matrix_market(const char *filename, void **buffer_out,

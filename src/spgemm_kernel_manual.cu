@@ -1,3 +1,4 @@
+#include "spgemm.h"
 #include <cuda_runtime.h>
 #include <thrust/scan.h>
 #include <thrust/device_ptr.h>
@@ -384,11 +385,13 @@ void spgemm_self_product_manual(
 
     int block_size = 256;
     int grid_size = A_rows;
-    
+
+    dbg("manual: count kernel begin (grid=%d, A_rows=%d)\n", grid_size, A_rows);
     count_self_nnz_hash_kernel<<<grid_size, block_size>>>(
         dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols,
         dC_row_nnz);
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("manual: count kernel done\n");
 
     int *dC_row_ptr;
     CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
@@ -402,16 +405,19 @@ void spgemm_self_product_manual(
     int C_nnz_result;
     CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
                           sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("manual: scan done, C_nnz_result=%d\n", C_nnz_result);
 
     int *dC_col_idx;
     float *dC_val;
     CHECK_CUDA(cudaMalloc(&dC_col_idx, C_nnz_result * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&dC_val, C_nnz_result * sizeof(float)));
 
+    dbg("manual: fill kernel begin\n");
     fill_self_result_hash_kernel<<<grid_size, block_size>>>(
         dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols,
         dC_row_ptr, dC_col_idx, dC_val);
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("manual: fill kernel done\n");
 
     // 不需要排序了，已经在 kernel 里排好了
 

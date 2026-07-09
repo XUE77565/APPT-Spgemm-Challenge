@@ -1,0 +1,826 @@
+Processing cage3 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     524.8 ms] CUDA context ready
+[dbg     524.9 ms] start read_matrix_market: ./data/rep/cage3.mtx
+[dbg     524.9 ms] read done: 5 x 5, nnz=19
+[dbg     524.9 ms] T1 cuSPARSE self_product: start
+[dbg     531.9 ms] self_product: A H2D done (176 B)
+[dbg     531.9 ms] cusparse: workEstimation begin
+[dbg     548.9 ms] cusparse: workEstimation done (buf1=1291 B)
+[dbg     548.9 ms] cusparse: compute begin
+[dbg     549.4 ms] cusparse: compute done (buf2=6943 B)
+[dbg     549.4 ms] cusparse: C size = 5 x 5, nnz=25
+[dbg     549.4 ms] cusparse: copy begin
+[dbg     549.5 ms] cusparse: copy done
+[dbg     550.6 ms] self_product: C D2H begin (224 B)
+[dbg     550.6 ms] self_product: C D2H done
+[dbg     550.7 ms] T1 cuSPARSE self_product: done (C_nnz=25)
+[dbg     550.7 ms] T1 writing results/matrices/cage3/self_product.mtx (C_nnz=25)...
+[dbg     550.9 ms] T1 write done
+[dbg     551.2 ms] T4 manual self_product: start
+[dbg     551.3 ms] manual: count kernel begin (grid=5, A_rows=5)
+[dbg     551.7 ms] manual: count kernel done
+[dbg     551.9 ms] manual: scan done, C_nnz_result=20
+[dbg     551.9 ms] manual: fill kernel begin
+[dbg     552.0 ms] manual: fill kernel done
+[dbg     553.0 ms] T4 manual self_product: done (C_nnz=20)
+[dbg     553.1 ms] T4 writing results/matrices/cage3/self_product_manual.mtx (C_nnz=20)...
+[dbg     553.1 ms] T4 write done
+Reading matrix from ./data/rep/cage3.mtx...
+Input A: 5 x 5, nnz = 19, sparsity = 24.00%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 5 x 5, nnz = 25, sparsity = 0.00%
+Time: 25.828 ms
+Saved to results/matrices/cage3/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 5 x 5, nnz = 20, sparsity = 20.00%
+Time: 1.847 ms
+Saved to results/matrices/cage3/self_product_manual.mtx
+
+=== All tests completed ===
+Processing can_73 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     437.0 ms] CUDA context ready
+[dbg     437.1 ms] start read_matrix_market: ./data/rep/can_73.mtx
+[dbg     437.2 ms] read done: 73 x 73, nnz=377
+[dbg     437.2 ms] T1 cuSPARSE self_product: start
+[dbg     444.2 ms] self_product: A H2D done (3312 B)
+[dbg     444.2 ms] cusparse: workEstimation begin
+[dbg     464.7 ms] cusparse: workEstimation done (buf1=5587 B)
+[dbg     464.8 ms] cusparse: compute begin
+[dbg     465.5 ms] cusparse: compute done (buf2=60079 B)
+[dbg     465.5 ms] cusparse: C size = 73 x 73, nnz=1377
+[dbg     465.5 ms] cusparse: copy begin
+[dbg     465.6 ms] cusparse: copy done
+[dbg     467.1 ms] self_product: C D2H begin (11312 B)
+[dbg     467.2 ms] self_product: C D2H done
+[dbg     467.3 ms] T1 cuSPARSE self_product: done (C_nnz=1377)
+[dbg     467.3 ms] T1 writing results/matrices/can_73/self_product.mtx (C_nnz=1377)...
+[dbg     468.3 ms] T1 write done
+[dbg     468.8 ms] T4 manual self_product: start
+[dbg     468.9 ms] manual: count kernel begin (grid=73, A_rows=73)
+[dbg     469.4 ms] manual: count kernel done
+[dbg     469.6 ms] manual: scan done, C_nnz_result=1352
+[dbg     469.6 ms] manual: fill kernel begin
+[dbg     469.8 ms] manual: fill kernel done
+[dbg     471.2 ms] T4 manual self_product: done (C_nnz=1352)
+[dbg     471.3 ms] T4 writing results/matrices/can_73/self_product_manual.mtx (C_nnz=1352)...
+[dbg     472.1 ms] T4 write done
+Reading matrix from ./data/rep/can_73.mtx...
+Input A: 73 x 73, nnz = 377, sparsity = 92.93%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 73 x 73, nnz = 1377, sparsity = 74.16%
+Time: 30.103 ms
+Saved to results/matrices/can_73/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 73 x 73, nnz = 1352, sparsity = 74.63%
+Time: 2.482 ms
+Saved to results/matrices/can_73/self_product_manual.mtx
+
+=== All tests completed ===
+Processing cavity04 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     440.8 ms] CUDA context ready
+[dbg     440.9 ms] start read_matrix_market: ./data/rep/cavity04.mtx
+[dbg     442.8 ms] read done: 317 x 317, nnz=7327
+[dbg     442.8 ms] T1 cuSPARSE self_product: start
+[dbg     450.0 ms] self_product: A H2D done (59888 B)
+[dbg     450.0 ms] cusparse: workEstimation begin
+[dbg     466.5 ms] cusparse: workEstimation done (buf1=88987 B)
+[dbg     466.5 ms] cusparse: compute begin
+[dbg     467.1 ms] cusparse: compute done (buf2=5420479 B)
+[dbg     467.1 ms] cusparse: C size = 317 x 317, nnz=27556
+[dbg     467.2 ms] cusparse: copy begin
+[dbg     467.2 ms] cusparse: copy done
+[dbg     468.3 ms] self_product: C D2H begin (221720 B)
+[dbg     468.4 ms] self_product: C D2H done
+[dbg     468.5 ms] T1 cuSPARSE self_product: done (C_nnz=27556)
+[dbg     468.5 ms] T1 writing results/matrices/cavity04/self_product.mtx (C_nnz=27556)...
+[dbg     477.7 ms] T1 write done
+[dbg     478.0 ms] T4 manual self_product: start
+[dbg     478.1 ms] manual: count kernel begin (grid=317, A_rows=317)
+[dbg     478.5 ms] manual: count kernel done
+[dbg     478.7 ms] manual: scan done, C_nnz_result=21981
+[dbg     478.7 ms] manual: fill kernel begin
+[dbg     478.9 ms] manual: fill kernel done
+[dbg     479.9 ms] T4 manual self_product: done (C_nnz=21981)
+[dbg     479.9 ms] T4 writing results/matrices/cavity04/self_product_manual.mtx (C_nnz=21981)...
+[dbg     485.8 ms] T4 write done
+Reading matrix from ./data/rep/cavity04.mtx...
+Input A: 317 x 317, nnz = 7327, sparsity = 92.71%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 317 x 317, nnz = 27556, sparsity = 72.58%
+Time: 25.629 ms
+Saved to results/matrices/cavity04/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 317 x 317, nnz = 21981, sparsity = 78.13%
+Time: 1.934 ms
+Saved to results/matrices/cavity04/self_product_manual.mtx
+
+=== All tests completed ===
+Processing coater1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     422.1 ms] CUDA context ready
+[dbg     422.2 ms] start read_matrix_market: ./data/rep/coater1.mtx
+[dbg     427.5 ms] read done: 1348 x 1348, nnz=19457
+[dbg     427.5 ms] T1 cuSPARSE self_product: start
+[dbg     434.5 ms] self_product: A H2D done (161052 B)
+[dbg     434.5 ms] cusparse: workEstimation begin
+[dbg     451.8 ms] cusparse: workEstimation done (buf1=234803 B)
+[dbg     451.8 ms] cusparse: compute begin
+[dbg     452.4 ms] cusparse: compute done (buf2=7958991 B)
+[dbg     452.5 ms] cusparse: C size = 1348 x 1348, nnz=130920
+[dbg     452.5 ms] cusparse: copy begin
+[dbg     452.6 ms] cusparse: copy done
+[dbg     453.7 ms] self_product: C D2H begin (1052756 B)
+[dbg     453.8 ms] self_product: C D2H done
+[dbg     453.9 ms] T1 cuSPARSE self_product: done (C_nnz=130920)
+[dbg     453.9 ms] T1 writing results/matrices/coater1/self_product.mtx (C_nnz=130920)...
+[dbg     497.2 ms] T1 write done
+[dbg     497.5 ms] T4 manual self_product: start
+[dbg     497.6 ms] manual: count kernel begin (grid=1348, A_rows=1348)
+[dbg     498.1 ms] manual: count kernel done
+[dbg     498.3 ms] manual: scan done, C_nnz_result=117409
+[dbg     498.3 ms] manual: fill kernel begin
+[dbg     498.6 ms] manual: fill kernel done
+[dbg     499.6 ms] T4 manual self_product: done (C_nnz=117409)
+[dbg     499.7 ms] T4 writing results/matrices/coater1/self_product_manual.mtx (C_nnz=117409)...
+[dbg     530.6 ms] T4 write done
+Reading matrix from ./data/rep/coater1.mtx...
+Input A: 1348 x 1348, nnz = 19457, sparsity = 98.93%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 1348 x 1348, nnz = 130920, sparsity = 92.80%
+Time: 26.375 ms
+Saved to results/matrices/coater1/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 1348 x 1348, nnz = 117409, sparsity = 93.54%
+Time: 2.167 ms
+Saved to results/matrices/coater1/self_product_manual.mtx
+
+=== All tests completed ===
+Processing CurlCurl_1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     411.6 ms] CUDA context ready
+[dbg     411.7 ms] start read_matrix_market: ./data/rep/CurlCurl_1.mtx
+[dbg     829.3 ms] read done: 226451 x 226451, nnz=2472071
+[dbg     829.3 ms] T1 cuSPARSE self_product: start
+[dbg     840.8 ms] self_product: A H2D done (20682376 B)
+[dbg     841.0 ms] cusparse: workEstimation begin
+[dbg     856.3 ms] cusparse: workEstimation done (buf1=29709947 B)
+[dbg     856.3 ms] cusparse: compute begin
+[dbg     857.8 ms] cusparse: compute done (buf2=655198007 B)
+[dbg     857.8 ms] cusparse: C size = 226451 x 226451, nnz=12165785
+[dbg     857.9 ms] cusparse: copy begin
+[dbg     858.2 ms] cusparse: copy done
+[dbg     897.7 ms] self_product: C D2H begin (98232088 B)
+[dbg     902.0 ms] self_product: C D2H done
+[dbg     902.4 ms] T1 cuSPARSE self_product: done (C_nnz=12165785)
+[dbg     902.4 ms] T1 writing results/matrices/CurlCurl_1/self_product.mtx (C_nnz=12165785)...
+[dbg    7216.6 ms] T1 write done
+[dbg    7244.8 ms] T4 manual self_product: start
+[dbg    7254.8 ms] manual: count kernel begin (grid=226451, A_rows=226451)
+[dbg    7269.4 ms] manual: count kernel done
+[dbg    7269.6 ms] manual: scan done, C_nnz_result=12165769
+[dbg    7269.8 ms] manual: fill kernel begin
+[dbg    7311.6 ms] manual: fill kernel done
+[dbg    7354.9 ms] T4 manual self_product: done (C_nnz=12165769)
+[dbg    7354.9 ms] T4 writing results/matrices/CurlCurl_1/self_product_manual.mtx (C_nnz=12165769)...
+[dbg   11173.9 ms] T4 write done
+Reading matrix from ./data/rep/CurlCurl_1.mtx...
+Input A: 226451 x 226451, nnz = 2472071, sparsity = 100.00%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 226451 x 226451, nnz = 12165785, sparsity = 99.98%
+Time: 73.053 ms
+Saved to results/matrices/CurlCurl_1/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 226451 x 226451, nnz = 12165769, sparsity = 99.98%
+Time: 110.115 ms
+Saved to results/matrices/CurlCurl_1/self_product_manual.mtx
+
+=== All tests completed ===
+Processing email-Enron ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     435.6 ms] CUDA context ready
+[dbg     435.7 ms] start read_matrix_market: ./data/rep/email-Enron.mtx
+[dbg     467.2 ms] read done: 36692 x 36692, nnz=367662
+[dbg     467.2 ms] T1 cuSPARSE self_product: start
+[dbg     474.7 ms] self_product: A H2D done (3088068 B)
+[dbg     474.8 ms] cusparse: workEstimation begin
+[dbg     491.0 ms] cusparse: workEstimation done (buf1=4419407 B)
+[dbg     491.0 ms] cusparse: compute begin
+[dbg     497.1 ms] cusparse: compute done (buf2=1237112791 B)
+[dbg     497.1 ms] cusparse: C size = 36692 x 36692, nnz=30492154
+[dbg     497.3 ms] cusparse: copy begin
+[dbg     497.8 ms] cusparse: copy done
+[dbg     594.8 ms] self_product: C D2H begin (244084004 B)
+[dbg     605.0 ms] self_product: C D2H done
+[dbg     605.5 ms] T1 cuSPARSE self_product: done (C_nnz=30492154)
+[dbg     605.5 ms] T1 writing results/matrices/email-Enron/self_product.mtx (C_nnz=30492154)...
+[dbg   10329.8 ms] T1 write done
+[dbg   10379.9 ms] T4 manual self_product: start
+[dbg   10382.1 ms] manual: count kernel begin (grid=36692, A_rows=36692)
+[dbg   10747.5 ms] manual: count kernel done
+[dbg   10747.8 ms] manual: scan done, C_nnz_result=27894827
+[dbg   10748.0 ms] manual: fill kernel begin
+[dbg   11115.5 ms] manual: fill kernel done
+[dbg   11212.1 ms] T4 manual self_product: done (C_nnz=27894827)
+[dbg   11212.1 ms] T4 writing results/matrices/email-Enron/self_product_manual.mtx (C_nnz=27894827)...
+[dbg   19704.3 ms] T4 write done
+Reading matrix from ./data/rep/email-Enron.mtx...
+Input A: 36692 x 36692, nnz = 367662, sparsity = 99.97%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 36692 x 36692, nnz = 30492154, sparsity = 97.74%
+Time: 138.262 ms
+Saved to results/matrices/email-Enron/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 36692 x 36692, nnz = 27894827, sparsity = 97.93%
+Time: 832.119 ms
+Saved to results/matrices/email-Enron/self_product_manual.mtx
+
+=== All tests completed ===
+Processing ex10hs ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     432.7 ms] CUDA context ready
+[dbg     432.8 ms] start read_matrix_market: ./data/rep/ex10hs.mtx
+[dbg     442.9 ms] read done: 2548 x 2548, nnz=57308
+[dbg     443.0 ms] T1 cuSPARSE self_product: start
+[dbg     449.9 ms] self_product: A H2D done (468660 B)
+[dbg     449.9 ms] cusparse: workEstimation begin
+[dbg     466.6 ms] cusparse: workEstimation done (buf1=689527 B)
+[dbg     466.7 ms] cusparse: compute begin
+[dbg     467.5 ms] cusparse: compute done (buf2=38782311 B)
+[dbg     467.6 ms] cusparse: C size = 2548 x 2548, nnz=205230
+[dbg     467.6 ms] cusparse: copy begin
+[dbg     467.7 ms] cusparse: copy done
+[dbg     468.9 ms] self_product: C D2H begin (1652036 B)
+[dbg     469.0 ms] self_product: C D2H done
+[dbg     469.1 ms] T1 cuSPARSE self_product: done (C_nnz=205230)
+[dbg     469.1 ms] T1 writing results/matrices/ex10hs/self_product.mtx (C_nnz=205230)...
+[dbg     550.0 ms] T1 write done
+[dbg     550.4 ms] T4 manual self_product: start
+[dbg     550.6 ms] manual: count kernel begin (grid=2548, A_rows=2548)
+[dbg     551.2 ms] manual: count kernel done
+[dbg     551.4 ms] manual: scan done, C_nnz_result=200224
+[dbg     551.4 ms] manual: fill kernel begin
+[dbg     552.0 ms] manual: fill kernel done
+[dbg     553.3 ms] T4 manual self_product: done (C_nnz=200224)
+[dbg     553.3 ms] T4 writing results/matrices/ex10hs/self_product_manual.mtx (C_nnz=200224)...
+[dbg     606.2 ms] T4 write done
+Reading matrix from ./data/rep/ex10hs.mtx...
+Input A: 2548 x 2548, nnz = 57308, sparsity = 99.12%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 2548 x 2548, nnz = 205230, sparsity = 96.84%
+Time: 26.163 ms
+Saved to results/matrices/ex10hs/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 2548 x 2548, nnz = 200224, sparsity = 96.92%
+Time: 2.896 ms
+Saved to results/matrices/ex10hs/self_product_manual.mtx
+
+=== All tests completed ===
+Processing GD01_b ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     430.1 ms] CUDA context ready
+[dbg     430.2 ms] start read_matrix_market: ./data/rep/GD01_b.mtx
+[dbg     430.3 ms] read done: 18 x 18, nnz=37
+[dbg     430.3 ms] T1 cuSPARSE self_product: start
+[dbg     437.2 ms] self_product: A H2D done (372 B)
+[dbg     437.2 ms] cusparse: workEstimation begin
+[dbg     453.7 ms] cusparse: workEstimation done (buf1=1507 B)
+[dbg     453.7 ms] cusparse: compute begin
+[dbg     454.2 ms] cusparse: compute done (buf2=6991 B)
+[dbg     454.2 ms] cusparse: C size = 18 x 18, nnz=64
+[dbg     454.2 ms] cusparse: copy begin
+[dbg     454.3 ms] cusparse: copy done
+[dbg     455.4 ms] self_product: C D2H begin (588 B)
+[dbg     455.4 ms] self_product: C D2H done
+[dbg     455.5 ms] T1 cuSPARSE self_product: done (C_nnz=64)
+[dbg     455.5 ms] T1 writing results/matrices/GD01_b/self_product.mtx (C_nnz=64)...
+[dbg     455.7 ms] T1 write done
+[dbg     456.0 ms] T4 manual self_product: start
+[dbg     456.1 ms] manual: count kernel begin (grid=18, A_rows=18)
+[dbg     456.5 ms] manual: count kernel done
+[dbg     456.7 ms] manual: scan done, C_nnz_result=60
+[dbg     456.7 ms] manual: fill kernel begin
+[dbg     456.8 ms] manual: fill kernel done
+[dbg     457.8 ms] T4 manual self_product: done (C_nnz=60)
+[dbg     457.9 ms] T4 writing results/matrices/GD01_b/self_product_manual.mtx (C_nnz=60)...
+[dbg     458.0 ms] T4 write done
+Reading matrix from ./data/rep/GD01_b.mtx...
+Input A: 18 x 18, nnz = 37, sparsity = 88.58%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 18 x 18, nnz = 64, sparsity = 80.25%
+Time: 25.211 ms
+Saved to results/matrices/GD01_b/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 18 x 18, nnz = 60, sparsity = 81.48%
+Time: 1.821 ms
+Saved to results/matrices/GD01_b/self_product_manual.mtx
+
+=== All tests completed ===
+Processing GD96_a ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     458.1 ms] CUDA context ready
+[dbg     458.2 ms] start read_matrix_market: ./data/rep/GD96_a.mtx
+[dbg     459.0 ms] read done: 1096 x 1096, nnz=1677
+[dbg     459.0 ms] T1 cuSPARSE self_product: start
+[dbg     467.4 ms] self_product: A H2D done (17804 B)
+[dbg     467.5 ms] cusparse: workEstimation begin
+[dbg     490.1 ms] cusparse: workEstimation done (buf1=21187 B)
+[dbg     490.1 ms] cusparse: compute begin
+[dbg     490.8 ms] cusparse: compute done (buf2=67379 B)
+[dbg     490.8 ms] cusparse: C size = 1096 x 1096, nnz=2137
+[dbg     490.8 ms] cusparse: copy begin
+[dbg     490.9 ms] cusparse: copy done
+[dbg     492.5 ms] self_product: C D2H begin (21484 B)
+[dbg     492.5 ms] self_product: C D2H done
+[dbg     492.6 ms] T1 cuSPARSE self_product: done (C_nnz=2137)
+[dbg     492.6 ms] T1 writing results/matrices/GD96_a/self_product.mtx (C_nnz=2137)...
+[dbg     494.1 ms] T1 write done
+[dbg     494.6 ms] T4 manual self_product: start
+[dbg     494.7 ms] manual: count kernel begin (grid=1096, A_rows=1096)
+[dbg     495.2 ms] manual: count kernel done
+[dbg     495.5 ms] manual: scan done, C_nnz_result=2126
+[dbg     495.5 ms] manual: fill kernel begin
+[dbg     495.8 ms] manual: fill kernel done
+[dbg     497.2 ms] T4 manual self_product: done (C_nnz=2126)
+[dbg     497.2 ms] T4 writing results/matrices/GD96_a/self_product_manual.mtx (C_nnz=2126)...
+[dbg     498.5 ms] T4 write done
+Reading matrix from ./data/rep/GD96_a.mtx...
+Input A: 1096 x 1096, nnz = 1677, sparsity = 99.86%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 1096 x 1096, nnz = 2137, sparsity = 99.82%
+Time: 33.611 ms
+Saved to results/matrices/GD96_a/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 1096 x 1096, nnz = 2126, sparsity = 99.82%
+Time: 2.633 ms
+Saved to results/matrices/GD96_a/self_product_manual.mtx
+
+=== All tests completed ===
+Processing hangGlider_3 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     457.1 ms] CUDA context ready
+[dbg     457.2 ms] start read_matrix_market: ./data/rep/hangGlider_3.mtx
+[dbg     493.6 ms] read done: 10260 x 10260, nnz=92703
+[dbg     493.6 ms] T1 cuSPARSE self_product: start
+[dbg     501.8 ms] self_product: A H2D done (782668 B)
+[dbg     501.8 ms] cusparse: workEstimation begin
+[dbg     522.2 ms] cusparse: workEstimation done (buf1=1115035 B)
+[dbg     522.2 ms] cusparse: compute begin
+[dbg     531.4 ms] cusparse: compute done (buf2=2015331711 B)
+[dbg     531.4 ms] cusparse: C size = 10260 x 10260, nnz=83182632
+[dbg     531.6 ms] cusparse: copy begin
+[dbg     532.6 ms] cusparse: copy done
+[dbg     791.4 ms] self_product: C D2H begin (665502100 B)
+[dbg     819.1 ms] self_product: C D2H done
+[dbg     819.9 ms] T1 cuSPARSE self_product: done (C_nnz=83182632)
+[dbg     819.9 ms] T1 writing results/matrices/hangGlider_3/self_product.mtx (C_nnz=83182632)...
+[dbg   35832.6 ms] T1 write done
+[dbg   35949.1 ms] T4 manual self_product: start
+[dbg   35950.0 ms] manual: count kernel begin (grid=10260, A_rows=10260)
+[dbg   50230.5 ms] manual: count kernel done
+[dbg   50230.9 ms] manual: scan done, C_nnz_result=31804425
+[dbg   50231.2 ms] manual: fill kernel begin
+[dbg   64501.2 ms] manual: fill kernel done
+[dbg   64611.4 ms] T4 manual self_product: done (C_nnz=31804425)
+[dbg   64611.4 ms] T4 writing results/matrices/hangGlider_3/self_product_manual.mtx (C_nnz=31804425)...
+[dbg   73176.3 ms] T4 write done
+Reading matrix from ./data/rep/hangGlider_3.mtx...
+Input A: 10260 x 10260, nnz = 92703, sparsity = 99.91%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 10260 x 10260, nnz = 83182632, sparsity = 20.98%
+Time: 326.232 ms
+Saved to results/matrices/hangGlider_3/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 10260 x 10260, nnz = 31804425, sparsity = 69.79%
+Time: 28662.291 ms
+Saved to results/matrices/hangGlider_3/self_product_manual.mtx
+
+=== All tests completed ===
+Processing heart1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     425.0 ms] CUDA context ready
+[dbg     425.2 ms] start read_matrix_market: ./data/rep/heart1.mtx
+[dbg     849.0 ms] read done: 3557 x 3557, nnz=1387773
+[dbg     849.0 ms] T1 cuSPARSE self_product: start
+[dbg     857.9 ms] self_product: A H2D done (11116416 B)
+[dbg     858.1 ms] cusparse: workEstimation begin
+[dbg     873.8 ms] cusparse: workEstimation done (buf1=16678915 B)
+[dbg     873.8 ms] cusparse: compute begin
+[dbg     914.2 ms] cusparse: compute done (buf2=14318003359 B)
+[dbg     914.2 ms] cusparse: C size = 3557 x 3557, nnz=5273361
+[dbg     914.4 ms] cusparse: copy begin
+[dbg     914.5 ms] cusparse: copy done
+[dbg     936.5 ms] self_product: C D2H begin (42201120 B)
+[dbg     938.3 ms] self_product: C D2H done
+[dbg     938.5 ms] T1 cuSPARSE self_product: done (C_nnz=5273361)
+[dbg     938.5 ms] T1 writing results/matrices/heart1/self_product.mtx (C_nnz=5273361)...
+[dbg    3074.7 ms] T1 write done
+[dbg    3079.0 ms] T4 manual self_product: start
+[dbg    3085.4 ms] manual: count kernel begin (grid=3557, A_rows=3557)
+[dbg    3102.2 ms] manual: count kernel done
+[dbg    3102.4 ms] manual: scan done, C_nnz_result=5263382
+[dbg    3102.5 ms] manual: fill kernel begin
+[dbg    3119.6 ms] manual: fill kernel done
+[dbg    3138.2 ms] T4 manual self_product: done (C_nnz=5263382)
+[dbg    3138.2 ms] T4 writing results/matrices/heart1/self_product_manual.mtx (C_nnz=5263382)...
+[dbg    4512.9 ms] T4 write done
+Reading matrix from ./data/rep/heart1.mtx...
+Input A: 3557 x 3557, nnz = 1387773, sparsity = 89.03%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 3557 x 3557, nnz = 5273361, sparsity = 58.32%
+Time: 89.498 ms
+Saved to results/matrices/heart1/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 3557 x 3557, nnz = 5263382, sparsity = 58.40%
+Time: 59.217 ms
+Saved to results/matrices/heart1/self_product_manual.mtx
+
+=== All tests completed ===
+Processing mesh1e1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     459.6 ms] CUDA context ready
+[dbg     459.7 ms] start read_matrix_market: ./data/rep/mesh1e1.mtx
+[dbg     459.9 ms] read done: 48 x 48, nnz=306
+[dbg     459.9 ms] T1 cuSPARSE self_product: start
+[dbg     469.1 ms] self_product: A H2D done (2644 B)
+[dbg     469.1 ms] cusparse: workEstimation begin
+[dbg     492.9 ms] cusparse: workEstimation done (buf1=4735 B)
+[dbg     492.9 ms] cusparse: compute begin
+[dbg     493.6 ms] cusparse: compute done (buf2=53191 B)
+[dbg     493.6 ms] cusparse: C size = 48 x 48, nnz=772
+[dbg     493.7 ms] cusparse: copy begin
+[dbg     493.8 ms] cusparse: copy done
+[dbg     495.3 ms] self_product: C D2H begin (6372 B)
+[dbg     495.3 ms] self_product: C D2H done
+[dbg     495.4 ms] T1 cuSPARSE self_product: done (C_nnz=772)
+[dbg     495.4 ms] T1 writing results/matrices/mesh1e1/self_product.mtx (C_nnz=772)...
+[dbg     496.1 ms] T1 write done
+[dbg     496.7 ms] T4 manual self_product: start
+[dbg     496.8 ms] manual: count kernel begin (grid=48, A_rows=48)
+[dbg     497.3 ms] manual: count kernel done
+[dbg     497.5 ms] manual: scan done, C_nnz_result=758
+[dbg     497.5 ms] manual: fill kernel begin
+[dbg     497.7 ms] manual: fill kernel done
+[dbg     499.2 ms] T4 manual self_product: done (C_nnz=758)
+[dbg     499.2 ms] T4 writing results/matrices/mesh1e1/self_product_manual.mtx (C_nnz=758)...
+[dbg     499.7 ms] T4 write done
+Reading matrix from ./data/rep/mesh1e1.mtx...
+Input A: 48 x 48, nnz = 306, sparsity = 86.72%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 48 x 48, nnz = 772, sparsity = 66.49%
+Time: 35.503 ms
+Saved to results/matrices/mesh1e1/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 48 x 48, nnz = 758, sparsity = 67.10%
+Time: 2.525 ms
+Saved to results/matrices/mesh1e1/self_product_manual.mtx
+
+=== All tests completed ===
+Processing nemeth19 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     430.9 ms] CUDA context ready
+[dbg     431.1 ms] start read_matrix_market: ./data/rep/nemeth19.mtx
+[dbg     713.4 ms] read done: 9506 x 9506, nnz=818302
+[dbg     713.5 ms] T1 cuSPARSE self_product: start
+[dbg     724.0 ms] self_product: A H2D done (6584444 B)
+[dbg     724.2 ms] cusparse: workEstimation begin
+[dbg     748.3 ms] cusparse: workEstimation done (buf1=9835279 B)
+[dbg     748.3 ms] cusparse: compute begin
+[dbg     752.0 ms] cusparse: compute done (buf2=1705066919 B)
+[dbg     752.0 ms] cusparse: C size = 9506 x 9506, nnz=1784266
+[dbg     752.2 ms] cusparse: copy begin
+[dbg     752.3 ms] cusparse: copy done
+[dbg     763.4 ms] self_product: C D2H begin (14312156 B)
+[dbg     764.0 ms] self_product: C D2H done
+[dbg     764.7 ms] T1 cuSPARSE self_product: done (C_nnz=1784266)
+[dbg     764.7 ms] T1 writing results/matrices/nemeth19/self_product.mtx (C_nnz=1784266)...
+[dbg    1754.7 ms] T1 write done
+[dbg    1756.6 ms] T4 manual self_product: start
+[dbg    1758.3 ms] manual: count kernel begin (grid=9506, A_rows=9506)
+[dbg    1760.3 ms] manual: count kernel done
+[dbg    1760.4 ms] manual: scan done, C_nnz_result=1583172
+[dbg    1760.6 ms] manual: fill kernel begin
+[dbg    1763.5 ms] manual: fill kernel done
+[dbg    1769.6 ms] T4 manual self_product: done (C_nnz=1583172)
+[dbg    1769.7 ms] T4 writing results/matrices/nemeth19/self_product_manual.mtx (C_nnz=1583172)...
+[dbg    2185.3 ms] T4 write done
+Reading matrix from ./data/rep/nemeth19.mtx...
+Input A: 9506 x 9506, nnz = 818302, sparsity = 99.09%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 9506 x 9506, nnz = 1784266, sparsity = 98.03%
+Time: 51.217 ms
+Saved to results/matrices/nemeth19/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 9506 x 9506, nnz = 1583172, sparsity = 98.25%
+Time: 13.035 ms
+Saved to results/matrices/nemeth19/self_product_manual.mtx
+
+=== All tests completed ===
+Processing polbooks ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     459.0 ms] CUDA context ready
+[dbg     459.2 ms] start read_matrix_market: ./data/rep/polbooks.mtx
+[dbg     459.4 ms] read done: 105 x 105, nnz=882
+[dbg     459.4 ms] T1 cuSPARSE self_product: start
+[dbg     468.1 ms] self_product: A H2D done (7480 B)
+[dbg     468.1 ms] cusparse: workEstimation begin
+[dbg     492.1 ms] cusparse: workEstimation done (buf1=11647 B)
+[dbg     492.1 ms] cusparse: compute begin
+[dbg     492.9 ms] cusparse: compute done (buf2=257767 B)
+[dbg     492.9 ms] cusparse: C size = 105 x 105, nnz=4073
+[dbg     492.9 ms] cusparse: copy begin
+[dbg     493.0 ms] cusparse: copy done
+[dbg     494.7 ms] self_product: C D2H begin (33008 B)
+[dbg     494.7 ms] self_product: C D2H done
+[dbg     494.8 ms] T1 cuSPARSE self_product: done (C_nnz=4073)
+[dbg     494.8 ms] T1 writing results/matrices/polbooks/self_product.mtx (C_nnz=4073)...
+[dbg     497.5 ms] T1 write done
+[dbg     498.0 ms] T4 manual self_product: start
+[dbg     498.1 ms] manual: count kernel begin (grid=105, A_rows=105)
+[dbg     498.6 ms] manual: count kernel done
+[dbg     498.9 ms] manual: scan done, C_nnz_result=4064
+[dbg     498.9 ms] manual: fill kernel begin
+[dbg     499.1 ms] manual: fill kernel done
+[dbg     500.6 ms] T4 manual self_product: done (C_nnz=4064)
+[dbg     500.6 ms] T4 writing results/matrices/polbooks/self_product_manual.mtx (C_nnz=4064)...
+[dbg     503.1 ms] T4 write done
+Reading matrix from ./data/rep/polbooks.mtx...
+Input A: 105 x 105, nnz = 882, sparsity = 92.00%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 105 x 105, nnz = 4073, sparsity = 63.06%
+Time: 35.450 ms
+Saved to results/matrices/polbooks/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 105 x 105, nnz = 4064, sparsity = 63.14%
+Time: 2.574 ms
+Saved to results/matrices/polbooks/self_product_manual.mtx
+
+=== All tests completed ===
+Processing poli_large ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     416.8 ms] CUDA context ready
+[dbg     417.0 ms] start read_matrix_market: ./data/rep/poli_large.mtx
+[dbg     425.1 ms] read done: 15575 x 15575, nnz=33074
+[dbg     425.1 ms] T1 cuSPARSE self_product: start
+[dbg     431.8 ms] self_product: A H2D done (326896 B)
+[dbg     431.8 ms] cusparse: workEstimation begin
+[dbg     448.7 ms] cusparse: workEstimation done (buf1=398463 B)
+[dbg     448.7 ms] cusparse: compute begin
+[dbg     449.3 ms] cusparse: compute done (buf2=2024511 B)
+[dbg     449.3 ms] cusparse: C size = 15575 x 15575, nnz=59649
+[dbg     449.3 ms] cusparse: copy begin
+[dbg     449.4 ms] cusparse: copy done
+[dbg     450.5 ms] self_product: C D2H begin (539496 B)
+[dbg     450.5 ms] self_product: C D2H done
+[dbg     450.6 ms] T1 cuSPARSE self_product: done (C_nnz=59649)
+[dbg     450.6 ms] T1 writing results/matrices/poli_large/self_product.mtx (C_nnz=59649)...
+[dbg     468.3 ms] T1 write done
+[dbg     468.6 ms] T4 manual self_product: start
+[dbg     468.7 ms] manual: count kernel begin (grid=15575, A_rows=15575)
+[dbg     471.6 ms] manual: count kernel done
+[dbg     471.8 ms] manual: scan done, C_nnz_result=59576
+[dbg     471.8 ms] manual: fill kernel begin
+[dbg     474.7 ms] manual: fill kernel done
+[dbg     475.7 ms] T4 manual self_product: done (C_nnz=59576)
+[dbg     475.7 ms] T4 writing results/matrices/poli_large/self_product_manual.mtx (C_nnz=59576)...
+[dbg     491.6 ms] T4 write done
+Reading matrix from ./data/rep/poli_large.mtx...
+Input A: 15575 x 15575, nnz = 33074, sparsity = 99.99%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 15575 x 15575, nnz = 59649, sparsity = 99.98%
+Time: 25.494 ms
+Saved to results/matrices/poli_large/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 15575 x 15575, nnz = 59576, sparsity = 99.98%
+Time: 7.093 ms
+Saved to results/matrices/poli_large/self_product_manual.mtx
+
+=== All tests completed ===
+Processing raefsky6 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     411.6 ms] CUDA context ready
+[dbg     411.8 ms] start read_matrix_market: ./data/rep/raefsky6.mtx
+[dbg     451.6 ms] read done: 3402 x 3402, nnz=137845
+[dbg     451.7 ms] T1 cuSPARSE self_product: start
+[dbg     458.5 ms] self_product: A H2D done (1116372 B)
+[dbg     458.5 ms] cusparse: workEstimation begin
+[dbg     474.8 ms] cusparse: workEstimation done (buf1=1657507 B)
+[dbg     474.8 ms] cusparse: compute begin
+[dbg     475.8 ms] cusparse: compute done (buf2=91781375 B)
+[dbg     475.8 ms] cusparse: C size = 3402 x 3402, nnz=356032
+[dbg     476.0 ms] cusparse: copy begin
+[dbg     476.1 ms] cusparse: copy done
+[dbg     477.6 ms] self_product: C D2H begin (2861868 B)
+[dbg     477.8 ms] self_product: C D2H done
+[dbg     477.9 ms] T1 cuSPARSE self_product: done (C_nnz=356032)
+[dbg     478.0 ms] T1 writing results/matrices/raefsky6/self_product.mtx (C_nnz=356032)...
+[dbg     600.8 ms] T1 write done
+[dbg     601.3 ms] T4 manual self_product: start
+[dbg     601.7 ms] manual: count kernel begin (grid=3402, A_rows=3402)
+[dbg     602.4 ms] manual: count kernel done
+[dbg     602.6 ms] manual: scan done, C_nnz_result=318362
+[dbg     602.7 ms] manual: fill kernel begin
+[dbg     603.6 ms] manual: fill kernel done
+[dbg     605.2 ms] T4 manual self_product: done (C_nnz=318362)
+[dbg     605.2 ms] T4 writing results/matrices/raefsky6/self_product_manual.mtx (C_nnz=318362)...
+[dbg     690.6 ms] T4 write done
+Reading matrix from ./data/rep/raefsky6.mtx...
+Input A: 3402 x 3402, nnz = 137845, sparsity = 98.81%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 3402 x 3402, nnz = 356032, sparsity = 96.92%
+Time: 26.260 ms
+Saved to results/matrices/raefsky6/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 3402 x 3402, nnz = 318362, sparsity = 97.25%
+Time: 3.926 ms
+Saved to results/matrices/raefsky6/self_product_manual.mtx
+
+=== All tests completed ===
+Processing Raj1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     417.6 ms] CUDA context ready
+[dbg     417.7 ms] start read_matrix_market: ./data/rep/Raj1.mtx
+[dbg     884.7 ms] read done: 263743 x 263743, nnz=1302464
+[dbg     884.8 ms] T1 cuSPARSE self_product: start
+[dbg     900.6 ms] self_product: A H2D done (11474688 B)
+[dbg     900.8 ms] cusparse: workEstimation begin
+[dbg     915.6 ms] cusparse: workEstimation done (buf1=15653671 B)
+[dbg     915.6 ms] cusparse: compute begin
+cuSPARSE error src/spgemm_kernel_cusparse.cu:108: 11 (insufficient resources)
+Reading matrix from ./data/rep/Raj1.mtx...
+Input A: 263743 x 263743, nnz = 1302464, sparsity = 100.00%
+
+=== Computing C = A x A (cuSPARSE) ===
+Processing sherman5 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     455.7 ms] CUDA context ready
+[dbg     455.9 ms] start read_matrix_market: ./data/rep/sherman5.mtx
+[dbg     461.7 ms] read done: 3312 x 3312, nnz=20793
+[dbg     461.7 ms] T1 cuSPARSE self_product: start
+[dbg     469.0 ms] self_product: A H2D done (179596 B)
+[dbg     469.1 ms] cusparse: workEstimation begin
+[dbg     485.6 ms] cusparse: workEstimation done (buf1=250835 B)
+[dbg     485.6 ms] cusparse: compute begin
+[dbg     486.9 ms] cusparse: compute done (buf2=5742975 B)
+[dbg     486.9 ms] cusparse: C size = 3312 x 3312, nnz=78821
+[dbg     486.9 ms] cusparse: copy begin
+[dbg     487.0 ms] cusparse: copy done
+[dbg     488.1 ms] self_product: C D2H begin (643820 B)
+[dbg     488.1 ms] self_product: C D2H done
+[dbg     488.2 ms] T1 cuSPARSE self_product: done (C_nnz=78821)
+[dbg     488.2 ms] T1 writing results/matrices/sherman5/self_product.mtx (C_nnz=78821)...
+[dbg     516.6 ms] T1 write done
+[dbg     516.9 ms] T4 manual self_product: start
+[dbg     517.1 ms] manual: count kernel begin (grid=3312, A_rows=3312)
+[dbg     517.7 ms] manual: count kernel done
+[dbg     517.9 ms] manual: scan done, C_nnz_result=78820
+[dbg     517.9 ms] manual: fill kernel begin
+[dbg     518.5 ms] manual: fill kernel done
+[dbg     519.6 ms] T4 manual self_product: done (C_nnz=78820)
+[dbg     519.6 ms] T4 writing results/matrices/sherman5/self_product_manual.mtx (C_nnz=78820)...
+[dbg     540.4 ms] T4 write done
+Reading matrix from ./data/rep/sherman5.mtx...
+Input A: 3312 x 3312, nnz = 20793, sparsity = 99.81%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 3312 x 3312, nnz = 78821, sparsity = 99.28%
+Time: 26.463 ms
+Saved to results/matrices/sherman5/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 3312 x 3312, nnz = 78820, sparsity = 99.28%
+Time: 2.624 ms
+Saved to results/matrices/sherman5/self_product_manual.mtx
+
+=== All tests completed ===
+Processing tomography ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     432.3 ms] CUDA context ready
+[dbg     432.5 ms] start read_matrix_market: ./data/rep/tomography.mtx
+[dbg     440.4 ms] read done: 500 x 500, nnz=28726
+[dbg     440.4 ms] T1 cuSPARSE self_product: start
+[dbg     447.3 ms] self_product: A H2D done (231812 B)
+[dbg     447.3 ms] cusparse: workEstimation begin
+[dbg     468.1 ms] cusparse: workEstimation done (buf1=346287 B)
+[dbg     468.1 ms] cusparse: compute begin
+[dbg     469.2 ms] cusparse: compute done (buf2=87983879 B)
+[dbg     469.2 ms] cusparse: C size = 500 x 500, nnz=208298
+[dbg     469.4 ms] cusparse: copy begin
+[dbg     469.5 ms] cusparse: copy done
+[dbg     471.4 ms] self_product: C D2H begin (1668388 B)
+[dbg     471.5 ms] self_product: C D2H done
+[dbg     471.7 ms] T1 cuSPARSE self_product: done (C_nnz=208298)
+[dbg     471.8 ms] T1 writing results/matrices/tomography/self_product.mtx (C_nnz=208298)...
+[dbg     644.2 ms] T1 write done
+[dbg     644.9 ms] T4 manual self_product: start
+[dbg     645.2 ms] manual: count kernel begin (grid=500, A_rows=500)
+[dbg     645.9 ms] manual: count kernel done
+[dbg     646.2 ms] manual: scan done, C_nnz_result=207838
+[dbg     646.2 ms] manual: fill kernel begin
+[dbg     646.6 ms] manual: fill kernel done
+[dbg     648.6 ms] T4 manual self_product: done (C_nnz=207838)
+[dbg     648.7 ms] T4 writing results/matrices/tomography/self_product_manual.mtx (C_nnz=207838)...
+[dbg     771.7 ms] T4 write done
+Reading matrix from ./data/rep/tomography.mtx...
+Input A: 500 x 500, nnz = 28726, sparsity = 88.51%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 500 x 500, nnz = 208298, sparsity = 16.68%
+Time: 31.352 ms
+Saved to results/matrices/tomography/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 500 x 500, nnz = 207838, sparsity = 16.86%
+Time: 3.781 ms
+Saved to results/matrices/tomography/self_product_manual.mtx
+
+=== All tests completed ===
+Processing vsp_bcsstk30_500sep_10in_1Kout ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     421.1 ms] CUDA context ready
+[dbg     421.2 ms] start read_matrix_market: ./data/rep/vsp_bcsstk30_500sep_10in_1Kout.mtx
+[dbg     829.1 ms] read done: 58348 x 58348, nnz=4033156
+[dbg     829.1 ms] T1 cuSPARSE self_product: start
+[dbg     841.2 ms] self_product: A H2D done (32498644 B)
+[dbg     841.3 ms] cusparse: workEstimation begin
+[dbg     856.0 ms] cusparse: workEstimation done (buf1=48470871 B)
+[dbg     856.0 ms] cusparse: compute begin
+[dbg     874.2 ms] cusparse: compute done (buf2=8146314983 B)
+[dbg     874.2 ms] cusparse: C size = 58348 x 58348, nnz=18175907
+[dbg     874.4 ms] cusparse: copy begin
+[dbg     874.7 ms] cusparse: copy done
+[dbg     934.6 ms] self_product: C D2H begin (145640652 B)
+[dbg     940.8 ms] self_product: C D2H done
+[dbg     941.0 ms] T1 cuSPARSE self_product: done (C_nnz=18175907)
+[dbg     941.0 ms] T1 writing results/matrices/vsp_bcsstk30_500sep_10in_1Kout/self_product.mtx (C_nnz=18175907)...
+[dbg    6425.5 ms] T1 write done
+[dbg    6440.1 ms] T4 manual self_product: start
+[dbg    6454.0 ms] manual: count kernel begin (grid=58348, A_rows=58348)
+[dbg    6467.3 ms] manual: count kernel done
+[dbg    6467.4 ms] manual: scan done, C_nnz_result=18175622
+[dbg    6467.7 ms] manual: fill kernel begin
+[dbg    6489.9 ms] manual: fill kernel done
+[dbg    6551.8 ms] T4 manual self_product: done (C_nnz=18175622)
+[dbg    6551.8 ms] T4 writing results/matrices/vsp_bcsstk30_500sep_10in_1Kout/self_product_manual.mtx (C_nnz=18175622)...
+[dbg   11383.2 ms] T4 write done
+Reading matrix from ./data/rep/vsp_bcsstk30_500sep_10in_1Kout.mtx...
+Input A: 58348 x 58348, nnz = 4033156, sparsity = 99.88%
+
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 58348 x 58348, nnz = 18175907, sparsity = 99.47%
+Time: 111.941 ms
+Saved to results/matrices/vsp_bcsstk30_500sep_10in_1Kout/self_product.mtx
+
+=== Computing C = A x A (Manual) ===
+Result C: 58348 x 58348, nnz = 18175622, sparsity = 99.47%
+Time: 111.715 ms
+Saved to results/matrices/vsp_bcsstk30_500sep_10in_1Kout/self_product_manual.mtx
+
+=== All tests completed ===
+
+=============================
+Total:    20
+OK:       19
+FAIL:     1
+TIMEOUT:  0  (>600s 自动跳过)
+=============================
+Failed:
+    Raj1 (rc=1)
+
+Summary: ./results/rep/summary.csv
+Per-matrix logs: ./results/rep/log/<name>.log
+Matrix outputs:  ./results/rep/matrices/<name>/

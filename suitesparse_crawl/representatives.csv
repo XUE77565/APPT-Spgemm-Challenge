@@ -1,0 +1,21 @@
+class,id,name,group,n,nnz,density_pct,sparsity_pct,in_local_data,url_mm
+Dense,1479,GD01_b,Pajek,18,37,11.41975308641975,88.58024691358025,False,https://sparse.tamu.edu/MM/Pajek/GD01_b.tar.gz
+Dense,872,mesh1e1,Pothen,48,306,13.28125,86.71875,False,https://sparse.tamu.edu/MM/Pothen/mesh1e1.tar.gz
+Dense,1328,tomography,MathWorks,500,28726,11.490400000000001,88.5096,False,https://sparse.tamu.edu/MM/MathWorks/tomography.tar.gz
+Dense,890,heart1,Norris,3557,1385317,10.94917591330995,89.05082408669004,False,https://sparse.tamu.edu/MM/Norris/heart1.tar.gz
+Dense,904,cage3,vanHeukelum,5,19,76.0,24.0,False,https://sparse.tamu.edu/MM/vanHeukelum/cage3.tar.gz
+Mildly sparse,106,can_73,HB,73,377,7.0744980296490905,92.92550197035092,False,https://sparse.tamu.edu/MM/HB/can_73.tar.gz
+Mildly sparse,383,cavity04,DRIVCAV,317,5923,5.89417747216113,94.10582252783888,False,https://sparse.tamu.edu/MM/DRIVCAV/cavity04.tar.gz
+Mildly sparse,819,raefsky6,Simon,3402,130371,1.12645119013921,98.87354880986078,False,https://sparse.tamu.edu/MM/Simon/raefsky6.tar.gz
+Mildly sparse,375,coater1,Brethour,1348,19457,1.07076975230916,98.92923024769084,False,https://sparse.tamu.edu/MM/Brethour/coater1.tar.gz
+Mildly sparse,2403,polbooks,Newman,105,882,8.0,92.0,False,https://sparse.tamu.edu/MM/Newman/polbooks.tar.gz
+Highly sparse,1488,GD96_a,Pajek,1096,1677,0.13960853002291002,99.86039146997707,False,https://sparse.tamu.edu/MM/Pajek/GD96_a.tar.gz
+Highly sparse,246,sherman5,HB,3312,20793,0.18955554680389,99.81044445319613,False,https://sparse.tamu.edu/MM/HB/sherman5.tar.gz
+Highly sparse,783,nemeth19,Nemeth,9506,818302,0.90556158868335,99.09443841131664,False,https://sparse.tamu.edu/MM/Nemeth/nemeth19.tar.gz
+Highly sparse,2633,vsp_bcsstk30_500sep_10in_1Kout,DIMACS10,58348,4033156,0.11846582194260001,99.8815341780574,False,https://sparse.tamu.edu/MM/DIMACS10/vsp_bcsstk30_500sep_10in_1Kout.tar.gz
+Highly sparse,408,ex10hs,FIDAP,2548,57308,0.8827066631506999,99.11729333684929,False,https://sparse.tamu.edu/MM/FIDAP/ex10hs.tar.gz
+Extremely sparse,468,poli_large,Grund,15575,33033,0.013617328259409998,99.9863826717406,False,https://sparse.tamu.edu/MM/Grund/poli_large.tar.gz
+Extremely sparse,2290,email-Enron,SNAP,36692,367662,0.02730901120626,99.97269098879372,False,https://sparse.tamu.edu/MM/SNAP/email-Enron.tar.gz
+Extremely sparse,2570,CurlCurl_1,Bodendiek,226451,2472071,0.004820726071118465,99.99517927392888,False,https://sparse.tamu.edu/MM/Bodendiek/CurlCurl_1.tar.gz
+Extremely sparse,1863,Raj1,Rajat,263743,1300261,0.0018692554382388489,99.99813074456176,False,https://sparse.tamu.edu/MM/Rajat/Raj1.tar.gz
+Extremely sparse,2693,hangGlider_3,VDOL,10260,92703,0.08806413369355001,99.91193586630644,False,https://sparse.tamu.edu/MM/VDOL/hangGlider_3.tar.gz

@@ -90,6 +90,7 @@ static void spgemm_cusparse_device(
     void *dBuffer1 = nullptr, *dBuffer2 = nullptr;
     size_t bufferSize1 = 0, bufferSize2 = 0;
 
+    dbg("cusparse: workEstimation begin\n");
     CHECK_CUSPARSE(cusparseSpGEMM_workEstimation(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc, &bufferSize1, nullptr));
@@ -97,7 +98,9 @@ static void spgemm_cusparse_device(
     CHECK_CUSPARSE(cusparseSpGEMM_workEstimation(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc, &bufferSize1, dBuffer1));
+    dbg("cusparse: workEstimation done (buf1=%zu B)\n", bufferSize1);
 
+    dbg("cusparse: compute begin\n");
     CHECK_CUSPARSE(cusparseSpGEMM_compute(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc, &bufferSize2, nullptr));
@@ -105,10 +108,13 @@ static void spgemm_cusparse_device(
     CHECK_CUSPARSE(cusparseSpGEMM_compute(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc, &bufferSize2, dBuffer2));
+    dbg("cusparse: compute done (buf2=%zu B)\n", bufferSize2);
 
     int64_t C_rows64, C_cols64, C_nnz64;
     CHECK_CUSPARSE(cusparseSpMatGetSize(matC, &C_rows64, &C_cols64, &C_nnz64));
     int C_nnz = static_cast<int>(C_nnz64);
+    dbg("cusparse: C size = %lld x %lld, nnz=%lld\n",
+        (long long)C_rows64, (long long)C_cols64, (long long)C_nnz64);
 
     int *dC_col_idx;
     float *dC_val;
@@ -116,9 +122,12 @@ static void spgemm_cusparse_device(
     CHECK_CUDA(cudaMalloc(&dC_val, C_nnz * sizeof(float)));
     CHECK_CUSPARSE(cusparseCsrSetPointers(matC, dC_row_ptr, dC_col_idx, dC_val));
 
+    dbg("cusparse: copy begin\n");
     CHECK_CUSPARSE(cusparseSpGEMM_copy(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc));
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("cusparse: copy done\n");
 
     // 分配对齐的 device 单块内存
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
@@ -167,6 +176,7 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
     CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+    dbg("self_product: A H2D done (%zu B)\n", A_total_size);
 
     void *dC_buffer;
     int C_rows_tmp, C_cols_tmp, C_nnz_tmp;
@@ -185,7 +195,9 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 
     void *C_buffer;
     CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
+    dbg("self_product: C D2H begin (%zu B)\n", C_total_size);
     CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+    dbg("self_product: C D2H done\n");
 
     *C_buffer_out = C_buffer;
     *C_rows = C_rows_tmp;
