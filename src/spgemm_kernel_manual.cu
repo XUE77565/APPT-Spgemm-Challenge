@@ -1,6 +1,8 @@
 #include "spgemm.h"
 #include <cuda_runtime.h>
 #include <thrust/scan.h>
+#include <thrust/sort.h>
+#include <thrust/reduce.h>
 #include <thrust/device_ptr.h>
 #include <cstdio>
 #include <cstdlib>
@@ -22,11 +24,11 @@ __device__ float row_dot_product(
 {
     float dot = 0.0f;
     int pi = start_i, pj = start_j;
-    
+
     while (pi < end_i && pj < end_j) {
         int ci = col_idx[pi];
         int cj = col_idx[pj];
-        
+
         if (ci == cj) {
             dot += val[pi] * val[pj];
             pi++;
@@ -37,7 +39,7 @@ __device__ float row_dot_product(
             pj++;
         }
     }
-    
+
     return dot;
 }
 
@@ -50,24 +52,24 @@ __global__ void count_full_nnz_kernel(
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
-    
+
     int A_i_start = A_row_ptr[i];
     int A_i_end = A_row_ptr[i + 1];
-    
+
     int count = 0;
     for (int j = 0; j < A_rows; j++) {
         int A_j_start = A_row_ptr[j];
         int A_j_end = A_row_ptr[j + 1];
-        
-        float dot = row_dot_product(A_col_idx, A_val, 
+
+        float dot = row_dot_product(A_col_idx, A_val,
                                    A_i_start, A_i_end,
                                    A_j_start, A_j_end);
-        
+
         if (fabsf(dot) > 1e-12f) {
             count++;
         }
     }
-    
+
     row_nnz[i] = count;
 }
 
@@ -79,21 +81,21 @@ __global__ void fill_full_result_kernel(
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
-    
+
     int A_i_start = A_row_ptr[i];
     int A_i_end = A_row_ptr[i + 1];
-    
+
     int C_start = C_row_ptr[i];
     int write_pos = 0;
-    
+
     for (int j = 0; j < A_rows; j++) {
         int A_j_start = A_row_ptr[j];
         int A_j_end = A_row_ptr[j + 1];
-        
+
         float dot = row_dot_product(A_col_idx, A_val,
                                    A_i_start, A_i_end,
                                    A_j_start, A_j_end);
-        
+
         if (fabsf(dot) > 1e-12f) {
             C_col_idx[C_start + write_pos] = j;
             C_val[C_start + write_pos] = dot;
@@ -102,166 +104,71 @@ __global__ void fill_full_result_kernel(
     }
 }
 
-// ========== A x A 优化版本 ==========
+// ========== A x A (self product) —— ESC: Expand–Sort–Compress ==========
+// 设计(替掉旧的 shared-hash SPA):
+//   每个中间乘积 a_ik * a_kj 看成三元组 (row=i, col=j, val=a_ik*a_kj)。
+//   1) count_intermediates : 便宜的符号阶段,算每行"中间项数"= Σ_{k∈A[i,:]} nnz(A[k,:]),
+//      用来分配展开阶段的写偏移(无需 hash,无需原子)。
+//   2) expand_intermediates : 【唯一的重计算】一行一块,把所有中间项写进全局 COO,
+//      key=(row<<32)|col 便于一次排序就按(行,列)有序;每行用 shared 计数器领号。
+//   3) thrust::sort_by_key  : 按 key 排序。
+//   4) thrust::reduce_by_key: 相邻同 key 求和去重 → 列有序、无重复的 CSR。
+// 相比旧版:中间展开只做一遍(旧版 count+fill 各一遍);全局存储无 HASH_SIZE=4096 /
+// temp[256] 上限,不再丢非零;排序/去重交给 thrust,正确性有保证。
 
-#define HASH_SIZE 4096
-#define HASH_EMPTY -1
-
-__device__ int hash_insert_or_add(
-    int *hash_keys, float *hash_vals, 
-    int key, float val)
+// Stage 1: 每行中间乘积数(精确,非上界:每个 a_ik 与 a_kj 各产生一条)。
+__global__ void count_intermediates_kernel(
+    const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub)
 {
-    int slot = key & (HASH_SIZE - 1);  // 改用位运算，更快
-    
-    for (int attempt = 0; attempt < HASH_SIZE; attempt++) {
-        //atomicCAS提取slot对应位置的key,如果是empty就写入key,返回值是老的key
-        int old_key = atomicCAS(&hash_keys[slot], HASH_EMPTY, key);
-        
-        if (old_key == HASH_EMPTY || old_key == key) {
-            atomicAdd(&hash_vals[slot], val);
-            return slot;
-        }
-        
-        slot = (slot + 1) & (HASH_SIZE - 1);
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= A_rows) return;
+    long long s = 0;
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    for (int p = rs; p < re; p++) {
+        int k = A_col_idx[p];
+        s += (long long)(A_row_ptr[k + 1] - A_row_ptr[k]);   // nnz(A 的第 k 行)
     }
-    
-    return -1;
+    ub[i] = (int)s;
 }
 
-__global__ void count_self_nnz_hash_kernel(
+// Stage 2: 唯一的重计算 —— 展开所有中间项到全局 COO。
+__global__ void expand_intermediates_kernel(
     const int *A_row_ptr, const int *A_col_idx, const float *A_val,
-    int A_rows, int A_cols,
-    int *row_nnz)
+    int A_rows, const int *row_off,
+    unsigned long long *key, float *val)
 {
-    //定义共享hash表和值
-    __shared__ int shared_hash_keys[HASH_SIZE];
-    __shared__ float shared_hash_vals[HASH_SIZE];
-    
     int i = blockIdx.x;
     if (i >= A_rows) return;
-    
-    // 初始化, 一个线程处理一行
-    for (int idx = threadIdx.x; idx < HASH_SIZE; idx += blockDim.x) {
-        shared_hash_keys[idx] = HASH_EMPTY;
-        shared_hash_vals[idx] = 0.0f;
-    }
+
+    __shared__ int pos;
+    if (threadIdx.x == 0) pos = row_off[i];   // 本行在 COO 里的起始偏移
     __syncthreads();
-    
-    int A_i_start = A_row_ptr[i];
-    int A_i_end = A_row_ptr[i + 1];
-    
-    // 累加到 hash table
-    for (int p = A_i_start + threadIdx.x; p < A_i_end; p += blockDim.x) {
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    for (int p = rs + threadIdx.x; p < re; p += blockDim.x) {
         int k = A_col_idx[p];
         float a_ik = A_val[p];
-        
-        int A_k_start = A_row_ptr[k];
-        int A_k_end = A_row_ptr[k + 1];
-        
-        for (int q = A_k_start; q < A_k_end; q++) {
-            int j = A_col_idx[q];
-            float a_kj = A_val[q];
-            
-            hash_insert_or_add(shared_hash_keys, shared_hash_vals, j, a_ik * a_kj);
+        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        for (int q = ks; q < ke; q++) {
+            int slot = atomicAdd(&pos, 1);                 // 领一个写位置(本 block 私有)
+            key[slot] = ((unsigned long long)i << 32) | (unsigned int)A_col_idx[q];
+            val[slot] = a_ik * A_val[q];
         }
-    }
-    __syncthreads();
-    
-    // 统计 nnz
-    if (threadIdx.x == 0) {
-        int count = 0;
-        for (int idx = 0; idx < HASH_SIZE; idx++) {
-            if (shared_hash_keys[idx] != HASH_EMPTY && 
-                fabsf(shared_hash_vals[idx]) > 1e-12f) {
-                count++;
-            }
-        }
-        row_nnz[i] = count;
     }
 }
 
-__global__ void fill_self_result_hash_kernel(
-    const int *A_row_ptr, const int *A_col_idx, const float *A_val,
-    int A_rows, int A_cols,
-    const int *C_row_ptr,
-    int *C_col_idx, float *C_val)
+// Stage 4: 把压缩后的 key 拆成 col,写 C_col_idx/C_val,并统计每行 nnz。
+__global__ void finalize_csr_kernel(
+    const unsigned long long *red_key, const float *red_val,
+    int C_nnz, int A_rows,
+    int *C_col_idx, float *C_val, int *C_row_nnz)
 {
-    __shared__ int shared_hash_keys[HASH_SIZE];
-    __shared__ float shared_hash_vals[HASH_SIZE];
-    __shared__ int temp_cols[256];  // 临时存 (j, val)，假设每行 nnz < 256
-    __shared__ float temp_vals[256];
-    
-    int i = blockIdx.x;
-    if (i >= A_rows) return;
-    
-    // 初始化
-    for (int idx = threadIdx.x; idx < HASH_SIZE; idx += blockDim.x) {
-        shared_hash_keys[idx] = HASH_EMPTY;
-        shared_hash_vals[idx] = 0.0f;
-    }
-    __syncthreads();
-    
-    int A_i_start = A_row_ptr[i];
-    int A_i_end = A_row_ptr[i + 1];
-    
-    // 累加
-    for (int p = A_i_start + threadIdx.x; p < A_i_end; p += blockDim.x) {
-        int k = A_col_idx[p];
-        float a_ik = A_val[p];
-        
-        int A_k_start = A_row_ptr[k];
-        int A_k_end = A_row_ptr[k + 1];
-        
-        for (int q = A_k_start; q < A_k_end; q++) {
-            int j = A_col_idx[q];
-            float a_kj = A_val[q];
-            
-            hash_insert_or_add(shared_hash_keys, shared_hash_vals, j, a_ik * a_kj);
-        }
-    }
-    __syncthreads();
-    
-    // Thread 0 收集到 temp 数组
-    int nnz_count = 0;
-    if (threadIdx.x == 0) {
-        for (int idx = 0; idx < HASH_SIZE; idx++) {
-            int j = shared_hash_keys[idx];
-            if (j != HASH_EMPTY) {
-                float val = shared_hash_vals[idx];
-                if (fabsf(val) > 1e-12f) {
-                    if (nnz_count < 256) {  // 防止越界
-                        temp_cols[nnz_count] = j;
-                        temp_vals[nnz_count] = val;
-                        nnz_count++;
-                    }
-                }
-            }
-        }
-    }
-    __syncthreads();
-    
-    // 在 shared memory 里排序（简化版冒泡）
-    for (int pass = 0; pass < nnz_count; pass++) {
-        for (int idx = threadIdx.x; idx < nnz_count - 1; idx += blockDim.x) {
-            if (temp_cols[idx] > temp_cols[idx + 1]) {
-                int tmp_col = temp_cols[idx];
-                temp_cols[idx] = temp_cols[idx + 1];
-                temp_cols[idx + 1] = tmp_col;
-                
-                float tmp_val = temp_vals[idx];
-                temp_vals[idx] = temp_vals[idx + 1];
-                temp_vals[idx + 1] = tmp_val;
-            }
-        }
-        __syncthreads();
-    }
-    
-    // 写回 global memory
-    int C_start = C_row_ptr[i];
-    for (int idx = threadIdx.x; idx < nnz_count; idx += blockDim.x) {
-        C_col_idx[C_start + idx] = temp_cols[idx];
-        C_val[C_start + idx] = temp_vals[idx];
-    }
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= C_nnz) return;
+    unsigned long long k = red_key[t];
+    C_col_idx[t] = (int)(k & 0xffffffffu);                  // 列号 = key 低 32 位
+    C_val[t]     = red_val[t];
+    atomicAdd(&C_row_nnz[(int)(k >> 32)], 1);               // 行号 = key 高 32 位
 }
 
 // ========== A x A^T Host ==========
@@ -290,7 +197,7 @@ void spgemm_transpose_product_manual(
 
     int block_size = 256;
     int grid_size = (A_rows + block_size - 1) / block_size;
-    
+
     count_full_nnz_kernel<<<grid_size, block_size>>>(
         dA_row_ptr, dA_col_idx, dA_val, A_rows, dC_row_nnz);
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -305,7 +212,7 @@ void spgemm_transpose_product_manual(
         thrust::device_ptr<int>(dC_row_ptr + 1));
 
     int C_nnz_result;
-    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, 
+    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
                          sizeof(int), cudaMemcpyDeviceToHost));
 
     int *dC_col_idx;
@@ -333,17 +240,17 @@ void spgemm_transpose_product_manual(
     CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
 
     char *dC_base = (char*)dC_buffer;
-    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, 
+    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size,
                          cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx, 
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
                          C_col_idx_size, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned, 
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
                          dC_val, C_val_size, cudaMemcpyDeviceToDevice));
 
     void *C_buffer = nullptr;
     CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
-                         
-    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, 
+
+    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size,
                          cudaMemcpyDeviceToHost));
 
     *C_buffer_out = C_buffer;
@@ -359,12 +266,13 @@ void spgemm_transpose_product_manual(
     cudaFree(dC_buffer);
 }
 
-// ========== A x A Host ==========
+// ========== A x A Host (ESC) ==========
 
 void spgemm_self_product_manual(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
+    // ---- 0. A 上传到 GPU(与旧版相同)----
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
     size_t A_val_size = A_nnz * sizeof(float);
@@ -379,62 +287,108 @@ void spgemm_self_product_manual(
     int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
     float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
 
+    const int block = 256;
+
+    // ---- Stage 1: 每行中间乘积数(便宜符号阶段,无 hash/原子)----
+    dbg("ESC: count intermediates begin\n");
+    int *d_ub;
+    CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
+    {
+        int grid = (A_rows + block - 1) / block;
+        count_intermediates_kernel<<<grid, block>>>(
+            dA_row_ptr, dA_col_idx, A_rows, d_ub);
+    }
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("ESC: count intermediates done\n");
+
+    // ---- Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数 ----
+    int *d_off;
+    CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));                 // off[0] = 0
+    // inclusive_scan 写到 off+1:得 off=[0, ub0, ub0+ub1, …, total],行偏移正确
+    thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
+                           thrust::device_ptr<int>(d_ub + A_rows),
+                           thrust::device_ptr<int>(d_off + 1));
+    int total_ub;
+    CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("ESC: total intermediates = %d\n", total_ub);
+
+    // ---- Stage 2: 展开(唯一的重计算)写全局 COO(key, val)----
+    unsigned long long *d_key;
+    float *d_val;
+    CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_ub * sizeof(unsigned long long)));
+    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_ub * sizeof(float)));
+    dbg("ESC: expand begin (%d intermediates)\n", total_ub);
+    expand_intermediates_kernel<<<A_rows, block>>>(
+        dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off, d_key, d_val);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("ESC: expand done\n");
+
+    // ---- Stage 3: 按 key=(row<<32|col) 全局排序 ----
+    dbg("ESC: sort_by_key begin\n");
+    thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
+                        thrust::device_ptr<unsigned long long>(d_key + total_ub),
+                        thrust::device_ptr<float>(d_val));
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("ESC: sort_by_key done\n");
+
+    // ---- Stage 3b: 相邻同 key 求和去重 → (red_key, red_val) ----
+    unsigned long long *d_rk;
+    float *d_rv;
+    CHECK_CUDA(cudaMalloc(&d_rk, (size_t)total_ub * sizeof(unsigned long long)));
+    CHECK_CUDA(cudaMalloc(&d_rv, (size_t)total_ub * sizeof(float)));
+    dbg("ESC: reduce_by_key begin\n");
+    thrust::pair<thrust::device_ptr<unsigned long long>,
+                 thrust::device_ptr<float> > red_end =
+        thrust::reduce_by_key(
+            thrust::device_ptr<unsigned long long>(d_key),
+            thrust::device_ptr<unsigned long long>(d_key + total_ub),
+            thrust::device_ptr<float>(d_val),
+            thrust::device_ptr<unsigned long long>(d_rk),
+            thrust::device_ptr<float>(d_rv));
+    int C_nnz_result = (int)(red_end.first - thrust::device_ptr<unsigned long long>(d_rk));
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("ESC: reduce done, C_nnz=%d\n", C_nnz_result);
+    cudaFree(d_key);          // COO 不再需要
+    cudaFree(d_val);
+
+    // ---- Stage 4: 拆 key→col 写 C_col_idx/C_val,统计每行 nnz ----
+    int *dC_col_idx;
+    float *dC_val;
     int *dC_row_nnz;
+    CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&dC_row_nnz, A_rows * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_nnz, 0, A_rows * sizeof(int)));
-
-    int block_size = 256;
-    int grid_size = A_rows;
-
-    dbg("manual: count kernel begin (grid=%d, A_rows=%d)\n", grid_size, A_rows);
-    //一行一个block
-    count_self_nnz_hash_kernel<<<grid_size, block_size>>>(
-        dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols,
-        dC_row_nnz);
+    {
+        int grid = (C_nnz_result + block - 1) / block;
+        finalize_csr_kernel<<<grid, block>>>(
+            d_rk, d_rv, C_nnz_result, A_rows, dC_col_idx, dC_val, dC_row_nnz);
+    }
     CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("manual: count kernel done\n");
+    cudaFree(d_rk);
+    cudaFree(d_rv);
 
+    // ---- Stage 4b: 每行 nnz → C_row_ptr ----
     int *dC_row_ptr;
     CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
+    thrust::inclusive_scan(thrust::device_ptr<int>(dC_row_nnz),
+                           thrust::device_ptr<int>(dC_row_nnz + A_rows),
+                           thrust::device_ptr<int>(dC_row_ptr + 1));
 
-    thrust::exclusive_scan(
-        thrust::device_ptr<int>(dC_row_nnz),
-        thrust::device_ptr<int>(dC_row_nnz + A_rows),
-        thrust::device_ptr<int>(dC_row_ptr + 1));
-
-    int C_nnz_result;
-    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
-                          sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("manual: scan done, C_nnz_result=%d\n", C_nnz_result);
-
-    int *dC_col_idx;
-    float *dC_val;
-    CHECK_CUDA(cudaMalloc(&dC_col_idx, C_nnz_result * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dC_val, C_nnz_result * sizeof(float)));
-
-    dbg("manual: fill kernel begin\n");
-    fill_self_result_hash_kernel<<<grid_size, block_size>>>(
-        dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols,
-        dC_row_ptr, dC_col_idx, dC_val);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("manual: fill kernel done\n");
-
-    // 不需要排序了，已经在 kernel 里排好了
-
+    // ---- 打包成单块 + D2H(与旧版相同)----
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
-    size_t C_col_idx_size = C_nnz_result * sizeof(int);
-    size_t C_val_size = C_nnz_result * sizeof(float);
+    size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
+    size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
     size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
     size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
     size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
 
     void *dC_buffer;
     CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
-
     char *dC_base = (char*)dC_buffer;
-    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size,
-                          cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
                           C_col_idx_size, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
@@ -449,10 +403,12 @@ void spgemm_self_product_manual(
     *C_cols = A_cols;
     *C_nnz = C_nnz_result;
 
-    CHECK_CUDA(cudaFree(dA_buffer));
-    CHECK_CUDA(cudaFree(dC_row_nnz));
-    CHECK_CUDA(cudaFree(dC_row_ptr));
-    CHECK_CUDA(cudaFree(dC_col_idx));
-    CHECK_CUDA(cudaFree(dC_val));
-    CHECK_CUDA(cudaFree(dC_buffer));
+    cudaFree(dA_buffer);
+    cudaFree(d_ub);
+    cudaFree(d_off);
+    cudaFree(dC_col_idx);
+    cudaFree(dC_val);
+    cudaFree(dC_row_nnz);
+    cudaFree(dC_row_ptr);
+    cudaFree(dC_buffer);
 }
