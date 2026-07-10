@@ -4,7 +4,7 @@ INCLUDES = -Iinclude -I/usr/local/cuda/include
 LIBS = -lcusparse -lcublas
 
 TARGET = spgemm_test
-SRCS = src/main.cu src/matrix_utils.cu src/spgemm_kernel_cusparse.cu src/spgemm_kernel_manual.cu
+SRCS = src/main.cu src/matrix_utils.cu src/spgemm_kernel_cusparse.cu src/spgemm_kernel_manual.cu src/spgemm_kernel_formulations.cu
 OBJS = $(SRCS:.cu=.o)
 HEADERS = $(wildcard include/*.h)   # 任何头文件改动都触发重编
 

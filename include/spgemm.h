@@ -56,4 +56,15 @@ void spgemm_transpose_product_manual(void *A_buffer, int A_rows, int A_cols, int
 void spgemm_self_product_manual(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                         void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
+// 三种公式对照(均为 ESC 合并;Gustavson=上面那个 manual)
+// 外积(outer, 外层=k):读 A 的列k ⊗ 行k
+void spgemm_self_product_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                               void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+// 列向(column-wise, 外层=j):读 A 的若干列(作为"内积轴"对照)
+void spgemm_self_product_colwise(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                                 void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+// 逐元素内积(inner product):C[i,j]=row_i·col_j,数值阶段逐元素归并点积(不走 ESC)
+void spgemm_self_product_inner(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                               void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+
 #endif
