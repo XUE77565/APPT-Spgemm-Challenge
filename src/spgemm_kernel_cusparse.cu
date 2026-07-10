@@ -25,6 +25,7 @@
     } while (0)
 
 static cusparseHandle_t g_handle = nullptr;
+static const char *g_cutag = "cu";   // device 阶段打桩 tag: 自乘="cu", 转置="cut"
 
 static void ensure_handle() {
     if (g_handle == nullptr) {
@@ -98,7 +99,7 @@ static void spgemm_cusparse_device(
     CHECK_CUSPARSE(cusparseSpGEMM_workEstimation(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc, &bufferSize1, dBuffer1));
-    CHECK_CUDA(cudaDeviceSynchronize()); dbg("[cu] workest (buf1=%zu B)\n", bufferSize1);
+    CHECK_CUDA(cudaDeviceSynchronize()); dbg("[%s] workest (buf1=%zu B)\n", g_cutag, bufferSize1);
 
     dbg("cusparse: compute begin\n");
     CHECK_CUSPARSE(cusparseSpGEMM_compute(
@@ -108,7 +109,7 @@ static void spgemm_cusparse_device(
     CHECK_CUSPARSE(cusparseSpGEMM_compute(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc, &bufferSize2, dBuffer2));
-    CHECK_CUDA(cudaDeviceSynchronize()); dbg("[cu] compute (buf2=%zu B)\n", bufferSize2);
+    CHECK_CUDA(cudaDeviceSynchronize()); dbg("[%s] compute (buf2=%zu B)\n", g_cutag, bufferSize2);
 
     int64_t C_rows64, C_cols64, C_nnz64;
     CHECK_CUSPARSE(cusparseSpMatGetSize(matC, &C_rows64, &C_cols64, &C_nnz64));
@@ -127,7 +128,7 @@ static void spgemm_cusparse_device(
         g_handle, opA, opB, &alpha, matA, matB, &beta, matC, computeType,
         CUSPARSE_SPGEMM_DEFAULT, spgemmDesc));
     CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[cu] copy\n");
+    dbg("[%s] copy\n", g_cutag);
 
     // 分配对齐的 device 单块内存
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
@@ -146,7 +147,7 @@ static void spgemm_cusparse_device(
     CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_size_aligned, dC_col_idx, C_col_idx_size, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_size_aligned + C_col_idx_size_aligned, dC_val, C_val_size, cudaMemcpyDeviceToDevice));
-    dbg("[cu] pack\n");
+    dbg("[%s] pack\n", g_cutag);
 
     *dC_buffer_out = dC_buffer;
     *C_rows_out = A_rows;
@@ -168,6 +169,7 @@ static void spgemm_cusparse_device(
 void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
     dbg("[cu] start\n");
+    g_cutag = "cu";
     ensure_handle();
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
@@ -212,6 +214,8 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 
 void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
+    dbg("[cut] start\n");
+    g_cutag = "cut";
     ensure_handle();
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
@@ -223,6 +227,7 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
     CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+    dbg("[cut] h2d\n");
 
     // 解析 A 的指针做转置
     char *dA_base = (char*)dA_buffer;
@@ -251,6 +256,8 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     dAT_val, dAT_row_ptr, dAT_col_idx, CUDA_R_32F,
     CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO,
     CUSPARSE_CSR2CSC_ALG1, dBuffer));
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[cut] transpose\n");
     cudaFree(dBuffer);
 
     // 合并 A^T 到单块内存（保证对齐）
@@ -296,6 +303,7 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void *C_buffer;
     CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
     CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+    dbg("[cut] d2h\n");
 
     *C_buffer_out = C_buffer;
     *C_rows = C_rows_tmp;

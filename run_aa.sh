@@ -12,8 +12,8 @@ set -o pipefail   # 让管道返回 spgemm_test 的真实退出码而不是 tee 
 
 # 单个矩阵最大允许耗时（秒）。可用环境变量覆盖，如：TIMEOUT=60 ./run_all.sh
 TIMEOUT=${TIMEOUT:-600}
-DATA_DIR="./data/rep"
-RESULTS_DIR="./results/rep"
+DATA_DIR="./data/first100"
+RESULTS_DIR="./results/aa/first100_aa"
 LOG_DIR="$RESULTS_DIR/log"
 MATRIX_DIR="$RESULTS_DIR/matrices"
 SUMMARY="$RESULTS_DIR/summary.csv"

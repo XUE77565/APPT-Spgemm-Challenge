@@ -9,6 +9,7 @@
 #define TEST_READ 0
 #define DBG 1
 #define WRITE_MTX 0
+#define CU_REF 1
 
 // 调试日志：带“程序启动以来毫秒数”时间戳，写 stderr（无缓冲，立刻可见，
 // 即使被 timeout 杀掉也能看到最后一行）。每个翻译单元共享同一份 t0
@@ -49,6 +50,16 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 // C = A × A^T，输入输出都是单块连续内存
 void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                               void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+
+// C = A·Aᵀ 上三角(对称,只算 i≤j)。ESC 实现,返回上三角 CSR。
+void spgemm_att_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+void spgemm_att_gust(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+void spgemm_att_colw(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+void spgemm_att_inner(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
 void spgemm_transpose_product_manual(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);

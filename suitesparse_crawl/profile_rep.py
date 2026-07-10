@@ -8,6 +8,7 @@ Profiling run_rep.sh 的结果:解析每个日志里的 dbg 阶段时间戳,
 """
 
 import re
+import os
 import sys
 from pathlib import Path
 
@@ -40,7 +41,7 @@ plt.rcParams.update({
 })
 
 REPO = Path(__file__).resolve().parent.parent
-LOG_DIR = REPO / "results" / "rep" / "log"
+LOG_DIR = Path(os.environ.get("REP_LOG_DIR", str(REPO / "results" / "rep" / "log")))
 REPS_CSV = Path(__file__).resolve().parent / "representatives.csv"
 OUT_CSV = Path(__file__).resolve().parent / "profile_rep.csv"
 CHART_DIR = Path(__file__).resolve().parent / "charts"

@@ -90,6 +90,49 @@ int main(int argc, char **argv) {
     }
 
 
+    // ============ A·Aᵀ 上三角 profiling 模式 (argv[2]=="att") ============
+    if (argc >= 3 && std::string(argv[2]) == "att") {
+        printf("===============WARMING UP (att)===============");
+        {
+            void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;
+            spgemm_transpose_product(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) cudaFreeHost(wc);
+            wc = nullptr;
+            spgemm_att_outer(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) cudaFreeHost(wc);
+            wc = nullptr;
+            spgemm_att_gust(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) cudaFreeHost(wc);
+            wc = nullptr;
+            spgemm_att_colw(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) cudaFreeHost(wc);
+            wc = nullptr;
+            spgemm_att_inner(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) cudaFreeHost(wc);
+        }
+        auto att_run = [&](const char *label, const char *kind, auto fn) {
+            LOG_BOTH("\n=== Computing %s ===\n", label);
+            void *C_buffer = nullptr; int Cr = 0, Cc = 0, Cn = 0;
+            auto s = std::chrono::high_resolution_clock::now();
+            fn(A_buffer, A_rows, A_cols, A_nnz, &C_buffer, &Cr, &Cc, &Cn);
+            auto e = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> el = e - s;
+            LOG_BOTH("Result C (%s): %d x %d, nnz = %d\n", kind, Cr, Cc, Cn);
+            LOG_BOTH("Time: %.3f ms\n", el.count());
+            if (C_buffer) cudaFreeHost(C_buffer);
+        };
+        att_run("C = A x A^T (cuSPARSE)", "A·Aᵀ 全量", spgemm_transpose_product);
+        att_run("C = A x A^T upper (outer)", "A·Aᵀ 上三角", spgemm_att_outer);
+        att_run("C = A x A^T upper (Gustavson)", "A·Aᵀ 上三角", spgemm_att_gust);
+        att_run("C = A x A^T upper (colwise)", "A·Aᵀ 上三角", spgemm_att_colw);
+        att_run("C = A x A^T upper (inner)", "A·Aᵀ 上三角", spgemm_att_inner);
+        LOG_BOTH("\n=== All att tests completed ===\n");
+        fclose(log_file);
+        free(A_buffer);
+        return 0;
+    }
+
+
     // ---- 预热:正式计时前各方法空跑一次,摊掉 thrust 工作区 / cuSPARSE handle /
     //   CUDA allocator 的一次性冷启动开销,使 T1–T7 测的是稳态性能(不打印、不计时)----
     printf("===============WARMING UP===============");
@@ -113,6 +156,7 @@ int main(int argc, char **argv) {
     }
 
     // 测试 1: C = A x A cuSparse
+    #if CU_REF
     {
         LOG_BOTH("\n=== Computing C = A x A (cuSPARSE) ===\n");
 
@@ -158,6 +202,7 @@ int main(int argc, char **argv) {
             cudaFreeHost(C_buffer);
         }
     }
+    #endif
 /*
     // 测试 2: C = A x A^T (cuSPARSE)
     {
