@@ -1,0 +1,4811 @@
+Processing c-63 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     561.4 ms] CUDA context ready
+[dbg     561.5 ms] start read_matrix_market: ./data/rep/c-63.mtx
+[dbg     642.9 ms] read done: 44234 x 44234, nnz=434704
+[dbg     642.9 ms] [cu] start
+[dbg     651.8 ms] [cu] h2d (3654572 B)
+[dbg     652.0 ms] cusparse: workEstimation begin
+[dbg     677.2 ms] [cu] workest (buf1=5225191 B)
+[dbg     677.2 ms] cusparse: compute begin
+[dbg     680.7 ms] [cu] compute (buf2=586641863 B)
+[dbg     680.7 ms] cusparse: C size = 44234 x 44234, nnz=14194078
+[dbg     680.9 ms] cusparse: copy begin
+[dbg     681.2 ms] [cu] copy
+[dbg     681.3 ms] [cu] pack
+[dbg     744.8 ms] self_product: C D2H begin (113729564 B)
+[dbg     749.8 ms] [cu] d2h
+[dbg     760.9 ms] [gust] start
+[dbg     761.6 ms] [gust] h2d
+[dbg     761.6 ms] ESC: count intermediates begin
+[dbg     763.0 ms] [gust] count
+[dbg     763.1 ms] [gust] scan
+[dbg     763.3 ms] ESC: expand begin (24422002 intermediates)
+[dbg     765.3 ms] [gust] expand
+[dbg     765.3 ms] ESC: sort_by_key begin
+[dbg     768.6 ms] [gust] sort
+[dbg     768.8 ms] ESC: reduce_by_key begin
+[dbg     769.3 ms] [gust] reduce
+[dbg     774.4 ms] [gust] final
+[dbg     774.5 ms] [gust] pack
+[dbg     824.8 ms] [gust] d2h
+[dbg     835.9 ms] [outer] start
+[dbg     836.6 ms] [outer] h2d
+[dbg     839.3 ms] [outer] csc
+[dbg     839.3 ms] [outer] count
+[dbg     839.4 ms] [outer] scan
+[dbg     844.8 ms] [outer] expand
+[dbg     848.2 ms] [outer] sort
+[dbg     848.7 ms] [outer] reduce
+[dbg     853.5 ms] [outer] final
+[dbg     853.6 ms] [outer] pack
+[dbg     902.5 ms] [outer] d2h
+[dbg     914.0 ms] [colw] start
+[dbg     914.6 ms] [colw] h2d
+[dbg     916.3 ms] [colw] csc
+[dbg     916.5 ms] [colw] count
+[dbg     916.5 ms] [colw] scan
+[dbg     918.5 ms] [colw] expand
+[dbg     921.8 ms] [colw] sort
+[dbg     922.3 ms] [colw] reduce
+[dbg     927.2 ms] [colw] final
+[dbg     927.3 ms] [colw] pack
+[dbg     976.9 ms] [colw] d2h
+[dbg     988.2 ms] [inner] start
+[dbg     988.9 ms] [inner] h2d
+[dbg     990.6 ms] [inner] csc
+[dbg     990.7 ms] [inner] count
+[dbg     990.8 ms] [inner] scan
+[dbg     992.9 ms] [inner] expand
+[dbg     996.2 ms] [inner] sort
+[dbg     996.7 ms] [inner] reduce
+[dbg    1001.4 ms] [inner] final
+[dbg    1039.4 ms] [inner] numeric
+[dbg    1039.5 ms] [inner] pack
+[dbg    1093.6 ms] [inner] d2h
+[dbg    1104.8 ms] warmup done
+[dbg    1104.8 ms] T1 cuSPARSE self_product: start
+[dbg    1104.8 ms] [cu] start
+[dbg    1105.5 ms] [cu] h2d (3654572 B)
+[dbg    1105.7 ms] cusparse: workEstimation begin
+[dbg    1105.8 ms] [cu] workest (buf1=5225191 B)
+[dbg    1105.8 ms] cusparse: compute begin
+[dbg    1108.7 ms] [cu] compute (buf2=586641863 B)
+[dbg    1108.7 ms] cusparse: C size = 44234 x 44234, nnz=14194078
+[dbg    1108.9 ms] cusparse: copy begin
+[dbg    1109.1 ms] [cu] copy
+[dbg    1109.1 ms] [cu] pack
+[dbg    1154.7 ms] self_product: C D2H begin (113729564 B)
+[dbg    1159.0 ms] [cu] d2h
+[dbg    1159.3 ms] T1 cuSPARSE self_product: done (C_nnz=14194078)
+[dbg    1170.0 ms] T4 manual self_product: start
+[dbg    1170.0 ms] [gust] start
+[dbg    1170.7 ms] [gust] h2d
+[dbg    1170.7 ms] ESC: count intermediates begin
+[dbg    1171.0 ms] [gust] count
+[dbg    1171.0 ms] [gust] scan
+[dbg    1171.3 ms] ESC: expand begin (24422002 intermediates)
+[dbg    1173.3 ms] [gust] expand
+[dbg    1173.3 ms] ESC: sort_by_key begin
+[dbg    1176.6 ms] [gust] sort
+[dbg    1176.7 ms] ESC: reduce_by_key begin
+[dbg    1177.1 ms] [gust] reduce
+[dbg    1182.0 ms] [gust] final
+[dbg    1182.1 ms] [gust] pack
+[dbg    1231.3 ms] [gust] d2h
+[dbg    1231.7 ms] T4 manual self_product: done (C_nnz=14194078)
+[dbg    1242.5 ms] T5 outer self_product: start
+[dbg    1242.5 ms] [outer] start
+[dbg    1243.2 ms] [outer] h2d
+[dbg    1244.8 ms] [outer] csc
+[dbg    1244.9 ms] [outer] count
+[dbg    1244.9 ms] [outer] scan
+[dbg    1250.3 ms] [outer] expand
+[dbg    1253.6 ms] [outer] sort
+[dbg    1254.1 ms] [outer] reduce
+[dbg    1258.9 ms] [outer] final
+[dbg    1259.0 ms] [outer] pack
+[dbg    1309.0 ms] [outer] d2h
+[dbg    1309.7 ms] T5 outer self_product: done (C_nnz=14194078)
+[dbg    1320.3 ms] T6 colwise self_product: start
+[dbg    1320.3 ms] [colw] start
+[dbg    1321.0 ms] [colw] h2d
+[dbg    1322.7 ms] [colw] csc
+[dbg    1322.8 ms] [colw] count
+[dbg    1322.9 ms] [colw] scan
+[dbg    1324.9 ms] [colw] expand
+[dbg    1328.2 ms] [colw] sort
+[dbg    1328.7 ms] [colw] reduce
+[dbg    1333.5 ms] [colw] final
+[dbg    1333.5 ms] [colw] pack
+[dbg    1382.3 ms] [colw] d2h
+[dbg    1383.0 ms] T6 colwise self_product: done (C_nnz=14194078)
+[dbg    1393.6 ms] T7 inner self_product: start
+[dbg    1393.6 ms] [inner] start
+[dbg    1394.3 ms] [inner] h2d
+[dbg    1395.9 ms] [inner] csc
+[dbg    1396.0 ms] [inner] count
+[dbg    1396.1 ms] [inner] scan
+[dbg    1398.2 ms] [inner] expand
+[dbg    1401.5 ms] [inner] sort
+[dbg    1402.0 ms] [inner] reduce
+[dbg    1406.8 ms] [inner] final
+[dbg    1444.8 ms] [inner] numeric
+[dbg    1444.9 ms] [inner] pack
+[dbg    1496.4 ms] [inner] d2h
+[dbg    1496.9 ms] T7 inner self_product: done (C_nnz=14194078)
+Reading matrix from ./data/rep/c-63.mtx...
+Input A: 44234 x 44234, nnz = 434704, sparsity = 99.98%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 44234 x 44234, nnz = 14194078, sparsity = 99.27%
+Time: 54.464 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 44234 x 44234, nnz = 14194078, sparsity = 99.27%
+Time: 61.718 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 44234 x 44234, nnz = 14194078, sparsity = 99.27%
+Time: 67.188 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 44234 x 44234, nnz = 14194078, sparsity = 99.27%
+Time: 62.701 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 44234 x 44234, nnz = 14194078, sparsity = 99.27%
+Time: 103.289 ms
+
+=== All tests completed ===
+Processing cage3 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.2 ms] CUDA context ready
+[dbg     485.4 ms] start read_matrix_market: ./data/rep/cage3.mtx
+[dbg     485.4 ms] read done: 5 x 5, nnz=19
+[dbg     485.5 ms] [cu] start
+[dbg     493.6 ms] [cu] h2d (176 B)
+[dbg     493.7 ms] cusparse: workEstimation begin
+[dbg     520.0 ms] [cu] workest (buf1=1291 B)
+[dbg     520.0 ms] cusparse: compute begin
+[dbg     520.7 ms] [cu] compute (buf2=6943 B)
+[dbg     520.7 ms] cusparse: C size = 5 x 5, nnz=25
+[dbg     520.7 ms] cusparse: copy begin
+[dbg     520.8 ms] [cu] copy
+[dbg     520.9 ms] [cu] pack
+[dbg     522.3 ms] self_product: C D2H begin (224 B)
+[dbg     522.3 ms] [cu] d2h
+[dbg     522.8 ms] [gust] start
+[dbg     522.9 ms] [gust] h2d
+[dbg     522.9 ms] ESC: count intermediates begin
+[dbg     524.3 ms] [gust] count
+[dbg     524.5 ms] [gust] scan
+[dbg     524.5 ms] ESC: expand begin (75 intermediates)
+[dbg     524.6 ms] [gust] expand
+[dbg     524.6 ms] ESC: sort_by_key begin
+[dbg     524.7 ms] [gust] sort
+[dbg     524.7 ms] ESC: reduce_by_key begin
+[dbg     524.8 ms] [gust] reduce
+[dbg     524.9 ms] [gust] final
+[dbg     524.9 ms] [gust] pack
+[dbg     526.2 ms] [gust] d2h
+[dbg     526.6 ms] [outer] start
+[dbg     526.7 ms] [outer] h2d
+[dbg     528.2 ms] [outer] csc
+[dbg     528.2 ms] [outer] count
+[dbg     528.3 ms] [outer] scan
+[dbg     528.3 ms] [outer] expand
+[dbg     528.4 ms] [outer] sort
+[dbg     528.4 ms] [outer] reduce
+[dbg     528.5 ms] [outer] final
+[dbg     528.5 ms] [outer] pack
+[dbg     529.6 ms] [outer] d2h
+[dbg     530.0 ms] [colw] start
+[dbg     530.1 ms] [colw] h2d
+[dbg     530.2 ms] [colw] csc
+[dbg     530.3 ms] [colw] count
+[dbg     530.3 ms] [colw] scan
+[dbg     530.3 ms] [colw] expand
+[dbg     530.4 ms] [colw] sort
+[dbg     530.4 ms] [colw] reduce
+[dbg     530.5 ms] [colw] final
+[dbg     530.5 ms] [colw] pack
+[dbg     531.4 ms] [colw] d2h
+[dbg     531.9 ms] [inner] start
+[dbg     532.0 ms] [inner] h2d
+[dbg     532.1 ms] [inner] csc
+[dbg     532.1 ms] [inner] count
+[dbg     532.2 ms] [inner] scan
+[dbg     532.2 ms] [inner] expand
+[dbg     532.2 ms] [inner] sort
+[dbg     532.3 ms] [inner] reduce
+[dbg     532.3 ms] [inner] final
+[dbg     532.4 ms] [inner] numeric
+[dbg     532.4 ms] [inner] pack
+[dbg     533.3 ms] [inner] d2h
+[dbg     533.6 ms] warmup done
+[dbg     533.7 ms] T1 cuSPARSE self_product: start
+[dbg     533.7 ms] [cu] start
+[dbg     533.8 ms] [cu] h2d (176 B)
+[dbg     533.8 ms] cusparse: workEstimation begin
+[dbg     533.9 ms] [cu] workest (buf1=1291 B)
+[dbg     533.9 ms] cusparse: compute begin
+[dbg     534.0 ms] [cu] compute (buf2=6943 B)
+[dbg     534.0 ms] cusparse: C size = 5 x 5, nnz=25
+[dbg     534.0 ms] cusparse: copy begin
+[dbg     534.1 ms] [cu] copy
+[dbg     534.1 ms] [cu] pack
+[dbg     535.0 ms] self_product: C D2H begin (224 B)
+[dbg     535.0 ms] [cu] d2h
+[dbg     535.1 ms] T1 cuSPARSE self_product: done (C_nnz=25)
+[dbg     535.4 ms] T4 manual self_product: start
+[dbg     535.4 ms] [gust] start
+[dbg     535.5 ms] [gust] h2d
+[dbg     535.5 ms] ESC: count intermediates begin
+[dbg     535.5 ms] [gust] count
+[dbg     535.6 ms] [gust] scan
+[dbg     535.6 ms] ESC: expand begin (75 intermediates)
+[dbg     535.6 ms] [gust] expand
+[dbg     535.6 ms] ESC: sort_by_key begin
+[dbg     535.7 ms] [gust] sort
+[dbg     535.7 ms] ESC: reduce_by_key begin
+[dbg     535.7 ms] [gust] reduce
+[dbg     535.8 ms] [gust] final
+[dbg     535.8 ms] [gust] pack
+[dbg     536.6 ms] [gust] d2h
+[dbg     536.7 ms] T4 manual self_product: done (C_nnz=25)
+[dbg     537.0 ms] T5 outer self_product: start
+[dbg     537.0 ms] [outer] start
+[dbg     537.1 ms] [outer] h2d
+[dbg     537.2 ms] [outer] csc
+[dbg     537.2 ms] [outer] count
+[dbg     537.3 ms] [outer] scan
+[dbg     537.3 ms] [outer] expand
+[dbg     537.4 ms] [outer] sort
+[dbg     537.4 ms] [outer] reduce
+[dbg     537.5 ms] [outer] final
+[dbg     537.5 ms] [outer] pack
+[dbg     538.3 ms] [outer] d2h
+[dbg     538.4 ms] T5 outer self_product: done (C_nnz=25)
+[dbg     538.7 ms] T6 colwise self_product: start
+[dbg     538.7 ms] [colw] start
+[dbg     538.9 ms] [colw] h2d
+[dbg     538.9 ms] [colw] csc
+[dbg     539.0 ms] [colw] count
+[dbg     539.0 ms] [colw] scan
+[dbg     539.0 ms] [colw] expand
+[dbg     539.1 ms] [colw] sort
+[dbg     539.1 ms] [colw] reduce
+[dbg     539.2 ms] [colw] final
+[dbg     539.2 ms] [colw] pack
+[dbg     540.0 ms] [colw] d2h
+[dbg     540.2 ms] T6 colwise self_product: done (C_nnz=25)
+[dbg     540.4 ms] T7 inner self_product: start
+[dbg     540.4 ms] [inner] start
+[dbg     540.6 ms] [inner] h2d
+[dbg     540.6 ms] [inner] csc
+[dbg     540.7 ms] [inner] count
+[dbg     540.7 ms] [inner] scan
+[dbg     540.7 ms] [inner] expand
+[dbg     540.8 ms] [inner] sort
+[dbg     540.8 ms] [inner] reduce
+[dbg     540.9 ms] [inner] final
+[dbg     540.9 ms] [inner] numeric
+[dbg     540.9 ms] [inner] pack
+[dbg     541.7 ms] [inner] d2h
+[dbg     541.8 ms] T7 inner self_product: done (C_nnz=25)
+Reading matrix from ./data/rep/cage3.mtx...
+Input A: 5 x 5, nnz = 19, sparsity = 24.00%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 5 x 5, nnz = 25, sparsity = 0.00%
+Time: 1.413 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 5 x 5, nnz = 25, sparsity = 0.00%
+Time: 1.330 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 5 x 5, nnz = 25, sparsity = 0.00%
+Time: 1.416 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 5 x 5, nnz = 25, sparsity = 0.00%
+Time: 1.416 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 5 x 5, nnz = 25, sparsity = 0.00%
+Time: 1.393 ms
+
+=== All tests completed ===
+Processing can_73 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     487.1 ms] CUDA context ready
+[dbg     487.2 ms] start read_matrix_market: ./data/rep/can_73.mtx
+[dbg     487.3 ms] read done: 73 x 73, nnz=377
+[dbg     487.3 ms] [cu] start
+[dbg     495.4 ms] [cu] h2d (3312 B)
+[dbg     495.4 ms] cusparse: workEstimation begin
+[dbg     521.4 ms] [cu] workest (buf1=5587 B)
+[dbg     521.4 ms] cusparse: compute begin
+[dbg     522.2 ms] [cu] compute (buf2=60079 B)
+[dbg     522.2 ms] cusparse: C size = 73 x 73, nnz=1377
+[dbg     522.2 ms] cusparse: copy begin
+[dbg     522.3 ms] [cu] copy
+[dbg     522.3 ms] [cu] pack
+[dbg     523.7 ms] self_product: C D2H begin (11312 B)
+[dbg     523.7 ms] [cu] d2h
+[dbg     524.2 ms] [gust] start
+[dbg     524.3 ms] [gust] h2d
+[dbg     524.3 ms] ESC: count intermediates begin
+[dbg     525.7 ms] [gust] count
+[dbg     526.0 ms] [gust] scan
+[dbg     526.0 ms] ESC: expand begin (2289 intermediates)
+[dbg     526.1 ms] [gust] expand
+[dbg     526.1 ms] ESC: sort_by_key begin
+[dbg     526.1 ms] [gust] sort
+[dbg     526.2 ms] ESC: reduce_by_key begin
+[dbg     526.3 ms] [gust] reduce
+[dbg     526.4 ms] [gust] final
+[dbg     526.4 ms] [gust] pack
+[dbg     527.8 ms] [gust] d2h
+[dbg     528.2 ms] [outer] start
+[dbg     528.3 ms] [outer] h2d
+[dbg     529.8 ms] [outer] csc
+[dbg     529.8 ms] [outer] count
+[dbg     529.9 ms] [outer] scan
+[dbg     529.9 ms] [outer] expand
+[dbg     530.0 ms] [outer] sort
+[dbg     530.0 ms] [outer] reduce
+[dbg     530.1 ms] [outer] final
+[dbg     530.1 ms] [outer] pack
+[dbg     531.1 ms] [outer] d2h
+[dbg     531.6 ms] [colw] start
+[dbg     531.7 ms] [colw] h2d
+[dbg     531.8 ms] [colw] csc
+[dbg     531.8 ms] [colw] count
+[dbg     531.9 ms] [colw] scan
+[dbg     531.9 ms] [colw] expand
+[dbg     532.0 ms] [colw] sort
+[dbg     532.0 ms] [colw] reduce
+[dbg     532.1 ms] [colw] final
+[dbg     532.1 ms] [colw] pack
+[dbg     533.0 ms] [colw] d2h
+[dbg     533.3 ms] [inner] start
+[dbg     533.5 ms] [inner] h2d
+[dbg     533.5 ms] [inner] csc
+[dbg     533.6 ms] [inner] count
+[dbg     533.6 ms] [inner] scan
+[dbg     533.6 ms] [inner] expand
+[dbg     533.7 ms] [inner] sort
+[dbg     533.7 ms] [inner] reduce
+[dbg     533.8 ms] [inner] final
+[dbg     533.8 ms] [inner] numeric
+[dbg     533.9 ms] [inner] pack
+[dbg     534.7 ms] [inner] d2h
+[dbg     535.1 ms] warmup done
+[dbg     535.1 ms] T1 cuSPARSE self_product: start
+[dbg     535.1 ms] [cu] start
+[dbg     535.2 ms] [cu] h2d (3312 B)
+[dbg     535.2 ms] cusparse: workEstimation begin
+[dbg     535.3 ms] [cu] workest (buf1=5587 B)
+[dbg     535.3 ms] cusparse: compute begin
+[dbg     535.5 ms] [cu] compute (buf2=60079 B)
+[dbg     535.5 ms] cusparse: C size = 73 x 73, nnz=1377
+[dbg     535.5 ms] cusparse: copy begin
+[dbg     535.5 ms] [cu] copy
+[dbg     535.6 ms] [cu] pack
+[dbg     536.4 ms] self_product: C D2H begin (11312 B)
+[dbg     536.4 ms] [cu] d2h
+[dbg     536.5 ms] T1 cuSPARSE self_product: done (C_nnz=1377)
+[dbg     536.8 ms] T4 manual self_product: start
+[dbg     536.8 ms] [gust] start
+[dbg     536.9 ms] [gust] h2d
+[dbg     536.9 ms] ESC: count intermediates begin
+[dbg     536.9 ms] [gust] count
+[dbg     537.0 ms] [gust] scan
+[dbg     537.0 ms] ESC: expand begin (2289 intermediates)
+[dbg     537.0 ms] [gust] expand
+[dbg     537.0 ms] ESC: sort_by_key begin
+[dbg     537.0 ms] [gust] sort
+[dbg     537.1 ms] ESC: reduce_by_key begin
+[dbg     537.1 ms] [gust] reduce
+[dbg     537.2 ms] [gust] final
+[dbg     537.2 ms] [gust] pack
+[dbg     538.0 ms] [gust] d2h
+[dbg     538.1 ms] T4 manual self_product: done (C_nnz=1377)
+[dbg     538.4 ms] T5 outer self_product: start
+[dbg     538.4 ms] [outer] start
+[dbg     538.5 ms] [outer] h2d
+[dbg     538.6 ms] [outer] csc
+[dbg     538.6 ms] [outer] count
+[dbg     538.6 ms] [outer] scan
+[dbg     538.6 ms] [outer] expand
+[dbg     538.7 ms] [outer] sort
+[dbg     538.7 ms] [outer] reduce
+[dbg     538.8 ms] [outer] final
+[dbg     538.8 ms] [outer] pack
+[dbg     539.6 ms] [outer] d2h
+[dbg     539.8 ms] T5 outer self_product: done (C_nnz=1377)
+[dbg     540.1 ms] T6 colwise self_product: start
+[dbg     540.1 ms] [colw] start
+[dbg     540.2 ms] [colw] h2d
+[dbg     540.3 ms] [colw] csc
+[dbg     540.3 ms] [colw] count
+[dbg     540.4 ms] [colw] scan
+[dbg     540.4 ms] [colw] expand
+[dbg     540.4 ms] [colw] sort
+[dbg     540.5 ms] [colw] reduce
+[dbg     540.5 ms] [colw] final
+[dbg     540.6 ms] [colw] pack
+[dbg     541.4 ms] [colw] d2h
+[dbg     541.5 ms] T6 colwise self_product: done (C_nnz=1377)
+[dbg     541.8 ms] T7 inner self_product: start
+[dbg     541.8 ms] [inner] start
+[dbg     541.9 ms] [inner] h2d
+[dbg     542.0 ms] [inner] csc
+[dbg     542.0 ms] [inner] count
+[dbg     542.0 ms] [inner] scan
+[dbg     542.0 ms] [inner] expand
+[dbg     542.1 ms] [inner] sort
+[dbg     542.1 ms] [inner] reduce
+[dbg     542.2 ms] [inner] final
+[dbg     542.2 ms] [inner] numeric
+[dbg     542.2 ms] [inner] pack
+[dbg     543.1 ms] [inner] d2h
+[dbg     543.2 ms] T7 inner self_product: done (C_nnz=1377)
+Reading matrix from ./data/rep/can_73.mtx...
+Input A: 73 x 73, nnz = 377, sparsity = 92.93%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 73 x 73, nnz = 1377, sparsity = 74.16%
+Time: 1.411 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 73 x 73, nnz = 1377, sparsity = 74.16%
+Time: 1.321 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 73 x 73, nnz = 1377, sparsity = 74.16%
+Time: 1.394 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 73 x 73, nnz = 1377, sparsity = 74.16%
+Time: 1.392 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 73 x 73, nnz = 1377, sparsity = 74.16%
+Time: 1.420 ms
+
+=== All tests completed ===
+Processing cavity04 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     481.9 ms] CUDA context ready
+[dbg     482.1 ms] start read_matrix_market: ./data/rep/cavity04.mtx
+[dbg     484.1 ms] read done: 317 x 317, nnz=7327
+[dbg     484.1 ms] [cu] start
+[dbg     492.4 ms] [cu] h2d (59888 B)
+[dbg     492.5 ms] cusparse: workEstimation begin
+[dbg     518.7 ms] [cu] workest (buf1=88987 B)
+[dbg     518.7 ms] cusparse: compute begin
+[dbg     519.5 ms] [cu] compute (buf2=5420479 B)
+[dbg     519.5 ms] cusparse: C size = 317 x 317, nnz=27556
+[dbg     519.6 ms] cusparse: copy begin
+[dbg     519.7 ms] [cu] copy
+[dbg     519.7 ms] [cu] pack
+[dbg     521.2 ms] self_product: C D2H begin (221720 B)
+[dbg     521.2 ms] [cu] d2h
+[dbg     521.6 ms] [gust] start
+[dbg     521.8 ms] [gust] h2d
+[dbg     521.8 ms] ESC: count intermediates begin
+[dbg     523.3 ms] [gust] count
+[dbg     523.5 ms] [gust] scan
+[dbg     523.6 ms] ESC: expand begin (225447 intermediates)
+[dbg     523.7 ms] [gust] expand
+[dbg     523.7 ms] ESC: sort_by_key begin
+[dbg     524.1 ms] [gust] sort
+[dbg     524.2 ms] ESC: reduce_by_key begin
+[dbg     524.4 ms] [gust] reduce
+[dbg     524.5 ms] [gust] final
+[dbg     524.5 ms] [gust] pack
+[dbg     525.8 ms] [gust] d2h
+[dbg     526.3 ms] [outer] start
+[dbg     526.4 ms] [outer] h2d
+[dbg     527.9 ms] [outer] csc
+[dbg     528.0 ms] [outer] count
+[dbg     528.0 ms] [outer] scan
+[dbg     528.2 ms] [outer] expand
+[dbg     528.5 ms] [outer] sort
+[dbg     528.6 ms] [outer] reduce
+[dbg     528.7 ms] [outer] final
+[dbg     528.8 ms] [outer] pack
+[dbg     529.8 ms] [outer] d2h
+[dbg     530.3 ms] [colw] start
+[dbg     530.4 ms] [colw] h2d
+[dbg     530.5 ms] [colw] csc
+[dbg     530.6 ms] [colw] count
+[dbg     530.6 ms] [colw] scan
+[dbg     530.8 ms] [colw] expand
+[dbg     531.1 ms] [colw] sort
+[dbg     531.2 ms] [colw] reduce
+[dbg     531.3 ms] [colw] final
+[dbg     531.3 ms] [colw] pack
+[dbg     532.4 ms] [colw] d2h
+[dbg     532.8 ms] [inner] start
+[dbg     533.0 ms] [inner] h2d
+[dbg     533.1 ms] [inner] csc
+[dbg     533.1 ms] [inner] count
+[dbg     533.1 ms] [inner] scan
+[dbg     533.3 ms] [inner] expand
+[dbg     533.6 ms] [inner] sort
+[dbg     533.7 ms] [inner] reduce
+[dbg     533.8 ms] [inner] final
+[dbg     533.9 ms] [inner] numeric
+[dbg     533.9 ms] [inner] pack
+[dbg     534.7 ms] [inner] d2h
+[dbg     535.2 ms] warmup done
+[dbg     535.2 ms] T1 cuSPARSE self_product: start
+[dbg     535.2 ms] [cu] start
+[dbg     535.3 ms] [cu] h2d (59888 B)
+[dbg     535.4 ms] cusparse: workEstimation begin
+[dbg     535.4 ms] [cu] workest (buf1=88987 B)
+[dbg     535.4 ms] cusparse: compute begin
+[dbg     535.7 ms] [cu] compute (buf2=5420479 B)
+[dbg     535.7 ms] cusparse: C size = 317 x 317, nnz=27556
+[dbg     535.7 ms] cusparse: copy begin
+[dbg     535.8 ms] [cu] copy
+[dbg     535.8 ms] [cu] pack
+[dbg     536.7 ms] self_product: C D2H begin (221720 B)
+[dbg     536.8 ms] [cu] d2h
+[dbg     536.9 ms] T1 cuSPARSE self_product: done (C_nnz=27556)
+[dbg     537.1 ms] T4 manual self_product: start
+[dbg     537.1 ms] [gust] start
+[dbg     537.3 ms] [gust] h2d
+[dbg     537.3 ms] ESC: count intermediates begin
+[dbg     537.3 ms] [gust] count
+[dbg     537.3 ms] [gust] scan
+[dbg     537.4 ms] ESC: expand begin (225447 intermediates)
+[dbg     537.5 ms] [gust] expand
+[dbg     537.5 ms] ESC: sort_by_key begin
+[dbg     537.7 ms] [gust] sort
+[dbg     537.8 ms] ESC: reduce_by_key begin
+[dbg     537.8 ms] [gust] reduce
+[dbg     538.0 ms] [gust] final
+[dbg     538.0 ms] [gust] pack
+[dbg     538.8 ms] [gust] d2h
+[dbg     539.0 ms] T4 manual self_product: done (C_nnz=27556)
+[dbg     539.3 ms] T5 outer self_product: start
+[dbg     539.3 ms] [outer] start
+[dbg     539.4 ms] [outer] h2d
+[dbg     539.5 ms] [outer] csc
+[dbg     539.5 ms] [outer] count
+[dbg     539.6 ms] [outer] scan
+[dbg     539.7 ms] [outer] expand
+[dbg     539.9 ms] [outer] sort
+[dbg     540.0 ms] [outer] reduce
+[dbg     540.2 ms] [outer] final
+[dbg     540.2 ms] [outer] pack
+[dbg     541.1 ms] [outer] d2h
+[dbg     541.3 ms] T5 outer self_product: done (C_nnz=27556)
+[dbg     541.5 ms] T6 colwise self_product: start
+[dbg     541.5 ms] [colw] start
+[dbg     541.6 ms] [colw] h2d
+[dbg     541.7 ms] [colw] csc
+[dbg     541.8 ms] [colw] count
+[dbg     541.8 ms] [colw] scan
+[dbg     541.9 ms] [colw] expand
+[dbg     542.2 ms] [colw] sort
+[dbg     542.3 ms] [colw] reduce
+[dbg     542.4 ms] [colw] final
+[dbg     542.4 ms] [colw] pack
+[dbg     543.3 ms] [colw] d2h
+[dbg     543.5 ms] T6 colwise self_product: done (C_nnz=27556)
+[dbg     543.7 ms] T7 inner self_product: start
+[dbg     543.7 ms] [inner] start
+[dbg     543.8 ms] [inner] h2d
+[dbg     544.0 ms] [inner] csc
+[dbg     544.0 ms] [inner] count
+[dbg     544.0 ms] [inner] scan
+[dbg     544.2 ms] [inner] expand
+[dbg     544.5 ms] [inner] sort
+[dbg     544.6 ms] [inner] reduce
+[dbg     544.7 ms] [inner] final
+[dbg     544.7 ms] [inner] numeric
+[dbg     544.8 ms] [inner] pack
+[dbg     545.6 ms] [inner] d2h
+[dbg     545.8 ms] T7 inner self_product: done (C_nnz=27556)
+Reading matrix from ./data/rep/cavity04.mtx...
+Input A: 317 x 317, nnz = 7327, sparsity = 92.71%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 317 x 317, nnz = 27556, sparsity = 72.58%
+Time: 1.639 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 317 x 317, nnz = 27556, sparsity = 72.58%
+Time: 1.860 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 317 x 317, nnz = 27556, sparsity = 72.58%
+Time: 1.969 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 317 x 317, nnz = 27556, sparsity = 72.58%
+Time: 1.944 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 317 x 317, nnz = 27556, sparsity = 72.58%
+Time: 2.020 ms
+
+=== All tests completed ===
+Processing coater1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     490.8 ms] CUDA context ready
+[dbg     491.0 ms] start read_matrix_market: ./data/rep/coater1.mtx
+[dbg     496.4 ms] read done: 1348 x 1348, nnz=19457
+[dbg     496.4 ms] [cu] start
+[dbg     504.7 ms] [cu] h2d (161052 B)
+[dbg     504.7 ms] cusparse: workEstimation begin
+[dbg     531.7 ms] [cu] workest (buf1=234803 B)
+[dbg     531.7 ms] cusparse: compute begin
+[dbg     532.6 ms] [cu] compute (buf2=7958991 B)
+[dbg     532.6 ms] cusparse: C size = 1348 x 1348, nnz=130920
+[dbg     532.6 ms] cusparse: copy begin
+[dbg     532.7 ms] [cu] copy
+[dbg     532.9 ms] [cu] pack
+[dbg     534.4 ms] self_product: C D2H begin (1052756 B)
+[dbg     534.5 ms] [cu] d2h
+[dbg     535.0 ms] [gust] start
+[dbg     535.1 ms] [gust] h2d
+[dbg     535.1 ms] ESC: count intermediates begin
+[dbg     536.6 ms] [gust] count
+[dbg     536.9 ms] [gust] scan
+[dbg     537.0 ms] ESC: expand begin (330910 intermediates)
+[dbg     537.0 ms] [gust] expand
+[dbg     537.0 ms] ESC: sort_by_key begin
+[dbg     537.5 ms] [gust] sort
+[dbg     537.6 ms] ESC: reduce_by_key begin
+[dbg     537.8 ms] [gust] reduce
+[dbg     538.0 ms] [gust] final
+[dbg     538.0 ms] [gust] pack
+[dbg     539.3 ms] [gust] d2h
+[dbg     539.8 ms] [outer] start
+[dbg     539.9 ms] [outer] h2d
+[dbg     541.4 ms] [outer] csc
+[dbg     541.5 ms] [outer] count
+[dbg     541.5 ms] [outer] scan
+[dbg     541.7 ms] [outer] expand
+[dbg     542.0 ms] [outer] sort
+[dbg     542.1 ms] [outer] reduce
+[dbg     542.4 ms] [outer] final
+[dbg     542.4 ms] [outer] pack
+[dbg     543.5 ms] [outer] d2h
+[dbg     544.1 ms] [colw] start
+[dbg     544.3 ms] [colw] h2d
+[dbg     544.4 ms] [colw] csc
+[dbg     544.5 ms] [colw] count
+[dbg     544.5 ms] [colw] scan
+[dbg     544.7 ms] [colw] expand
+[dbg     545.0 ms] [colw] sort
+[dbg     545.1 ms] [colw] reduce
+[dbg     545.3 ms] [colw] final
+[dbg     545.4 ms] [colw] pack
+[dbg     546.6 ms] [colw] d2h
+[dbg     547.1 ms] [inner] start
+[dbg     547.3 ms] [inner] h2d
+[dbg     547.4 ms] [inner] csc
+[dbg     547.4 ms] [inner] count
+[dbg     547.4 ms] [inner] scan
+[dbg     547.6 ms] [inner] expand
+[dbg     547.9 ms] [inner] sort
+[dbg     548.0 ms] [inner] reduce
+[dbg     548.2 ms] [inner] final
+[dbg     548.3 ms] [inner] numeric
+[dbg     548.4 ms] [inner] pack
+[dbg     549.4 ms] [inner] d2h
+[dbg     549.9 ms] warmup done
+[dbg     549.9 ms] T1 cuSPARSE self_product: start
+[dbg     549.9 ms] [cu] start
+[dbg     550.1 ms] [cu] h2d (161052 B)
+[dbg     550.1 ms] cusparse: workEstimation begin
+[dbg     550.2 ms] [cu] workest (buf1=234803 B)
+[dbg     550.2 ms] cusparse: compute begin
+[dbg     550.5 ms] [cu] compute (buf2=7958991 B)
+[dbg     550.5 ms] cusparse: C size = 1348 x 1348, nnz=130920
+[dbg     550.5 ms] cusparse: copy begin
+[dbg     550.6 ms] [cu] copy
+[dbg     550.7 ms] [cu] pack
+[dbg     551.7 ms] self_product: C D2H begin (1052756 B)
+[dbg     551.8 ms] [cu] d2h
+[dbg     551.9 ms] T1 cuSPARSE self_product: done (C_nnz=130920)
+[dbg     552.2 ms] T4 manual self_product: start
+[dbg     552.2 ms] [gust] start
+[dbg     552.3 ms] [gust] h2d
+[dbg     552.3 ms] ESC: count intermediates begin
+[dbg     552.4 ms] [gust] count
+[dbg     552.4 ms] [gust] scan
+[dbg     552.5 ms] ESC: expand begin (330910 intermediates)
+[dbg     552.5 ms] [gust] expand
+[dbg     552.5 ms] ESC: sort_by_key begin
+[dbg     552.8 ms] [gust] sort
+[dbg     552.9 ms] ESC: reduce_by_key begin
+[dbg     553.0 ms] [gust] reduce
+[dbg     553.2 ms] [gust] final
+[dbg     553.2 ms] [gust] pack
+[dbg     554.2 ms] [gust] d2h
+[dbg     554.4 ms] T4 manual self_product: done (C_nnz=130920)
+[dbg     554.6 ms] T5 outer self_product: start
+[dbg     554.6 ms] [outer] start
+[dbg     554.8 ms] [outer] h2d
+[dbg     554.9 ms] [outer] csc
+[dbg     554.9 ms] [outer] count
+[dbg     554.9 ms] [outer] scan
+[dbg     555.1 ms] [outer] expand
+[dbg     555.3 ms] [outer] sort
+[dbg     555.5 ms] [outer] reduce
+[dbg     555.7 ms] [outer] final
+[dbg     555.7 ms] [outer] pack
+[dbg     556.7 ms] [outer] d2h
+[dbg     557.0 ms] T5 outer self_product: done (C_nnz=130920)
+[dbg     557.3 ms] T6 colwise self_product: start
+[dbg     557.3 ms] [colw] start
+[dbg     557.4 ms] [colw] h2d
+[dbg     557.5 ms] [colw] csc
+[dbg     557.5 ms] [colw] count
+[dbg     557.6 ms] [colw] scan
+[dbg     557.7 ms] [colw] expand
+[dbg     558.0 ms] [colw] sort
+[dbg     558.2 ms] [colw] reduce
+[dbg     558.4 ms] [colw] final
+[dbg     558.4 ms] [colw] pack
+[dbg     559.4 ms] [colw] d2h
+[dbg     559.7 ms] T6 colwise self_product: done (C_nnz=130920)
+[dbg     560.0 ms] T7 inner self_product: start
+[dbg     560.0 ms] [inner] start
+[dbg     560.1 ms] [inner] h2d
+[dbg     560.2 ms] [inner] csc
+[dbg     560.2 ms] [inner] count
+[dbg     560.3 ms] [inner] scan
+[dbg     560.4 ms] [inner] expand
+[dbg     560.6 ms] [inner] sort
+[dbg     560.8 ms] [inner] reduce
+[dbg     561.0 ms] [inner] final
+[dbg     561.1 ms] [inner] numeric
+[dbg     561.1 ms] [inner] pack
+[dbg     562.1 ms] [inner] d2h
+[dbg     562.3 ms] T7 inner self_product: done (C_nnz=130920)
+Reading matrix from ./data/rep/coater1.mtx...
+Input A: 1348 x 1348, nnz = 19457, sparsity = 98.93%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 1348 x 1348, nnz = 130920, sparsity = 92.80%
+Time: 1.983 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 1348 x 1348, nnz = 130920, sparsity = 92.80%
+Time: 2.159 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 1348 x 1348, nnz = 130920, sparsity = 92.80%
+Time: 2.365 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 1348 x 1348, nnz = 130920, sparsity = 92.80%
+Time: 2.377 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 1348 x 1348, nnz = 130920, sparsity = 92.80%
+Time: 2.359 ms
+
+=== All tests completed ===
+Processing CurlCurl_1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     480.7 ms] CUDA context ready
+[dbg     480.8 ms] start read_matrix_market: ./data/rep/CurlCurl_1.mtx
+[dbg     928.1 ms] read done: 226451 x 226451, nnz=2472071
+[dbg     928.1 ms] [cu] start
+[dbg     944.0 ms] [cu] h2d (20682376 B)
+[dbg     944.2 ms] cusparse: workEstimation begin
+[dbg     968.4 ms] [cu] workest (buf1=29709947 B)
+[dbg     968.4 ms] cusparse: compute begin
+[dbg     970.1 ms] [cu] compute (buf2=655198007 B)
+[dbg     970.1 ms] cusparse: C size = 226451 x 226451, nnz=12165785
+[dbg     970.3 ms] cusparse: copy begin
+[dbg     970.6 ms] [cu] copy
+[dbg     970.7 ms] [cu] pack
+[dbg    1026.1 ms] self_product: C D2H begin (98232088 B)
+[dbg    1030.6 ms] [cu] d2h
+[dbg    1040.4 ms] [gust] start
+[dbg    1043.6 ms] [gust] h2d
+[dbg    1043.6 ms] ESC: count intermediates begin
+[dbg    1044.9 ms] [gust] count
+[dbg    1045.0 ms] [gust] scan
+[dbg    1045.2 ms] ESC: expand begin (27224109 intermediates)
+[dbg    1045.6 ms] [gust] expand
+[dbg    1045.6 ms] ESC: sort_by_key begin
+[dbg    1049.3 ms] [gust] sort
+[dbg    1049.4 ms] ESC: reduce_by_key begin
+[dbg    1049.9 ms] [gust] reduce
+[dbg    1051.0 ms] [gust] final
+[dbg    1051.1 ms] [gust] pack
+[dbg    1094.6 ms] [gust] d2h
+[dbg    1104.4 ms] [outer] start
+[dbg    1107.6 ms] [outer] h2d
+[dbg    1109.3 ms] [outer] csc
+[dbg    1109.4 ms] [outer] count
+[dbg    1109.5 ms] [outer] scan
+[dbg    1110.1 ms] [outer] expand
+[dbg    1113.7 ms] [outer] sort
+[dbg    1114.2 ms] [outer] reduce
+[dbg    1115.1 ms] [outer] final
+[dbg    1115.2 ms] [outer] pack
+[dbg    1156.9 ms] [outer] d2h
+[dbg    1166.7 ms] [colw] start
+[dbg    1170.0 ms] [colw] h2d
+[dbg    1170.6 ms] [colw] csc
+[dbg    1170.7 ms] [colw] count
+[dbg    1170.8 ms] [colw] scan
+[dbg    1171.4 ms] [colw] expand
+[dbg    1175.0 ms] [colw] sort
+[dbg    1175.5 ms] [colw] reduce
+[dbg    1176.4 ms] [colw] final
+[dbg    1176.5 ms] [colw] pack
+[dbg    1218.5 ms] [colw] d2h
+[dbg    1228.2 ms] [inner] start
+[dbg    1231.5 ms] [inner] h2d
+[dbg    1232.1 ms] [inner] csc
+[dbg    1232.2 ms] [inner] count
+[dbg    1232.3 ms] [inner] scan
+[dbg    1232.9 ms] [inner] expand
+[dbg    1236.6 ms] [inner] sort
+[dbg    1237.1 ms] [inner] reduce
+[dbg    1237.9 ms] [inner] final
+[dbg    1239.0 ms] [inner] numeric
+[dbg    1239.1 ms] [inner] pack
+[dbg    1280.8 ms] [inner] d2h
+[dbg    1290.6 ms] warmup done
+[dbg    1290.6 ms] T1 cuSPARSE self_product: start
+[dbg    1290.6 ms] [cu] start
+[dbg    1293.8 ms] [cu] h2d (20682376 B)
+[dbg    1294.0 ms] cusparse: workEstimation begin
+[dbg    1294.2 ms] [cu] workest (buf1=29709947 B)
+[dbg    1294.2 ms] cusparse: compute begin
+[dbg    1295.3 ms] [cu] compute (buf2=655198007 B)
+[dbg    1295.3 ms] cusparse: C size = 226451 x 226451, nnz=12165785
+[dbg    1295.5 ms] cusparse: copy begin
+[dbg    1295.7 ms] [cu] copy
+[dbg    1295.8 ms] [cu] pack
+[dbg    1334.9 ms] self_product: C D2H begin (98232088 B)
+[dbg    1338.5 ms] [cu] d2h
+[dbg    1338.7 ms] T1 cuSPARSE self_product: done (C_nnz=12165785)
+[dbg    1347.9 ms] T4 manual self_product: start
+[dbg    1347.9 ms] [gust] start
+[dbg    1351.2 ms] [gust] h2d
+[dbg    1351.2 ms] ESC: count intermediates begin
+[dbg    1351.4 ms] [gust] count
+[dbg    1351.4 ms] [gust] scan
+[dbg    1351.7 ms] ESC: expand begin (27224109 intermediates)
+[dbg    1352.1 ms] [gust] expand
+[dbg    1352.1 ms] ESC: sort_by_key begin
+[dbg    1355.8 ms] [gust] sort
+[dbg    1356.0 ms] ESC: reduce_by_key begin
+[dbg    1356.4 ms] [gust] reduce
+[dbg    1357.4 ms] [gust] final
+[dbg    1357.5 ms] [gust] pack
+[dbg    1399.3 ms] [gust] d2h
+[dbg    1399.7 ms] T4 manual self_product: done (C_nnz=12165785)
+[dbg    1408.8 ms] T5 outer self_product: start
+[dbg    1408.8 ms] [outer] start
+[dbg    1412.0 ms] [outer] h2d
+[dbg    1412.7 ms] [outer] csc
+[dbg    1412.8 ms] [outer] count
+[dbg    1412.9 ms] [outer] scan
+[dbg    1413.5 ms] [outer] expand
+[dbg    1417.1 ms] [outer] sort
+[dbg    1417.6 ms] [outer] reduce
+[dbg    1418.6 ms] [outer] final
+[dbg    1418.7 ms] [outer] pack
+[dbg    1460.6 ms] [outer] d2h
+[dbg    1461.4 ms] T5 outer self_product: done (C_nnz=12165785)
+[dbg    1470.5 ms] T6 colwise self_product: start
+[dbg    1470.5 ms] [colw] start
+[dbg    1473.8 ms] [colw] h2d
+[dbg    1474.4 ms] [colw] csc
+[dbg    1474.5 ms] [colw] count
+[dbg    1474.6 ms] [colw] scan
+[dbg    1475.2 ms] [colw] expand
+[dbg    1478.8 ms] [colw] sort
+[dbg    1479.3 ms] [colw] reduce
+[dbg    1480.2 ms] [colw] final
+[dbg    1480.3 ms] [colw] pack
+[dbg    1521.8 ms] [colw] d2h
+[dbg    1522.6 ms] T6 colwise self_product: done (C_nnz=12165785)
+[dbg    1531.7 ms] T7 inner self_product: start
+[dbg    1531.8 ms] [inner] start
+[dbg    1535.0 ms] [inner] h2d
+[dbg    1535.7 ms] [inner] csc
+[dbg    1535.8 ms] [inner] count
+[dbg    1535.8 ms] [inner] scan
+[dbg    1536.4 ms] [inner] expand
+[dbg    1540.1 ms] [inner] sort
+[dbg    1540.6 ms] [inner] reduce
+[dbg    1541.5 ms] [inner] final
+[dbg    1542.4 ms] [inner] numeric
+[dbg    1542.5 ms] [inner] pack
+[dbg    1584.6 ms] [inner] d2h
+[dbg    1585.1 ms] T7 inner self_product: done (C_nnz=12165785)
+Reading matrix from ./data/rep/CurlCurl_1.mtx...
+Input A: 226451 x 226451, nnz = 2472071, sparsity = 100.00%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 226451 x 226451, nnz = 12165785, sparsity = 99.98%
+Time: 48.146 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 226451 x 226451, nnz = 12165785, sparsity = 99.98%
+Time: 51.811 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 226451 x 226451, nnz = 12165785, sparsity = 99.98%
+Time: 52.660 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 226451 x 226451, nnz = 12165785, sparsity = 99.98%
+Time: 52.110 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 226451 x 226451, nnz = 12165785, sparsity = 99.98%
+Time: 53.389 ms
+
+=== All tests completed ===
+Processing email-Enron ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     481.9 ms] CUDA context ready
+[dbg     482.0 ms] start read_matrix_market: ./data/rep/email-Enron.mtx
+[dbg     517.5 ms] read done: 36692 x 36692, nnz=367662
+[dbg     517.5 ms] [cu] start
+[dbg     526.7 ms] [cu] h2d (3088068 B)
+[dbg     526.9 ms] cusparse: workEstimation begin
+[dbg     551.8 ms] [cu] workest (buf1=4419407 B)
+[dbg     551.8 ms] cusparse: compute begin
+[dbg     558.3 ms] [cu] compute (buf2=1237112791 B)
+[dbg     558.3 ms] cusparse: C size = 36692 x 36692, nnz=30492154
+[dbg     558.5 ms] cusparse: copy begin
+[dbg     559.0 ms] [cu] copy
+[dbg     559.1 ms] [cu] pack
+[dbg     713.9 ms] self_product: C D2H begin (244084004 B)
+[dbg     725.1 ms] [cu] d2h
+[dbg     750.0 ms] [gust] start
+[dbg     751.1 ms] [gust] h2d
+[dbg     751.1 ms] ESC: count intermediates begin
+[dbg     752.5 ms] [gust] count
+[dbg     752.7 ms] [gust] scan
+[dbg     752.9 ms] ESC: expand begin (51501448 intermediates)
+[dbg     754.1 ms] [gust] expand
+[dbg     754.1 ms] ESC: sort_by_key begin
+[dbg     760.9 ms] [gust] sort
+[dbg     761.1 ms] ESC: reduce_by_key begin
+[dbg     762.0 ms] [gust] reduce
+[dbg     771.9 ms] [gust] final
+[dbg     772.0 ms] [gust] pack
+[dbg     909.6 ms] [gust] d2h
+[dbg     933.6 ms] [outer] start
+[dbg     934.6 ms] [outer] h2d
+[dbg     936.7 ms] [outer] csc
+[dbg     936.8 ms] [outer] count
+[dbg     936.8 ms] [outer] scan
+[dbg     938.3 ms] [outer] expand
+[dbg     944.9 ms] [outer] sort
+[dbg     945.9 ms] [outer] reduce
+[dbg     955.0 ms] [outer] final
+[dbg     955.1 ms] [outer] pack
+[dbg    1081.2 ms] [outer] d2h
+[dbg    1106.5 ms] [colw] start
+[dbg    1107.4 ms] [colw] h2d
+[dbg    1108.4 ms] [colw] csc
+[dbg    1108.5 ms] [colw] count
+[dbg    1108.5 ms] [colw] scan
+[dbg    1110.0 ms] [colw] expand
+[dbg    1116.6 ms] [colw] sort
+[dbg    1117.5 ms] [colw] reduce
+[dbg    1126.7 ms] [colw] final
+[dbg    1126.8 ms] [colw] pack
+[dbg    1251.5 ms] [colw] d2h
+[dbg    1275.7 ms] [inner] start
+[dbg    1276.7 ms] [inner] h2d
+[dbg    1277.7 ms] [inner] csc
+[dbg    1277.8 ms] [inner] count
+[dbg    1277.9 ms] [inner] scan
+[dbg    1279.4 ms] [inner] expand
+[dbg    1286.3 ms] [inner] sort
+[dbg    1287.3 ms] [inner] reduce
+[dbg    1296.4 ms] [inner] final
+[dbg    1307.1 ms] [inner] numeric
+[dbg    1307.4 ms] [inner] pack
+[dbg    1428.4 ms] [inner] d2h
+[dbg    1453.1 ms] warmup done
+[dbg    1453.1 ms] T1 cuSPARSE self_product: start
+[dbg    1453.1 ms] [cu] start
+[dbg    1453.9 ms] [cu] h2d (3088068 B)
+[dbg    1454.2 ms] cusparse: workEstimation begin
+[dbg    1454.4 ms] [cu] workest (buf1=4419407 B)
+[dbg    1454.4 ms] cusparse: compute begin
+[dbg    1460.2 ms] [cu] compute (buf2=1237112791 B)
+[dbg    1460.2 ms] cusparse: C size = 36692 x 36692, nnz=30492154
+[dbg    1460.3 ms] cusparse: copy begin
+[dbg    1460.7 ms] [cu] copy
+[dbg    1460.8 ms] [cu] pack
+[dbg    1567.2 ms] self_product: C D2H begin (244084004 B)
+[dbg    1576.7 ms] [cu] d2h
+[dbg    1577.1 ms] T1 cuSPARSE self_product: done (C_nnz=30492154)
+[dbg    1600.2 ms] T4 manual self_product: start
+[dbg    1600.2 ms] [gust] start
+[dbg    1601.0 ms] [gust] h2d
+[dbg    1601.0 ms] ESC: count intermediates begin
+[dbg    1601.3 ms] [gust] count
+[dbg    1601.3 ms] [gust] scan
+[dbg    1601.7 ms] ESC: expand begin (51501448 intermediates)
+[dbg    1602.9 ms] [gust] expand
+[dbg    1602.9 ms] ESC: sort_by_key begin
+[dbg    1609.7 ms] [gust] sort
+[dbg    1610.3 ms] ESC: reduce_by_key begin
+[dbg    1611.0 ms] [gust] reduce
+[dbg    1620.5 ms] [gust] final
+[dbg    1620.6 ms] [gust] pack
+[dbg    1736.1 ms] [gust] d2h
+[dbg    1736.7 ms] T4 manual self_product: done (C_nnz=30492154)
+[dbg    1761.2 ms] T5 outer self_product: start
+[dbg    1761.2 ms] [outer] start
+[dbg    1762.1 ms] [outer] h2d
+[dbg    1763.1 ms] [outer] csc
+[dbg    1763.1 ms] [outer] count
+[dbg    1763.2 ms] [outer] scan
+[dbg    1764.7 ms] [outer] expand
+[dbg    1771.4 ms] [outer] sort
+[dbg    1772.4 ms] [outer] reduce
+[dbg    1781.6 ms] [outer] final
+[dbg    1781.7 ms] [outer] pack
+[dbg    1902.6 ms] [outer] d2h
+[dbg    1903.5 ms] T5 outer self_product: done (C_nnz=30492154)
+[dbg    1926.7 ms] T6 colwise self_product: start
+[dbg    1926.7 ms] [colw] start
+[dbg    1927.6 ms] [colw] h2d
+[dbg    1928.7 ms] [colw] csc
+[dbg    1928.8 ms] [colw] count
+[dbg    1928.8 ms] [colw] scan
+[dbg    1930.4 ms] [colw] expand
+[dbg    1937.0 ms] [colw] sort
+[dbg    1937.9 ms] [colw] reduce
+[dbg    1947.2 ms] [colw] final
+[dbg    1947.3 ms] [colw] pack
+[dbg    2070.0 ms] [colw] d2h
+[dbg    2071.2 ms] T6 colwise self_product: done (C_nnz=30492154)
+[dbg    2095.4 ms] T7 inner self_product: start
+[dbg    2095.4 ms] [inner] start
+[dbg    2098.5 ms] [inner] h2d
+[dbg    2099.4 ms] [inner] csc
+[dbg    2099.5 ms] [inner] count
+[dbg    2099.5 ms] [inner] scan
+[dbg    2100.9 ms] [inner] expand
+[dbg    2107.7 ms] [inner] sort
+[dbg    2108.6 ms] [inner] reduce
+[dbg    2117.8 ms] [inner] final
+[dbg    2128.4 ms] [inner] numeric
+[dbg    2128.7 ms] [inner] pack
+[dbg    2253.5 ms] [inner] d2h
+[dbg    2254.0 ms] T7 inner self_product: done (C_nnz=30492154)
+Reading matrix from ./data/rep/email-Enron.mtx...
+Input A: 36692 x 36692, nnz = 367662, sparsity = 99.97%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 36692 x 36692, nnz = 30492154, sparsity = 97.74%
+Time: 124.012 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 36692 x 36692, nnz = 30492154, sparsity = 97.74%
+Time: 136.488 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 36692 x 36692, nnz = 30492154, sparsity = 97.74%
+Time: 142.395 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 36692 x 36692, nnz = 30492154, sparsity = 97.74%
+Time: 144.531 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 36692 x 36692, nnz = 30492154, sparsity = 97.74%
+Time: 158.641 ms
+
+=== All tests completed ===
+Processing eurqsa ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.1 ms] CUDA context ready
+[dbg     485.2 ms] start read_matrix_market: ./data/rep/eurqsa.mtx
+[dbg     493.0 ms] read done: 7245 x 7245, nnz=46142
+[dbg     493.0 ms] [cu] start
+[dbg     500.9 ms] [cu] h2d (398120 B)
+[dbg     500.9 ms] cusparse: workEstimation begin
+[dbg     525.2 ms] [cu] workest (buf1=555535 B)
+[dbg     525.3 ms] cusparse: compute begin
+[dbg     526.1 ms] [cu] compute (buf2=10106095 B)
+[dbg     526.1 ms] cusparse: C size = 7245 x 7245, nnz=287297
+[dbg     526.3 ms] cusparse: copy begin
+[dbg     526.4 ms] [cu] copy
+[dbg     526.5 ms] [cu] pack
+[dbg     528.3 ms] self_product: C D2H begin (2327360 B)
+[dbg     528.5 ms] [cu] d2h
+[dbg     529.1 ms] [gust] start
+[dbg     529.3 ms] [gust] h2d
+[dbg     529.3 ms] ESC: count intermediates begin
+[dbg     531.0 ms] [gust] count
+[dbg     531.3 ms] [gust] scan
+[dbg     531.4 ms] ESC: expand begin (418410 intermediates)
+[dbg     531.5 ms] [gust] expand
+[dbg     531.5 ms] ESC: sort_by_key begin
+[dbg     532.0 ms] [gust] sort
+[dbg     532.1 ms] ESC: reduce_by_key begin
+[dbg     532.3 ms] [gust] reduce
+[dbg     532.7 ms] [gust] final
+[dbg     532.8 ms] [gust] pack
+[dbg     534.4 ms] [gust] d2h
+[dbg     535.1 ms] [outer] start
+[dbg     535.3 ms] [outer] h2d
+[dbg     536.9 ms] [outer] csc
+[dbg     536.9 ms] [outer] count
+[dbg     537.0 ms] [outer] scan
+[dbg     537.2 ms] [outer] expand
+[dbg     537.5 ms] [outer] sort
+[dbg     537.7 ms] [outer] reduce
+[dbg     538.0 ms] [outer] final
+[dbg     538.1 ms] [outer] pack
+[dbg     539.5 ms] [outer] d2h
+[dbg     540.3 ms] [colw] start
+[dbg     540.4 ms] [colw] h2d
+[dbg     540.6 ms] [colw] csc
+[dbg     540.6 ms] [colw] count
+[dbg     540.7 ms] [colw] scan
+[dbg     541.0 ms] [colw] expand
+[dbg     541.3 ms] [colw] sort
+[dbg     541.5 ms] [colw] reduce
+[dbg     541.8 ms] [colw] final
+[dbg     541.9 ms] [colw] pack
+[dbg     543.3 ms] [colw] d2h
+[dbg     544.1 ms] [inner] start
+[dbg     544.2 ms] [inner] h2d
+[dbg     544.3 ms] [inner] csc
+[dbg     544.3 ms] [inner] count
+[dbg     544.4 ms] [inner] scan
+[dbg     544.6 ms] [inner] expand
+[dbg     544.9 ms] [inner] sort
+[dbg     545.1 ms] [inner] reduce
+[dbg     545.4 ms] [inner] final
+[dbg     545.6 ms] [inner] numeric
+[dbg     545.7 ms] [inner] pack
+[dbg     547.1 ms] [inner] d2h
+[dbg     547.7 ms] warmup done
+[dbg     547.7 ms] T1 cuSPARSE self_product: start
+[dbg     547.7 ms] [cu] start
+[dbg     547.8 ms] [cu] h2d (398120 B)
+[dbg     547.8 ms] cusparse: workEstimation begin
+[dbg     547.9 ms] [cu] workest (buf1=555535 B)
+[dbg     547.9 ms] cusparse: compute begin
+[dbg     548.2 ms] [cu] compute (buf2=10106095 B)
+[dbg     548.2 ms] cusparse: C size = 7245 x 7245, nnz=287297
+[dbg     548.4 ms] cusparse: copy begin
+[dbg     548.4 ms] [cu] copy
+[dbg     548.5 ms] [cu] pack
+[dbg     549.9 ms] self_product: C D2H begin (2327360 B)
+[dbg     550.2 ms] [cu] d2h
+[dbg     550.4 ms] T1 cuSPARSE self_product: done (C_nnz=287297)
+[dbg     550.7 ms] T4 manual self_product: start
+[dbg     550.7 ms] [gust] start
+[dbg     550.8 ms] [gust] h2d
+[dbg     550.9 ms] ESC: count intermediates begin
+[dbg     550.9 ms] [gust] count
+[dbg     550.9 ms] [gust] scan
+[dbg     551.1 ms] ESC: expand begin (418410 intermediates)
+[dbg     551.2 ms] [gust] expand
+[dbg     551.2 ms] ESC: sort_by_key begin
+[dbg     551.5 ms] [gust] sort
+[dbg     551.6 ms] ESC: reduce_by_key begin
+[dbg     551.6 ms] [gust] reduce
+[dbg     552.0 ms] [gust] final
+[dbg     552.1 ms] [gust] pack
+[dbg     553.5 ms] [gust] d2h
+[dbg     553.8 ms] T4 manual self_product: done (C_nnz=287297)
+[dbg     554.1 ms] T5 outer self_product: start
+[dbg     554.1 ms] [outer] start
+[dbg     554.3 ms] [outer] h2d
+[dbg     554.4 ms] [outer] csc
+[dbg     554.4 ms] [outer] count
+[dbg     554.5 ms] [outer] scan
+[dbg     554.7 ms] [outer] expand
+[dbg     555.0 ms] [outer] sort
+[dbg     555.1 ms] [outer] reduce
+[dbg     555.4 ms] [outer] final
+[dbg     555.5 ms] [outer] pack
+[dbg     556.9 ms] [outer] d2h
+[dbg     557.3 ms] T5 outer self_product: done (C_nnz=287297)
+[dbg     557.6 ms] T6 colwise self_product: start
+[dbg     557.6 ms] [colw] start
+[dbg     557.8 ms] [colw] h2d
+[dbg     557.9 ms] [colw] csc
+[dbg     557.9 ms] [colw] count
+[dbg     558.0 ms] [colw] scan
+[dbg     558.2 ms] [colw] expand
+[dbg     558.5 ms] [colw] sort
+[dbg     558.7 ms] [colw] reduce
+[dbg     558.9 ms] [colw] final
+[dbg     559.0 ms] [colw] pack
+[dbg     560.4 ms] [colw] d2h
+[dbg     560.8 ms] T6 colwise self_product: done (C_nnz=287297)
+[dbg     561.1 ms] T7 inner self_product: start
+[dbg     561.2 ms] [inner] start
+[dbg     561.3 ms] [inner] h2d
+[dbg     561.4 ms] [inner] csc
+[dbg     561.5 ms] [inner] count
+[dbg     561.5 ms] [inner] scan
+[dbg     561.7 ms] [inner] expand
+[dbg     562.0 ms] [inner] sort
+[dbg     562.2 ms] [inner] reduce
+[dbg     562.5 ms] [inner] final
+[dbg     562.7 ms] [inner] numeric
+[dbg     562.8 ms] [inner] pack
+[dbg     564.3 ms] [inner] d2h
+[dbg     564.5 ms] T7 inner self_product: done (C_nnz=287297)
+Reading matrix from ./data/rep/eurqsa.mtx...
+Input A: 7245 x 7245, nnz = 46142, sparsity = 99.91%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 7245 x 7245, nnz = 287297, sparsity = 99.45%
+Time: 2.693 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 7245 x 7245, nnz = 287297, sparsity = 99.45%
+Time: 3.112 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 7245 x 7245, nnz = 287297, sparsity = 99.45%
+Time: 3.219 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 7245 x 7245, nnz = 287297, sparsity = 99.45%
+Time: 3.203 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 7245 x 7245, nnz = 287297, sparsity = 99.45%
+Time: 3.398 ms
+
+=== All tests completed ===
+Processing ex10hs ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     474.3 ms] CUDA context ready
+[dbg     474.5 ms] start read_matrix_market: ./data/rep/ex10hs.mtx
+[dbg     484.3 ms] read done: 2548 x 2548, nnz=57308
+[dbg     484.3 ms] [cu] start
+[dbg     491.3 ms] [cu] h2d (468660 B)
+[dbg     491.3 ms] cusparse: workEstimation begin
+[dbg     511.7 ms] [cu] workest (buf1=689527 B)
+[dbg     511.7 ms] cusparse: compute begin
+[dbg     512.7 ms] [cu] compute (buf2=38782311 B)
+[dbg     512.7 ms] cusparse: C size = 2548 x 2548, nnz=205230
+[dbg     512.8 ms] cusparse: copy begin
+[dbg     512.8 ms] [cu] copy
+[dbg     512.9 ms] [cu] pack
+[dbg     514.1 ms] self_product: C D2H begin (1652036 B)
+[dbg     514.2 ms] [cu] d2h
+[dbg     514.6 ms] [gust] start
+[dbg     514.8 ms] [gust] h2d
+[dbg     514.8 ms] ESC: count intermediates begin
+[dbg     515.9 ms] [gust] count
+[dbg     516.1 ms] [gust] scan
+[dbg     516.2 ms] ESC: expand begin (1614318 intermediates)
+[dbg     516.3 ms] [gust] expand
+[dbg     516.3 ms] ESC: sort_by_key begin
+[dbg     516.7 ms] [gust] sort
+[dbg     516.8 ms] ESC: reduce_by_key begin
+[dbg     517.0 ms] [gust] reduce
+[dbg     517.3 ms] [gust] final
+[dbg     517.4 ms] [gust] pack
+[dbg     518.4 ms] [gust] d2h
+[dbg     518.8 ms] [outer] start
+[dbg     518.9 ms] [outer] h2d
+[dbg     520.2 ms] [outer] csc
+[dbg     520.2 ms] [outer] count
+[dbg     520.2 ms] [outer] scan
+[dbg     520.4 ms] [outer] expand
+[dbg     520.8 ms] [outer] sort
+[dbg     520.9 ms] [outer] reduce
+[dbg     521.1 ms] [outer] final
+[dbg     521.2 ms] [outer] pack
+[dbg     522.1 ms] [outer] d2h
+[dbg     522.6 ms] [colw] start
+[dbg     522.7 ms] [colw] h2d
+[dbg     522.8 ms] [colw] csc
+[dbg     522.9 ms] [colw] count
+[dbg     522.9 ms] [colw] scan
+[dbg     523.2 ms] [colw] expand
+[dbg     523.6 ms] [colw] sort
+[dbg     523.7 ms] [colw] reduce
+[dbg     523.9 ms] [colw] final
+[dbg     524.0 ms] [colw] pack
+[dbg     525.0 ms] [colw] d2h
+[dbg     525.6 ms] [inner] start
+[dbg     525.7 ms] [inner] h2d
+[dbg     525.8 ms] [inner] csc
+[dbg     525.8 ms] [inner] count
+[dbg     525.9 ms] [inner] scan
+[dbg     526.1 ms] [inner] expand
+[dbg     526.4 ms] [inner] sort
+[dbg     526.6 ms] [inner] reduce
+[dbg     526.8 ms] [inner] final
+[dbg     527.0 ms] [inner] numeric
+[dbg     527.0 ms] [inner] pack
+[dbg     528.0 ms] [inner] d2h
+[dbg     528.4 ms] warmup done
+[dbg     528.5 ms] T1 cuSPARSE self_product: start
+[dbg     528.5 ms] [cu] start
+[dbg     528.6 ms] [cu] h2d (468660 B)
+[dbg     528.6 ms] cusparse: workEstimation begin
+[dbg     528.6 ms] [cu] workest (buf1=689527 B)
+[dbg     528.6 ms] cusparse: compute begin
+[dbg     529.1 ms] [cu] compute (buf2=38782311 B)
+[dbg     529.1 ms] cusparse: C size = 2548 x 2548, nnz=205230
+[dbg     529.2 ms] cusparse: copy begin
+[dbg     529.2 ms] [cu] copy
+[dbg     529.3 ms] [cu] pack
+[dbg     530.3 ms] self_product: C D2H begin (1652036 B)
+[dbg     530.4 ms] [cu] d2h
+[dbg     530.5 ms] T1 cuSPARSE self_product: done (C_nnz=205230)
+[dbg     530.7 ms] T4 manual self_product: start
+[dbg     530.7 ms] [gust] start
+[dbg     530.8 ms] [gust] h2d
+[dbg     530.8 ms] ESC: count intermediates begin
+[dbg     530.9 ms] [gust] count
+[dbg     530.9 ms] [gust] scan
+[dbg     531.1 ms] ESC: expand begin (1614318 intermediates)
+[dbg     531.1 ms] [gust] expand
+[dbg     531.1 ms] ESC: sort_by_key begin
+[dbg     531.5 ms] [gust] sort
+[dbg     531.6 ms] ESC: reduce_by_key begin
+[dbg     531.6 ms] [gust] reduce
+[dbg     531.9 ms] [gust] final
+[dbg     532.0 ms] [gust] pack
+[dbg     533.0 ms] [gust] d2h
+[dbg     533.1 ms] T4 manual self_product: done (C_nnz=205230)
+[dbg     533.4 ms] T5 outer self_product: start
+[dbg     533.4 ms] [outer] start
+[dbg     533.5 ms] [outer] h2d
+[dbg     533.6 ms] [outer] csc
+[dbg     533.6 ms] [outer] count
+[dbg     533.7 ms] [outer] scan
+[dbg     533.8 ms] [outer] expand
+[dbg     534.2 ms] [outer] sort
+[dbg     534.4 ms] [outer] reduce
+[dbg     534.6 ms] [outer] final
+[dbg     534.7 ms] [outer] pack
+[dbg     535.6 ms] [outer] d2h
+[dbg     535.9 ms] T5 outer self_product: done (C_nnz=205230)
+[dbg     536.2 ms] T6 colwise self_product: start
+[dbg     536.2 ms] [colw] start
+[dbg     536.3 ms] [colw] h2d
+[dbg     536.4 ms] [colw] csc
+[dbg     536.4 ms] [colw] count
+[dbg     536.5 ms] [colw] scan
+[dbg     536.7 ms] [colw] expand
+[dbg     537.0 ms] [colw] sort
+[dbg     537.2 ms] [colw] reduce
+[dbg     537.4 ms] [colw] final
+[dbg     537.5 ms] [colw] pack
+[dbg     538.4 ms] [colw] d2h
+[dbg     538.7 ms] T6 colwise self_product: done (C_nnz=205230)
+[dbg     538.9 ms] T7 inner self_product: start
+[dbg     538.9 ms] [inner] start
+[dbg     539.1 ms] [inner] h2d
+[dbg     539.2 ms] [inner] csc
+[dbg     539.2 ms] [inner] count
+[dbg     539.2 ms] [inner] scan
+[dbg     539.4 ms] [inner] expand
+[dbg     539.8 ms] [inner] sort
+[dbg     539.9 ms] [inner] reduce
+[dbg     540.1 ms] [inner] final
+[dbg     540.3 ms] [inner] numeric
+[dbg     540.4 ms] [inner] pack
+[dbg     541.3 ms] [inner] d2h
+[dbg     541.5 ms] T7 inner self_product: done (C_nnz=205230)
+Reading matrix from ./data/rep/ex10hs.mtx...
+Input A: 2548 x 2548, nnz = 57308, sparsity = 99.12%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 2548 x 2548, nnz = 205230, sparsity = 96.84%
+Time: 2.019 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 2548 x 2548, nnz = 205230, sparsity = 96.84%
+Time: 2.404 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 2548 x 2548, nnz = 205230, sparsity = 96.84%
+Time: 2.511 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 2548 x 2548, nnz = 205230, sparsity = 96.84%
+Time: 2.515 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 2548 x 2548, nnz = 205230, sparsity = 96.84%
+Time: 2.531 ms
+
+=== All tests completed ===
+Processing ex9 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.5 ms] CUDA context ready
+[dbg     485.6 ms] start read_matrix_market: ./data/rep/ex9.mtx
+[dbg     502.0 ms] read done: 3363 x 3363, nnz=99471
+[dbg     502.0 ms] [cu] start
+[dbg     510.1 ms] [cu] h2d (809224 B)
+[dbg     510.1 ms] cusparse: workEstimation begin
+[dbg     537.8 ms] [cu] workest (buf1=1196251 B)
+[dbg     537.8 ms] cusparse: compute begin
+[dbg     539.2 ms] [cu] compute (buf2=81388383 B)
+[dbg     539.2 ms] cusparse: C size = 3363 x 3363, nnz=373815
+[dbg     539.4 ms] cusparse: copy begin
+[dbg     539.5 ms] [cu] copy
+[dbg     539.6 ms] [cu] pack
+[dbg     541.7 ms] self_product: C D2H begin (3003976 B)
+[dbg     542.0 ms] [cu] d2h
+[dbg     542.7 ms] [gust] start
+[dbg     542.9 ms] [gust] h2d
+[dbg     542.9 ms] ESC: count intermediates begin
+[dbg     544.4 ms] [gust] count
+[dbg     544.5 ms] [gust] scan
+[dbg     544.8 ms] ESC: expand begin (3388035 intermediates)
+[dbg     544.8 ms] [gust] expand
+[dbg     544.8 ms] ESC: sort_by_key begin
+[dbg     545.6 ms] [gust] sort
+[dbg     545.8 ms] ESC: reduce_by_key begin
+[dbg     546.0 ms] [gust] reduce
+[dbg     546.5 ms] [gust] final
+[dbg     546.6 ms] [gust] pack
+[dbg     548.5 ms] [gust] d2h
+[dbg     549.1 ms] [outer] start
+[dbg     549.4 ms] [outer] h2d
+[dbg     551.0 ms] [outer] csc
+[dbg     551.1 ms] [outer] count
+[dbg     551.1 ms] [outer] scan
+[dbg     551.4 ms] [outer] expand
+[dbg     552.0 ms] [outer] sort
+[dbg     552.2 ms] [outer] reduce
+[dbg     552.6 ms] [outer] final
+[dbg     552.7 ms] [outer] pack
+[dbg     554.4 ms] [outer] d2h
+[dbg     555.2 ms] [colw] start
+[dbg     555.4 ms] [colw] h2d
+[dbg     555.6 ms] [colw] csc
+[dbg     555.7 ms] [colw] count
+[dbg     555.7 ms] [colw] scan
+[dbg     556.2 ms] [colw] expand
+[dbg     556.9 ms] [colw] sort
+[dbg     557.0 ms] [colw] reduce
+[dbg     557.4 ms] [colw] final
+[dbg     557.5 ms] [colw] pack
+[dbg     559.3 ms] [colw] d2h
+[dbg     560.1 ms] [inner] start
+[dbg     560.4 ms] [inner] h2d
+[dbg     560.5 ms] [inner] csc
+[dbg     560.5 ms] [inner] count
+[dbg     560.6 ms] [inner] scan
+[dbg     560.9 ms] [inner] expand
+[dbg     561.6 ms] [inner] sort
+[dbg     561.8 ms] [inner] reduce
+[dbg     562.1 ms] [inner] final
+[dbg     562.3 ms] [inner] numeric
+[dbg     562.4 ms] [inner] pack
+[dbg     564.1 ms] [inner] d2h
+[dbg     564.7 ms] warmup done
+[dbg     564.7 ms] T1 cuSPARSE self_product: start
+[dbg     564.7 ms] [cu] start
+[dbg     565.0 ms] [cu] h2d (809224 B)
+[dbg     565.0 ms] cusparse: workEstimation begin
+[dbg     565.1 ms] [cu] workest (buf1=1196251 B)
+[dbg     565.1 ms] cusparse: compute begin
+[dbg     565.8 ms] [cu] compute (buf2=81388383 B)
+[dbg     565.8 ms] cusparse: C size = 3363 x 3363, nnz=373815
+[dbg     566.0 ms] cusparse: copy begin
+[dbg     566.0 ms] [cu] copy
+[dbg     566.1 ms] [cu] pack
+[dbg     567.6 ms] self_product: C D2H begin (3003976 B)
+[dbg     567.9 ms] [cu] d2h
+[dbg     568.0 ms] T1 cuSPARSE self_product: done (C_nnz=373815)
+[dbg     568.4 ms] T4 manual self_product: start
+[dbg     568.4 ms] [gust] start
+[dbg     568.6 ms] [gust] h2d
+[dbg     568.6 ms] ESC: count intermediates begin
+[dbg     568.7 ms] [gust] count
+[dbg     568.7 ms] [gust] scan
+[dbg     569.0 ms] ESC: expand begin (3388035 intermediates)
+[dbg     569.0 ms] [gust] expand
+[dbg     569.0 ms] ESC: sort_by_key begin
+[dbg     569.7 ms] [gust] sort
+[dbg     569.8 ms] ESC: reduce_by_key begin
+[dbg     569.9 ms] [gust] reduce
+[dbg     570.3 ms] [gust] final
+[dbg     570.4 ms] [gust] pack
+[dbg     571.9 ms] [gust] d2h
+[dbg     572.2 ms] T4 manual self_product: done (C_nnz=373815)
+[dbg     572.6 ms] T5 outer self_product: start
+[dbg     572.6 ms] [outer] start
+[dbg     572.8 ms] [outer] h2d
+[dbg     572.9 ms] [outer] csc
+[dbg     572.9 ms] [outer] count
+[dbg     573.0 ms] [outer] scan
+[dbg     573.2 ms] [outer] expand
+[dbg     573.9 ms] [outer] sort
+[dbg     574.1 ms] [outer] reduce
+[dbg     574.4 ms] [outer] final
+[dbg     574.5 ms] [outer] pack
+[dbg     576.0 ms] [outer] d2h
+[dbg     576.4 ms] T5 outer self_product: done (C_nnz=373815)
+[dbg     576.8 ms] T6 colwise self_product: start
+[dbg     576.8 ms] [colw] start
+[dbg     577.0 ms] [colw] h2d
+[dbg     577.2 ms] [colw] csc
+[dbg     577.2 ms] [colw] count
+[dbg     577.2 ms] [colw] scan
+[dbg     577.5 ms] [colw] expand
+[dbg     578.2 ms] [colw] sort
+[dbg     578.3 ms] [colw] reduce
+[dbg     578.7 ms] [colw] final
+[dbg     578.8 ms] [colw] pack
+[dbg     580.3 ms] [colw] d2h
+[dbg     580.7 ms] T6 colwise self_product: done (C_nnz=373815)
+[dbg     581.1 ms] T7 inner self_product: start
+[dbg     581.1 ms] [inner] start
+[dbg     581.3 ms] [inner] h2d
+[dbg     581.5 ms] [inner] csc
+[dbg     581.5 ms] [inner] count
+[dbg     581.5 ms] [inner] scan
+[dbg     581.8 ms] [inner] expand
+[dbg     582.5 ms] [inner] sort
+[dbg     582.6 ms] [inner] reduce
+[dbg     583.0 ms] [inner] final
+[dbg     583.2 ms] [inner] numeric
+[dbg     583.3 ms] [inner] pack
+[dbg     584.8 ms] [inner] d2h
+[dbg     585.0 ms] T7 inner self_product: done (C_nnz=373815)
+Reading matrix from ./data/rep/ex9.mtx...
+Input A: 3363 x 3363, nnz = 99471, sparsity = 99.12%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 3363 x 3363, nnz = 373815, sparsity = 96.69%
+Time: 3.276 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 3363 x 3363, nnz = 373815, sparsity = 96.69%
+Time: 3.792 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 3363 x 3363, nnz = 373815, sparsity = 96.69%
+Time: 3.888 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 3363 x 3363, nnz = 373815, sparsity = 96.69%
+Time: 3.928 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 3363 x 3363, nnz = 373815, sparsity = 96.69%
+Time: 3.950 ms
+
+=== All tests completed ===
+Processing filter2D ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     476.3 ms] CUDA context ready
+[dbg     476.5 ms] start read_matrix_market: ./data/rep/filter2D.mtx
+[dbg     478.7 ms] read done: 1668 x 1668, nnz=10750
+[dbg     478.7 ms] [cu] start
+[dbg     486.8 ms] [cu] h2d (92676 B)
+[dbg     486.9 ms] cusparse: workEstimation begin
+[dbg     512.9 ms] [cu] workest (buf1=130063 B)
+[dbg     512.9 ms] cusparse: compute begin
+[dbg     513.5 ms] [cu] compute (buf2=1742095 B)
+[dbg     513.5 ms] cusparse: C size = 1668 x 1668, nnz=28176
+[dbg     513.7 ms] cusparse: copy begin
+[dbg     513.8 ms] [cu] copy
+[dbg     513.8 ms] [cu] pack
+[dbg     515.2 ms] self_product: C D2H begin (232084 B)
+[dbg     515.3 ms] [cu] d2h
+[dbg     515.8 ms] [gust] start
+[dbg     515.9 ms] [gust] h2d
+[dbg     515.9 ms] ESC: count intermediates begin
+[dbg     517.3 ms] [gust] count
+[dbg     517.6 ms] [gust] scan
+[dbg     517.6 ms] ESC: expand begin (71766 intermediates)
+[dbg     517.6 ms] [gust] expand
+[dbg     517.6 ms] ESC: sort_by_key begin
+[dbg     517.9 ms] [gust] sort
+[dbg     517.9 ms] ESC: reduce_by_key begin
+[dbg     518.1 ms] [gust] reduce
+[dbg     518.1 ms] [gust] final
+[dbg     518.2 ms] [gust] pack
+[dbg     519.4 ms] [gust] d2h
+[dbg     519.8 ms] [outer] start
+[dbg     520.0 ms] [outer] h2d
+[dbg     521.5 ms] [outer] csc
+[dbg     521.5 ms] [outer] count
+[dbg     521.6 ms] [outer] scan
+[dbg     521.6 ms] [outer] expand
+[dbg     521.8 ms] [outer] sort
+[dbg     521.8 ms] [outer] reduce
+[dbg     522.0 ms] [outer] final
+[dbg     522.0 ms] [outer] pack
+[dbg     523.1 ms] [outer] d2h
+[dbg     523.5 ms] [colw] start
+[dbg     523.6 ms] [colw] h2d
+[dbg     523.7 ms] [colw] csc
+[dbg     523.8 ms] [colw] count
+[dbg     523.8 ms] [colw] scan
+[dbg     523.9 ms] [colw] expand
+[dbg     524.0 ms] [colw] sort
+[dbg     524.0 ms] [colw] reduce
+[dbg     524.2 ms] [colw] final
+[dbg     524.2 ms] [colw] pack
+[dbg     525.1 ms] [colw] d2h
+[dbg     525.5 ms] [inner] start
+[dbg     525.6 ms] [inner] h2d
+[dbg     525.7 ms] [inner] csc
+[dbg     525.8 ms] [inner] count
+[dbg     525.8 ms] [inner] scan
+[dbg     525.8 ms] [inner] expand
+[dbg     525.9 ms] [inner] sort
+[dbg     526.0 ms] [inner] reduce
+[dbg     526.1 ms] [inner] final
+[dbg     526.2 ms] [inner] numeric
+[dbg     526.2 ms] [inner] pack
+[dbg     527.0 ms] [inner] d2h
+[dbg     527.4 ms] warmup done
+[dbg     527.4 ms] T1 cuSPARSE self_product: start
+[dbg     527.4 ms] [cu] start
+[dbg     527.5 ms] [cu] h2d (92676 B)
+[dbg     527.5 ms] cusparse: workEstimation begin
+[dbg     527.6 ms] [cu] workest (buf1=130063 B)
+[dbg     527.6 ms] cusparse: compute begin
+[dbg     527.8 ms] [cu] compute (buf2=1742095 B)
+[dbg     527.8 ms] cusparse: C size = 1668 x 1668, nnz=28176
+[dbg     528.0 ms] cusparse: copy begin
+[dbg     528.0 ms] [cu] copy
+[dbg     528.0 ms] [cu] pack
+[dbg     528.9 ms] self_product: C D2H begin (232084 B)
+[dbg     529.0 ms] [cu] d2h
+[dbg     529.1 ms] T1 cuSPARSE self_product: done (C_nnz=28176)
+[dbg     529.4 ms] T4 manual self_product: start
+[dbg     529.4 ms] [gust] start
+[dbg     529.5 ms] [gust] h2d
+[dbg     529.5 ms] ESC: count intermediates begin
+[dbg     529.5 ms] [gust] count
+[dbg     529.6 ms] [gust] scan
+[dbg     529.6 ms] ESC: expand begin (71766 intermediates)
+[dbg     529.6 ms] [gust] expand
+[dbg     529.6 ms] ESC: sort_by_key begin
+[dbg     529.7 ms] [gust] sort
+[dbg     529.8 ms] ESC: reduce_by_key begin
+[dbg     529.8 ms] [gust] reduce
+[dbg     529.8 ms] [gust] final
+[dbg     529.9 ms] [gust] pack
+[dbg     530.7 ms] [gust] d2h
+[dbg     530.8 ms] T4 manual self_product: done (C_nnz=28176)
+[dbg     531.1 ms] T5 outer self_product: start
+[dbg     531.1 ms] [outer] start
+[dbg     531.2 ms] [outer] h2d
+[dbg     531.3 ms] [outer] csc
+[dbg     531.3 ms] [outer] count
+[dbg     531.4 ms] [outer] scan
+[dbg     531.4 ms] [outer] expand
+[dbg     531.5 ms] [outer] sort
+[dbg     531.6 ms] [outer] reduce
+[dbg     531.7 ms] [outer] final
+[dbg     531.8 ms] [outer] pack
+[dbg     532.7 ms] [outer] d2h
+[dbg     532.9 ms] T5 outer self_product: done (C_nnz=28176)
+[dbg     533.2 ms] T6 colwise self_product: start
+[dbg     533.2 ms] [colw] start
+[dbg     533.3 ms] [colw] h2d
+[dbg     533.4 ms] [colw] csc
+[dbg     533.4 ms] [colw] count
+[dbg     533.4 ms] [colw] scan
+[dbg     533.5 ms] [colw] expand
+[dbg     533.6 ms] [colw] sort
+[dbg     533.6 ms] [colw] reduce
+[dbg     533.9 ms] [colw] final
+[dbg     533.9 ms] [colw] pack
+[dbg     534.7 ms] [colw] d2h
+[dbg     534.9 ms] T6 colwise self_product: done (C_nnz=28176)
+[dbg     535.2 ms] T7 inner self_product: start
+[dbg     535.2 ms] [inner] start
+[dbg     535.3 ms] [inner] h2d
+[dbg     535.4 ms] [inner] csc
+[dbg     535.4 ms] [inner] count
+[dbg     535.4 ms] [inner] scan
+[dbg     535.5 ms] [inner] expand
+[dbg     535.6 ms] [inner] sort
+[dbg     535.6 ms] [inner] reduce
+[dbg     535.8 ms] [inner] final
+[dbg     535.8 ms] [inner] numeric
+[dbg     535.8 ms] [inner] pack
+[dbg     536.6 ms] [inner] d2h
+[dbg     536.8 ms] T7 inner self_product: done (C_nnz=28176)
+Reading matrix from ./data/rep/filter2D.mtx...
+Input A: 1668 x 1668, nnz = 10750, sparsity = 99.61%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 1668 x 1668, nnz = 28176, sparsity = 98.99%
+Time: 1.703 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 1668 x 1668, nnz = 28176, sparsity = 98.99%
+Time: 1.397 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 1668 x 1668, nnz = 28176, sparsity = 98.99%
+Time: 1.788 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 1668 x 1668, nnz = 28176, sparsity = 98.99%
+Time: 1.732 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 1668 x 1668, nnz = 28176, sparsity = 98.99%
+Time: 1.639 ms
+
+=== All tests completed ===
+Processing GD01_b ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.9 ms] CUDA context ready
+[dbg     486.1 ms] start read_matrix_market: ./data/rep/GD01_b.mtx
+[dbg     486.1 ms] read done: 18 x 18, nnz=37
+[dbg     486.1 ms] [cu] start
+[dbg     494.1 ms] [cu] h2d (372 B)
+[dbg     494.1 ms] cusparse: workEstimation begin
+[dbg     519.7 ms] [cu] workest (buf1=1507 B)
+[dbg     519.7 ms] cusparse: compute begin
+[dbg     520.4 ms] [cu] compute (buf2=6991 B)
+[dbg     520.4 ms] cusparse: C size = 18 x 18, nnz=64
+[dbg     520.4 ms] cusparse: copy begin
+[dbg     520.5 ms] [cu] copy
+[dbg     520.5 ms] [cu] pack
+[dbg     522.0 ms] self_product: C D2H begin (588 B)
+[dbg     522.0 ms] [cu] d2h
+[dbg     522.5 ms] [gust] start
+[dbg     522.6 ms] [gust] h2d
+[dbg     522.6 ms] ESC: count intermediates begin
+[dbg     524.3 ms] [gust] count
+[dbg     524.5 ms] [gust] scan
+[dbg     524.5 ms] ESC: expand begin (77 intermediates)
+[dbg     524.6 ms] [gust] expand
+[dbg     524.6 ms] ESC: sort_by_key begin
+[dbg     524.7 ms] [gust] sort
+[dbg     524.7 ms] ESC: reduce_by_key begin
+[dbg     524.8 ms] [gust] reduce
+[dbg     524.9 ms] [gust] final
+[dbg     524.9 ms] [gust] pack
+[dbg     526.2 ms] [gust] d2h
+[dbg     526.6 ms] [outer] start
+[dbg     526.7 ms] [outer] h2d
+[dbg     528.4 ms] [outer] csc
+[dbg     528.4 ms] [outer] count
+[dbg     528.5 ms] [outer] scan
+[dbg     528.5 ms] [outer] expand
+[dbg     528.5 ms] [outer] sort
+[dbg     528.6 ms] [outer] reduce
+[dbg     528.7 ms] [outer] final
+[dbg     528.7 ms] [outer] pack
+[dbg     529.7 ms] [outer] d2h
+[dbg     530.1 ms] [colw] start
+[dbg     530.2 ms] [colw] h2d
+[dbg     530.3 ms] [colw] csc
+[dbg     530.3 ms] [colw] count
+[dbg     530.4 ms] [colw] scan
+[dbg     530.4 ms] [colw] expand
+[dbg     530.5 ms] [colw] sort
+[dbg     530.5 ms] [colw] reduce
+[dbg     530.5 ms] [colw] final
+[dbg     530.6 ms] [colw] pack
+[dbg     531.4 ms] [colw] d2h
+[dbg     531.9 ms] [inner] start
+[dbg     531.9 ms] [inner] h2d
+[dbg     532.0 ms] [inner] csc
+[dbg     532.0 ms] [inner] count
+[dbg     532.1 ms] [inner] scan
+[dbg     532.1 ms] [inner] expand
+[dbg     532.2 ms] [inner] sort
+[dbg     532.2 ms] [inner] reduce
+[dbg     532.2 ms] [inner] final
+[dbg     532.3 ms] [inner] numeric
+[dbg     532.3 ms] [inner] pack
+[dbg     533.1 ms] [inner] d2h
+[dbg     533.5 ms] warmup done
+[dbg     533.5 ms] T1 cuSPARSE self_product: start
+[dbg     533.5 ms] [cu] start
+[dbg     533.6 ms] [cu] h2d (372 B)
+[dbg     533.6 ms] cusparse: workEstimation begin
+[dbg     533.7 ms] [cu] workest (buf1=1507 B)
+[dbg     533.7 ms] cusparse: compute begin
+[dbg     533.9 ms] [cu] compute (buf2=6991 B)
+[dbg     533.9 ms] cusparse: C size = 18 x 18, nnz=64
+[dbg     533.9 ms] cusparse: copy begin
+[dbg     533.9 ms] [cu] copy
+[dbg     534.0 ms] [cu] pack
+[dbg     534.8 ms] self_product: C D2H begin (588 B)
+[dbg     534.8 ms] [cu] d2h
+[dbg     534.9 ms] T1 cuSPARSE self_product: done (C_nnz=64)
+[dbg     535.1 ms] T4 manual self_product: start
+[dbg     535.1 ms] [gust] start
+[dbg     535.2 ms] [gust] h2d
+[dbg     535.2 ms] ESC: count intermediates begin
+[dbg     535.3 ms] [gust] count
+[dbg     535.3 ms] [gust] scan
+[dbg     535.3 ms] ESC: expand begin (77 intermediates)
+[dbg     535.3 ms] [gust] expand
+[dbg     535.3 ms] ESC: sort_by_key begin
+[dbg     535.4 ms] [gust] sort
+[dbg     535.4 ms] ESC: reduce_by_key begin
+[dbg     535.4 ms] [gust] reduce
+[dbg     535.5 ms] [gust] final
+[dbg     535.5 ms] [gust] pack
+[dbg     536.3 ms] [gust] d2h
+[dbg     536.4 ms] T4 manual self_product: done (C_nnz=64)
+[dbg     536.7 ms] T5 outer self_product: start
+[dbg     536.7 ms] [outer] start
+[dbg     536.8 ms] [outer] h2d
+[dbg     536.8 ms] [outer] csc
+[dbg     536.9 ms] [outer] count
+[dbg     536.9 ms] [outer] scan
+[dbg     536.9 ms] [outer] expand
+[dbg     537.0 ms] [outer] sort
+[dbg     537.0 ms] [outer] reduce
+[dbg     537.1 ms] [outer] final
+[dbg     537.1 ms] [outer] pack
+[dbg     537.9 ms] [outer] d2h
+[dbg     538.0 ms] T5 outer self_product: done (C_nnz=64)
+[dbg     538.3 ms] T6 colwise self_product: start
+[dbg     538.3 ms] [colw] start
+[dbg     538.4 ms] [colw] h2d
+[dbg     538.5 ms] [colw] csc
+[dbg     538.5 ms] [colw] count
+[dbg     538.6 ms] [colw] scan
+[dbg     538.6 ms] [colw] expand
+[dbg     538.6 ms] [colw] sort
+[dbg     538.7 ms] [colw] reduce
+[dbg     538.7 ms] [colw] final
+[dbg     538.7 ms] [colw] pack
+[dbg     539.5 ms] [colw] d2h
+[dbg     539.7 ms] T6 colwise self_product: done (C_nnz=64)
+[dbg     539.9 ms] T7 inner self_product: start
+[dbg     539.9 ms] [inner] start
+[dbg     540.0 ms] [inner] h2d
+[dbg     540.1 ms] [inner] csc
+[dbg     540.1 ms] [inner] count
+[dbg     540.2 ms] [inner] scan
+[dbg     540.2 ms] [inner] expand
+[dbg     540.2 ms] [inner] sort
+[dbg     540.3 ms] [inner] reduce
+[dbg     540.3 ms] [inner] final
+[dbg     540.3 ms] [inner] numeric
+[dbg     540.4 ms] [inner] pack
+[dbg     541.2 ms] [inner] d2h
+[dbg     541.3 ms] T7 inner self_product: done (C_nnz=64)
+Reading matrix from ./data/rep/GD01_b.mtx...
+Input A: 18 x 18, nnz = 37, sparsity = 88.58%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 18 x 18, nnz = 64, sparsity = 80.25%
+Time: 1.341 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 18 x 18, nnz = 64, sparsity = 80.25%
+Time: 1.241 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 18 x 18, nnz = 64, sparsity = 80.25%
+Time: 1.349 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 18 x 18, nnz = 64, sparsity = 80.25%
+Time: 1.321 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 18 x 18, nnz = 64, sparsity = 80.25%
+Time: 1.361 ms
+
+=== All tests completed ===
+Processing GD96_a ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     468.9 ms] CUDA context ready
+[dbg     469.1 ms] start read_matrix_market: ./data/rep/GD96_a.mtx
+[dbg     469.5 ms] read done: 1096 x 1096, nnz=1677
+[dbg     469.5 ms] [cu] start
+[dbg     477.8 ms] [cu] h2d (17804 B)
+[dbg     477.9 ms] cusparse: workEstimation begin
+[dbg     502.6 ms] [cu] workest (buf1=21187 B)
+[dbg     502.6 ms] cusparse: compute begin
+[dbg     503.2 ms] [cu] compute (buf2=67379 B)
+[dbg     503.2 ms] cusparse: C size = 1096 x 1096, nnz=2137
+[dbg     503.3 ms] cusparse: copy begin
+[dbg     503.4 ms] [cu] copy
+[dbg     503.4 ms] [cu] pack
+[dbg     504.9 ms] self_product: C D2H begin (21484 B)
+[dbg     504.9 ms] [cu] d2h
+[dbg     505.4 ms] [gust] start
+[dbg     505.5 ms] [gust] h2d
+[dbg     505.5 ms] ESC: count intermediates begin
+[dbg     507.1 ms] [gust] count
+[dbg     507.4 ms] [gust] scan
+[dbg     507.4 ms] ESC: expand begin (2175 intermediates)
+[dbg     507.5 ms] [gust] expand
+[dbg     507.5 ms] ESC: sort_by_key begin
+[dbg     507.5 ms] [gust] sort
+[dbg     507.6 ms] ESC: reduce_by_key begin
+[dbg     507.7 ms] [gust] reduce
+[dbg     507.8 ms] [gust] final
+[dbg     507.8 ms] [gust] pack
+[dbg     509.1 ms] [gust] d2h
+[dbg     509.5 ms] [outer] start
+[dbg     509.6 ms] [outer] h2d
+[dbg     511.2 ms] [outer] csc
+[dbg     511.3 ms] [outer] count
+[dbg     511.3 ms] [outer] scan
+[dbg     511.4 ms] [outer] expand
+[dbg     511.4 ms] [outer] sort
+[dbg     511.4 ms] [outer] reduce
+[dbg     511.5 ms] [outer] final
+[dbg     511.5 ms] [outer] pack
+[dbg     512.6 ms] [outer] d2h
+[dbg     513.0 ms] [colw] start
+[dbg     513.1 ms] [colw] h2d
+[dbg     513.2 ms] [colw] csc
+[dbg     513.2 ms] [colw] count
+[dbg     513.3 ms] [colw] scan
+[dbg     513.3 ms] [colw] expand
+[dbg     513.4 ms] [colw] sort
+[dbg     513.4 ms] [colw] reduce
+[dbg     513.5 ms] [colw] final
+[dbg     513.5 ms] [colw] pack
+[dbg     514.4 ms] [colw] d2h
+[dbg     514.8 ms] [inner] start
+[dbg     514.9 ms] [inner] h2d
+[dbg     514.9 ms] [inner] csc
+[dbg     515.0 ms] [inner] count
+[dbg     515.0 ms] [inner] scan
+[dbg     515.0 ms] [inner] expand
+[dbg     515.1 ms] [inner] sort
+[dbg     515.1 ms] [inner] reduce
+[dbg     515.2 ms] [inner] final
+[dbg     515.3 ms] [inner] numeric
+[dbg     515.3 ms] [inner] pack
+[dbg     516.1 ms] [inner] d2h
+[dbg     516.4 ms] warmup done
+[dbg     516.5 ms] T1 cuSPARSE self_product: start
+[dbg     516.5 ms] [cu] start
+[dbg     516.6 ms] [cu] h2d (17804 B)
+[dbg     516.6 ms] cusparse: workEstimation begin
+[dbg     516.6 ms] [cu] workest (buf1=21187 B)
+[dbg     516.6 ms] cusparse: compute begin
+[dbg     516.8 ms] [cu] compute (buf2=67379 B)
+[dbg     516.8 ms] cusparse: C size = 1096 x 1096, nnz=2137
+[dbg     516.8 ms] cusparse: copy begin
+[dbg     516.9 ms] [cu] copy
+[dbg     516.9 ms] [cu] pack
+[dbg     517.7 ms] self_product: C D2H begin (21484 B)
+[dbg     517.7 ms] [cu] d2h
+[dbg     517.8 ms] T1 cuSPARSE self_product: done (C_nnz=2137)
+[dbg     518.1 ms] T4 manual self_product: start
+[dbg     518.1 ms] [gust] start
+[dbg     518.2 ms] [gust] h2d
+[dbg     518.2 ms] ESC: count intermediates begin
+[dbg     518.2 ms] [gust] count
+[dbg     518.3 ms] [gust] scan
+[dbg     518.3 ms] ESC: expand begin (2175 intermediates)
+[dbg     518.3 ms] [gust] expand
+[dbg     518.3 ms] ESC: sort_by_key begin
+[dbg     518.4 ms] [gust] sort
+[dbg     518.4 ms] ESC: reduce_by_key begin
+[dbg     518.4 ms] [gust] reduce
+[dbg     518.5 ms] [gust] final
+[dbg     518.5 ms] [gust] pack
+[dbg     519.3 ms] [gust] d2h
+[dbg     519.4 ms] T4 manual self_product: done (C_nnz=2137)
+[dbg     519.6 ms] T5 outer self_product: start
+[dbg     519.6 ms] [outer] start
+[dbg     519.7 ms] [outer] h2d
+[dbg     519.8 ms] [outer] csc
+[dbg     519.8 ms] [outer] count
+[dbg     519.9 ms] [outer] scan
+[dbg     519.9 ms] [outer] expand
+[dbg     519.9 ms] [outer] sort
+[dbg     520.0 ms] [outer] reduce
+[dbg     520.0 ms] [outer] final
+[dbg     520.1 ms] [outer] pack
+[dbg     520.9 ms] [outer] d2h
+[dbg     521.0 ms] T5 outer self_product: done (C_nnz=2137)
+[dbg     521.3 ms] T6 colwise self_product: start
+[dbg     521.3 ms] [colw] start
+[dbg     521.4 ms] [colw] h2d
+[dbg     521.5 ms] [colw] csc
+[dbg     521.5 ms] [colw] count
+[dbg     521.6 ms] [colw] scan
+[dbg     521.6 ms] [colw] expand
+[dbg     521.6 ms] [colw] sort
+[dbg     521.7 ms] [colw] reduce
+[dbg     521.7 ms] [colw] final
+[dbg     521.8 ms] [colw] pack
+[dbg     522.5 ms] [colw] d2h
+[dbg     522.7 ms] T6 colwise self_product: done (C_nnz=2137)
+[dbg     522.9 ms] T7 inner self_product: start
+[dbg     523.0 ms] [inner] start
+[dbg     523.0 ms] [inner] h2d
+[dbg     523.1 ms] [inner] csc
+[dbg     523.2 ms] [inner] count
+[dbg     523.2 ms] [inner] scan
+[dbg     523.2 ms] [inner] expand
+[dbg     523.3 ms] [inner] sort
+[dbg     523.3 ms] [inner] reduce
+[dbg     523.4 ms] [inner] final
+[dbg     523.4 ms] [inner] numeric
+[dbg     523.4 ms] [inner] pack
+[dbg     524.2 ms] [inner] d2h
+[dbg     524.3 ms] T7 inner self_product: done (C_nnz=2137)
+Reading matrix from ./data/rep/GD96_a.mtx...
+Input A: 1096 x 1096, nnz = 1677, sparsity = 99.86%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 1096 x 1096, nnz = 2137, sparsity = 99.82%
+Time: 1.369 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 1096 x 1096, nnz = 2137, sparsity = 99.82%
+Time: 1.263 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 1096 x 1096, nnz = 2137, sparsity = 99.82%
+Time: 1.343 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 1096 x 1096, nnz = 2137, sparsity = 99.82%
+Time: 1.363 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 1096 x 1096, nnz = 2137, sparsity = 99.82%
+Time: 1.370 ms
+
+=== All tests completed ===
+Processing hangGlider_3 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.4 ms] CUDA context ready
+[dbg     485.6 ms] start read_matrix_market: ./data/rep/hangGlider_3.mtx
+[dbg     503.9 ms] read done: 10260 x 10260, nnz=92703
+[dbg     503.9 ms] [cu] start
+[dbg     511.6 ms] [cu] h2d (782668 B)
+[dbg     511.6 ms] cusparse: workEstimation begin
+[dbg     535.7 ms] [cu] workest (buf1=1115035 B)
+[dbg     535.7 ms] cusparse: compute begin
+[dbg     545.3 ms] [cu] compute (buf2=2015331711 B)
+[dbg     545.3 ms] cusparse: C size = 10260 x 10260, nnz=83182632
+[dbg     545.5 ms] cusparse: copy begin
+[dbg     546.6 ms] [cu] copy
+[dbg     546.8 ms] [cu] pack
+[dbg     918.1 ms] self_product: C D2H begin (665502100 B)
+[dbg     948.4 ms] [cu] d2h
+[dbg    1035.9 ms] [gust] start
+[dbg    1036.7 ms] [gust] h2d
+[dbg    1036.7 ms] ESC: count intermediates begin
+[dbg    1039.7 ms] [gust] count
+[dbg    1039.9 ms] [gust] scan
+[dbg    1040.5 ms] ESC: expand begin (83899119 intermediates)
+[dbg    1052.6 ms] [gust] expand
+[dbg    1052.6 ms] ESC: sort_by_key begin
+[dbg    1063.7 ms] [gust] sort
+[dbg    1063.9 ms] ESC: reduce_by_key begin
+[dbg    1065.5 ms] [gust] reduce
+[dbg    1117.8 ms] [gust] final
+[dbg    1118.0 ms] [gust] pack
+[dbg    1521.5 ms] [gust] d2h
+[dbg    1595.2 ms] [outer] start
+[dbg    1595.7 ms] [outer] h2d
+[dbg    1601.1 ms] [outer] csc
+[dbg    1601.1 ms] [outer] count
+[dbg    1601.2 ms] [outer] scan
+[dbg    1645.1 ms] [outer] expand
+[dbg    1656.1 ms] [outer] sort
+[dbg    1658.0 ms] [outer] reduce
+[dbg    1709.6 ms] [outer] final
+[dbg    1709.7 ms] [outer] pack
+[dbg    2101.5 ms] [outer] d2h
+[dbg    2180.3 ms] [colw] start
+[dbg    2184.1 ms] [colw] h2d
+[dbg    2187.8 ms] [colw] csc
+[dbg    2188.4 ms] [colw] count
+[dbg    2188.6 ms] [colw] scan
+[dbg    2201.2 ms] [colw] expand
+[dbg    2212.4 ms] [colw] sort
+[dbg    2214.3 ms] [colw] reduce
+[dbg    2266.2 ms] [colw] final
+[dbg    2266.4 ms] [colw] pack
+[dbg    2666.5 ms] [colw] d2h
+[dbg    2759.9 ms] [inner] start
+[dbg    2761.0 ms] [inner] h2d
+[dbg    2765.1 ms] [inner] csc
+[dbg    2765.5 ms] [inner] count
+[dbg    2765.6 ms] [inner] scan
+[dbg    2777.9 ms] [inner] expand
+[dbg    2789.2 ms] [inner] sort
+[dbg    2791.2 ms] [inner] reduce
+[dbg    2842.9 ms] [inner] final
+[dbg    2875.5 ms] [inner] numeric
+[dbg    2876.0 ms] [inner] pack
+[dbg    3280.8 ms] [inner] d2h
+[dbg    3376.9 ms] warmup done
+[dbg    3377.0 ms] T1 cuSPARSE self_product: start
+[dbg    3377.0 ms] [cu] start
+[dbg    3378.5 ms] [cu] h2d (782668 B)
+[dbg    3378.6 ms] cusparse: workEstimation begin
+[dbg    3379.2 ms] [cu] workest (buf1=1115035 B)
+[dbg    3379.2 ms] cusparse: compute begin
+[dbg    3388.7 ms] [cu] compute (buf2=2015331711 B)
+[dbg    3388.8 ms] cusparse: C size = 10260 x 10260, nnz=83182632
+[dbg    3389.2 ms] cusparse: copy begin
+[dbg    3390.4 ms] [cu] copy
+[dbg    3390.6 ms] [cu] pack
+[dbg    3761.3 ms] self_product: C D2H begin (665502100 B)
+[dbg    3793.6 ms] [cu] d2h
+[dbg    3794.3 ms] T1 cuSPARSE self_product: done (C_nnz=83182632)
+[dbg    3866.4 ms] T4 manual self_product: start
+[dbg    3866.4 ms] [gust] start
+[dbg    3866.8 ms] [gust] h2d
+[dbg    3866.8 ms] ESC: count intermediates begin
+[dbg    3867.2 ms] [gust] count
+[dbg    3867.3 ms] [gust] scan
+[dbg    3867.7 ms] ESC: expand begin (83899119 intermediates)
+[dbg    3879.9 ms] [gust] expand
+[dbg    3879.9 ms] ESC: sort_by_key begin
+[dbg    3890.9 ms] [gust] sort
+[dbg    3891.2 ms] ESC: reduce_by_key begin
+[dbg    3892.7 ms] [gust] reduce
+[dbg    3945.0 ms] [gust] final
+[dbg    3945.2 ms] [gust] pack
+[dbg    4344.0 ms] [gust] d2h
+[dbg    4344.8 ms] T4 manual self_product: done (C_nnz=83182632)
+[dbg    4416.7 ms] T5 outer self_product: start
+[dbg    4416.7 ms] [outer] start
+[dbg    4417.2 ms] [outer] h2d
+[dbg    4420.6 ms] [outer] csc
+[dbg    4420.7 ms] [outer] count
+[dbg    4420.9 ms] [outer] scan
+[dbg    4465.9 ms] [outer] expand
+[dbg    4476.4 ms] [outer] sort
+[dbg    4478.2 ms] [outer] reduce
+[dbg    4529.8 ms] [outer] final
+[dbg    4530.0 ms] [outer] pack
+[dbg    4923.8 ms] [outer] d2h
+[dbg    4925.2 ms] T5 outer self_product: done (C_nnz=83182632)
+[dbg    5005.4 ms] T6 colwise self_product: start
+[dbg    5005.4 ms] [colw] start
+[dbg    5006.4 ms] [colw] h2d
+[dbg    5009.7 ms] [colw] csc
+[dbg    5010.1 ms] [colw] count
+[dbg    5010.2 ms] [colw] scan
+[dbg    5022.4 ms] [colw] expand
+[dbg    5032.8 ms] [colw] sort
+[dbg    5034.6 ms] [colw] reduce
+[dbg    5086.0 ms] [colw] final
+[dbg    5086.2 ms] [colw] pack
+[dbg    5448.6 ms] [colw] d2h
+[dbg    5449.9 ms] T6 colwise self_product: done (C_nnz=83182632)
+[dbg    5521.1 ms] T7 inner self_product: start
+[dbg    5521.1 ms] [inner] start
+[dbg    5521.7 ms] [inner] h2d
+[dbg    5525.1 ms] [inner] csc
+[dbg    5525.4 ms] [inner] count
+[dbg    5525.5 ms] [inner] scan
+[dbg    5538.1 ms] [inner] expand
+[dbg    5549.2 ms] [inner] sort
+[dbg    5551.1 ms] [inner] reduce
+[dbg    5602.6 ms] [inner] final
+[dbg    5635.2 ms] [inner] numeric
+[dbg    5635.6 ms] [inner] pack
+[dbg    6050.3 ms] [inner] d2h
+[dbg    6051.1 ms] T7 inner self_product: done (C_nnz=83182632)
+Reading matrix from ./data/rep/hangGlider_3.mtx...
+Input A: 10260 x 10260, nnz = 92703, sparsity = 99.91%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 10260 x 10260, nnz = 83182632, sparsity = 20.98%
+Time: 417.301 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 10260 x 10260, nnz = 83182632, sparsity = 20.98%
+Time: 478.420 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 10260 x 10260, nnz = 83182632, sparsity = 20.98%
+Time: 508.463 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 10260 x 10260, nnz = 83182632, sparsity = 20.98%
+Time: 444.449 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 10260 x 10260, nnz = 83182632, sparsity = 20.98%
+Time: 530.062 ms
+
+=== All tests completed ===
+Processing impcol_b ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.0 ms] CUDA context ready
+[dbg     485.2 ms] start read_matrix_market: ./data/rep/impcol_b.mtx
+[dbg     485.3 ms] read done: 59 x 59, nnz=312
+[dbg     485.3 ms] [cu] start
+[dbg     493.5 ms] [cu] h2d (2736 B)
+[dbg     493.5 ms] cusparse: workEstimation begin
+[dbg     521.0 ms] [cu] workest (buf1=4807 B)
+[dbg     521.0 ms] cusparse: compute begin
+[dbg     521.6 ms] [cu] compute (buf2=45991 B)
+[dbg     521.7 ms] cusparse: C size = 59 x 59, nnz=906
+[dbg     521.7 ms] cusparse: copy begin
+[dbg     521.8 ms] [cu] copy
+[dbg     521.8 ms] [cu] pack
+[dbg     523.4 ms] self_product: C D2H begin (7488 B)
+[dbg     523.4 ms] [cu] d2h
+[dbg     523.9 ms] [gust] start
+[dbg     524.0 ms] [gust] h2d
+[dbg     524.0 ms] ESC: count intermediates begin
+[dbg     525.6 ms] [gust] count
+[dbg     525.9 ms] [gust] scan
+[dbg     525.9 ms] ESC: expand begin (1702 intermediates)
+[dbg     525.9 ms] [gust] expand
+[dbg     525.9 ms] ESC: sort_by_key begin
+[dbg     526.0 ms] [gust] sort
+[dbg     526.0 ms] ESC: reduce_by_key begin
+[dbg     526.2 ms] [gust] reduce
+[dbg     526.3 ms] [gust] final
+[dbg     526.3 ms] [gust] pack
+[dbg     527.6 ms] [gust] d2h
+[dbg     528.0 ms] [outer] start
+[dbg     528.1 ms] [outer] h2d
+[dbg     529.7 ms] [outer] csc
+[dbg     529.7 ms] [outer] count
+[dbg     529.8 ms] [outer] scan
+[dbg     529.8 ms] [outer] expand
+[dbg     529.8 ms] [outer] sort
+[dbg     529.9 ms] [outer] reduce
+[dbg     530.0 ms] [outer] final
+[dbg     530.0 ms] [outer] pack
+[dbg     531.0 ms] [outer] d2h
+[dbg     531.5 ms] [colw] start
+[dbg     531.6 ms] [colw] h2d
+[dbg     531.7 ms] [colw] csc
+[dbg     531.7 ms] [colw] count
+[dbg     531.8 ms] [colw] scan
+[dbg     531.8 ms] [colw] expand
+[dbg     531.9 ms] [colw] sort
+[dbg     531.9 ms] [colw] reduce
+[dbg     532.0 ms] [colw] final
+[dbg     532.0 ms] [colw] pack
+[dbg     532.9 ms] [colw] d2h
+[dbg     533.3 ms] [inner] start
+[dbg     533.4 ms] [inner] h2d
+[dbg     533.5 ms] [inner] csc
+[dbg     533.5 ms] [inner] count
+[dbg     533.5 ms] [inner] scan
+[dbg     533.6 ms] [inner] expand
+[dbg     533.6 ms] [inner] sort
+[dbg     533.6 ms] [inner] reduce
+[dbg     533.7 ms] [inner] final
+[dbg     533.7 ms] [inner] numeric
+[dbg     533.8 ms] [inner] pack
+[dbg     534.6 ms] [inner] d2h
+[dbg     535.0 ms] warmup done
+[dbg     535.0 ms] T1 cuSPARSE self_product: start
+[dbg     535.0 ms] [cu] start
+[dbg     535.1 ms] [cu] h2d (2736 B)
+[dbg     535.1 ms] cusparse: workEstimation begin
+[dbg     535.2 ms] [cu] workest (buf1=4807 B)
+[dbg     535.2 ms] cusparse: compute begin
+[dbg     535.4 ms] [cu] compute (buf2=45991 B)
+[dbg     535.4 ms] cusparse: C size = 59 x 59, nnz=906
+[dbg     535.4 ms] cusparse: copy begin
+[dbg     535.4 ms] [cu] copy
+[dbg     535.5 ms] [cu] pack
+[dbg     536.3 ms] self_product: C D2H begin (7488 B)
+[dbg     536.3 ms] [cu] d2h
+[dbg     536.4 ms] T1 cuSPARSE self_product: done (C_nnz=906)
+[dbg     536.7 ms] T4 manual self_product: start
+[dbg     536.7 ms] [gust] start
+[dbg     536.8 ms] [gust] h2d
+[dbg     536.8 ms] ESC: count intermediates begin
+[dbg     536.8 ms] [gust] count
+[dbg     536.9 ms] [gust] scan
+[dbg     536.9 ms] ESC: expand begin (1702 intermediates)
+[dbg     536.9 ms] [gust] expand
+[dbg     536.9 ms] ESC: sort_by_key begin
+[dbg     536.9 ms] [gust] sort
+[dbg     536.9 ms] ESC: reduce_by_key begin
+[dbg     537.0 ms] [gust] reduce
+[dbg     537.0 ms] [gust] final
+[dbg     537.0 ms] [gust] pack
+[dbg     537.9 ms] [gust] d2h
+[dbg     538.0 ms] T4 manual self_product: done (C_nnz=906)
+[dbg     538.3 ms] T5 outer self_product: start
+[dbg     538.3 ms] [outer] start
+[dbg     538.4 ms] [outer] h2d
+[dbg     538.5 ms] [outer] csc
+[dbg     538.5 ms] [outer] count
+[dbg     538.5 ms] [outer] scan
+[dbg     538.5 ms] [outer] expand
+[dbg     538.6 ms] [outer] sort
+[dbg     538.6 ms] [outer] reduce
+[dbg     538.7 ms] [outer] final
+[dbg     538.7 ms] [outer] pack
+[dbg     539.6 ms] [outer] d2h
+[dbg     539.7 ms] T5 outer self_product: done (C_nnz=906)
+[dbg     540.0 ms] T6 colwise self_product: start
+[dbg     540.0 ms] [colw] start
+[dbg     540.1 ms] [colw] h2d
+[dbg     540.1 ms] [colw] csc
+[dbg     540.2 ms] [colw] count
+[dbg     540.2 ms] [colw] scan
+[dbg     540.2 ms] [colw] expand
+[dbg     540.3 ms] [colw] sort
+[dbg     540.3 ms] [colw] reduce
+[dbg     540.3 ms] [colw] final
+[dbg     540.4 ms] [colw] pack
+[dbg     541.2 ms] [colw] d2h
+[dbg     541.3 ms] T6 colwise self_product: done (C_nnz=906)
+[dbg     541.6 ms] T7 inner self_product: start
+[dbg     541.6 ms] [inner] start
+[dbg     541.7 ms] [inner] h2d
+[dbg     541.8 ms] [inner] csc
+[dbg     541.8 ms] [inner] count
+[dbg     541.8 ms] [inner] scan
+[dbg     541.8 ms] [inner] expand
+[dbg     541.9 ms] [inner] sort
+[dbg     541.9 ms] [inner] reduce
+[dbg     542.0 ms] [inner] final
+[dbg     542.0 ms] [inner] numeric
+[dbg     542.0 ms] [inner] pack
+[dbg     542.9 ms] [inner] d2h
+[dbg     543.0 ms] T7 inner self_product: done (C_nnz=906)
+Reading matrix from ./data/rep/impcol_b.mtx...
+Input A: 59 x 59, nnz = 312, sparsity = 91.04%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 59 x 59, nnz = 906, sparsity = 73.97%
+Time: 1.388 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 59 x 59, nnz = 906, sparsity = 73.97%
+Time: 1.299 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 59 x 59, nnz = 906, sparsity = 73.97%
+Time: 1.397 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 59 x 59, nnz = 906, sparsity = 73.97%
+Time: 1.363 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 59 x 59, nnz = 906, sparsity = 73.97%
+Time: 1.399 ms
+
+=== All tests completed ===
+Processing lund_b ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     479.3 ms] CUDA context ready
+[dbg     479.4 ms] start read_matrix_market: ./data/rep/lund_b.mtx
+[dbg     479.8 ms] read done: 147 x 147, nnz=2441
+[dbg     479.8 ms] [cu] start
+[dbg     488.1 ms] [cu] h2d (20120 B)
+[dbg     488.2 ms] cusparse: workEstimation begin
+[dbg     514.7 ms] [cu] workest (buf1=30355 B)
+[dbg     514.7 ms] cusparse: compute begin
+[dbg     515.4 ms] [cu] compute (buf2=1047535 B)
+[dbg     515.4 ms] cusparse: C size = 147 x 147, nnz=5821
+[dbg     515.5 ms] cusparse: copy begin
+[dbg     515.6 ms] [cu] copy
+[dbg     515.6 ms] [cu] pack
+[dbg     517.0 ms] self_product: C D2H begin (47160 B)
+[dbg     517.0 ms] [cu] d2h
+[dbg     517.5 ms] [gust] start
+[dbg     517.6 ms] [gust] h2d
+[dbg     517.6 ms] ESC: count intermediates begin
+[dbg     519.1 ms] [gust] count
+[dbg     519.4 ms] [gust] scan
+[dbg     519.4 ms] ESC: expand begin (43401 intermediates)
+[dbg     519.4 ms] [gust] expand
+[dbg     519.4 ms] ESC: sort_by_key begin
+[dbg     519.7 ms] [gust] sort
+[dbg     519.7 ms] ESC: reduce_by_key begin
+[dbg     519.8 ms] [gust] reduce
+[dbg     519.9 ms] [gust] final
+[dbg     519.9 ms] [gust] pack
+[dbg     521.2 ms] [gust] d2h
+[dbg     521.6 ms] [outer] start
+[dbg     521.7 ms] [outer] h2d
+[dbg     523.3 ms] [outer] csc
+[dbg     523.3 ms] [outer] count
+[dbg     523.3 ms] [outer] scan
+[dbg     523.4 ms] [outer] expand
+[dbg     523.5 ms] [outer] sort
+[dbg     523.5 ms] [outer] reduce
+[dbg     523.6 ms] [outer] final
+[dbg     523.6 ms] [outer] pack
+[dbg     524.7 ms] [outer] d2h
+[dbg     525.0 ms] [colw] start
+[dbg     525.2 ms] [colw] h2d
+[dbg     525.3 ms] [colw] csc
+[dbg     525.3 ms] [colw] count
+[dbg     525.3 ms] [colw] scan
+[dbg     525.4 ms] [colw] expand
+[dbg     525.5 ms] [colw] sort
+[dbg     525.6 ms] [colw] reduce
+[dbg     525.6 ms] [colw] final
+[dbg     525.6 ms] [colw] pack
+[dbg     526.5 ms] [colw] d2h
+[dbg     527.0 ms] [inner] start
+[dbg     527.1 ms] [inner] h2d
+[dbg     527.2 ms] [inner] csc
+[dbg     527.2 ms] [inner] count
+[dbg     527.3 ms] [inner] scan
+[dbg     527.3 ms] [inner] expand
+[dbg     527.4 ms] [inner] sort
+[dbg     527.5 ms] [inner] reduce
+[dbg     527.5 ms] [inner] final
+[dbg     527.6 ms] [inner] numeric
+[dbg     527.6 ms] [inner] pack
+[dbg     528.5 ms] [inner] d2h
+[dbg     529.0 ms] warmup done
+[dbg     529.0 ms] T1 cuSPARSE self_product: start
+[dbg     529.0 ms] [cu] start
+[dbg     529.1 ms] [cu] h2d (20120 B)
+[dbg     529.1 ms] cusparse: workEstimation begin
+[dbg     529.2 ms] [cu] workest (buf1=30355 B)
+[dbg     529.2 ms] cusparse: compute begin
+[dbg     529.4 ms] [cu] compute (buf2=1047535 B)
+[dbg     529.4 ms] cusparse: C size = 147 x 147, nnz=5821
+[dbg     529.4 ms] cusparse: copy begin
+[dbg     529.5 ms] [cu] copy
+[dbg     529.5 ms] [cu] pack
+[dbg     530.4 ms] self_product: C D2H begin (47160 B)
+[dbg     530.5 ms] [cu] d2h
+[dbg     530.6 ms] T1 cuSPARSE self_product: done (C_nnz=5821)
+[dbg     531.0 ms] T4 manual self_product: start
+[dbg     531.0 ms] [gust] start
+[dbg     531.1 ms] [gust] h2d
+[dbg     531.1 ms] ESC: count intermediates begin
+[dbg     531.1 ms] [gust] count
+[dbg     531.2 ms] [gust] scan
+[dbg     531.2 ms] ESC: expand begin (43401 intermediates)
+[dbg     531.2 ms] [gust] expand
+[dbg     531.2 ms] ESC: sort_by_key begin
+[dbg     531.3 ms] [gust] sort
+[dbg     531.3 ms] ESC: reduce_by_key begin
+[dbg     531.4 ms] [gust] reduce
+[dbg     531.4 ms] [gust] final
+[dbg     531.4 ms] [gust] pack
+[dbg     532.4 ms] [gust] d2h
+[dbg     532.5 ms] T4 manual self_product: done (C_nnz=5821)
+[dbg     532.8 ms] T5 outer self_product: start
+[dbg     532.8 ms] [outer] start
+[dbg     532.9 ms] [outer] h2d
+[dbg     533.0 ms] [outer] csc
+[dbg     533.1 ms] [outer] count
+[dbg     533.1 ms] [outer] scan
+[dbg     533.1 ms] [outer] expand
+[dbg     533.3 ms] [outer] sort
+[dbg     533.3 ms] [outer] reduce
+[dbg     533.4 ms] [outer] final
+[dbg     533.4 ms] [outer] pack
+[dbg     534.3 ms] [outer] d2h
+[dbg     534.4 ms] T5 outer self_product: done (C_nnz=5821)
+[dbg     534.8 ms] T6 colwise self_product: start
+[dbg     534.8 ms] [colw] start
+[dbg     535.0 ms] [colw] h2d
+[dbg     535.1 ms] [colw] csc
+[dbg     535.1 ms] [colw] count
+[dbg     535.2 ms] [colw] scan
+[dbg     535.2 ms] [colw] expand
+[dbg     535.3 ms] [colw] sort
+[dbg     535.4 ms] [colw] reduce
+[dbg     535.4 ms] [colw] final
+[dbg     535.4 ms] [colw] pack
+[dbg     536.3 ms] [colw] d2h
+[dbg     536.5 ms] T6 colwise self_product: done (C_nnz=5821)
+[dbg     536.7 ms] T7 inner self_product: start
+[dbg     536.7 ms] [inner] start
+[dbg     536.9 ms] [inner] h2d
+[dbg     537.0 ms] [inner] csc
+[dbg     537.0 ms] [inner] count
+[dbg     537.1 ms] [inner] scan
+[dbg     537.1 ms] [inner] expand
+[dbg     537.2 ms] [inner] sort
+[dbg     537.3 ms] [inner] reduce
+[dbg     537.3 ms] [inner] final
+[dbg     537.3 ms] [inner] numeric
+[dbg     537.4 ms] [inner] pack
+[dbg     538.2 ms] [inner] d2h
+[dbg     538.3 ms] T7 inner self_product: done (C_nnz=5821)
+Reading matrix from ./data/rep/lund_b.mtx...
+Input A: 147 x 147, nnz = 2441, sparsity = 88.70%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 147 x 147, nnz = 5821, sparsity = 73.06%
+Time: 1.586 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 147 x 147, nnz = 5821, sparsity = 73.06%
+Time: 1.535 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 147 x 147, nnz = 5821, sparsity = 73.06%
+Time: 1.639 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 147 x 147, nnz = 5821, sparsity = 73.06%
+Time: 1.629 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 147 x 147, nnz = 5821, sparsity = 73.06%
+Time: 1.596 ms
+
+=== All tests completed ===
+Processing mbeaflw ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     476.9 ms] CUDA context ready
+[dbg     477.1 ms] start read_matrix_market: ./data/rep/mbeaflw.mtx
+[dbg     489.3 ms] read done: 496 x 496, nnz=49920
+[dbg     489.3 ms] [cu] start
+[dbg     497.2 ms] [cu] h2d (401348 B)
+[dbg     497.3 ms] cusparse: workEstimation begin
+[dbg     522.4 ms] [cu] workest (buf1=600871 B)
+[dbg     522.4 ms] cusparse: compute begin
+[dbg     523.6 ms] [cu] compute (buf2=143858231 B)
+[dbg     523.6 ms] cusparse: C size = 496 x 496, nnz=205661
+[dbg     523.7 ms] cusparse: copy begin
+[dbg     523.8 ms] [cu] copy
+[dbg     523.9 ms] [cu] pack
+[dbg     525.5 ms] self_product: C D2H begin (1647276 B)
+[dbg     525.7 ms] [cu] d2h
+[dbg     526.3 ms] [gust] start
+[dbg     526.5 ms] [gust] h2d
+[dbg     526.5 ms] ESC: count intermediates begin
+[dbg     528.1 ms] [gust] count
+[dbg     528.4 ms] [gust] scan
+[dbg     528.5 ms] ESC: expand begin (5988684 intermediates)
+[dbg     528.8 ms] [gust] expand
+[dbg     528.8 ms] ESC: sort_by_key begin
+[dbg     530.0 ms] [gust] sort
+[dbg     530.2 ms] ESC: reduce_by_key begin
+[dbg     530.5 ms] [gust] reduce
+[dbg     531.0 ms] [gust] final
+[dbg     531.1 ms] [gust] pack
+[dbg     532.5 ms] [gust] d2h
+[dbg     533.0 ms] [outer] start
+[dbg     533.2 ms] [outer] h2d
+[dbg     535.2 ms] [outer] csc
+[dbg     535.2 ms] [outer] count
+[dbg     535.3 ms] [outer] scan
+[dbg     535.6 ms] [outer] expand
+[dbg     536.6 ms] [outer] sort
+[dbg     536.9 ms] [outer] reduce
+[dbg     537.3 ms] [outer] final
+[dbg     537.4 ms] [outer] pack
+[dbg     538.6 ms] [outer] d2h
+[dbg     539.4 ms] [colw] start
+[dbg     539.6 ms] [colw] h2d
+[dbg     540.0 ms] [colw] csc
+[dbg     540.1 ms] [colw] count
+[dbg     540.1 ms] [colw] scan
+[dbg     540.4 ms] [colw] expand
+[dbg     541.5 ms] [colw] sort
+[dbg     541.7 ms] [colw] reduce
+[dbg     542.1 ms] [colw] final
+[dbg     542.2 ms] [colw] pack
+[dbg     543.4 ms] [colw] d2h
+[dbg     544.1 ms] [inner] start
+[dbg     544.3 ms] [inner] h2d
+[dbg     544.7 ms] [inner] csc
+[dbg     544.8 ms] [inner] count
+[dbg     544.8 ms] [inner] scan
+[dbg     545.3 ms] [inner] expand
+[dbg     546.3 ms] [inner] sort
+[dbg     546.5 ms] [inner] reduce
+[dbg     546.9 ms] [inner] final
+[dbg     547.3 ms] [inner] numeric
+[dbg     547.4 ms] [inner] pack
+[dbg     548.6 ms] [inner] d2h
+[dbg     549.1 ms] warmup done
+[dbg     549.1 ms] T1 cuSPARSE self_product: start
+[dbg     549.1 ms] [cu] start
+[dbg     549.3 ms] [cu] h2d (401348 B)
+[dbg     549.3 ms] cusparse: workEstimation begin
+[dbg     549.4 ms] [cu] workest (buf1=600871 B)
+[dbg     549.4 ms] cusparse: compute begin
+[dbg     550.0 ms] [cu] compute (buf2=143858231 B)
+[dbg     550.0 ms] cusparse: C size = 496 x 496, nnz=205661
+[dbg     550.1 ms] cusparse: copy begin
+[dbg     550.2 ms] [cu] copy
+[dbg     550.2 ms] [cu] pack
+[dbg     551.5 ms] self_product: C D2H begin (1647276 B)
+[dbg     551.7 ms] [cu] d2h
+[dbg     551.9 ms] T1 cuSPARSE self_product: done (C_nnz=205661)
+[dbg     552.1 ms] T4 manual self_product: start
+[dbg     552.1 ms] [gust] start
+[dbg     552.3 ms] [gust] h2d
+[dbg     552.3 ms] ESC: count intermediates begin
+[dbg     552.4 ms] [gust] count
+[dbg     552.4 ms] [gust] scan
+[dbg     552.6 ms] ESC: expand begin (5988684 intermediates)
+[dbg     552.9 ms] [gust] expand
+[dbg     552.9 ms] ESC: sort_by_key begin
+[dbg     554.0 ms] [gust] sort
+[dbg     554.1 ms] ESC: reduce_by_key begin
+[dbg     554.2 ms] [gust] reduce
+[dbg     554.7 ms] [gust] final
+[dbg     554.8 ms] [gust] pack
+[dbg     556.0 ms] [gust] d2h
+[dbg     556.2 ms] T4 manual self_product: done (C_nnz=205661)
+[dbg     556.4 ms] T5 outer self_product: start
+[dbg     556.4 ms] [outer] start
+[dbg     556.6 ms] [outer] h2d
+[dbg     557.0 ms] [outer] csc
+[dbg     557.1 ms] [outer] count
+[dbg     557.1 ms] [outer] scan
+[dbg     557.4 ms] [outer] expand
+[dbg     558.4 ms] [outer] sort
+[dbg     558.7 ms] [outer] reduce
+[dbg     559.0 ms] [outer] final
+[dbg     559.1 ms] [outer] pack
+[dbg     560.3 ms] [outer] d2h
+[dbg     560.7 ms] T5 outer self_product: done (C_nnz=205661)
+[dbg     561.0 ms] T6 colwise self_product: start
+[dbg     561.0 ms] [colw] start
+[dbg     561.2 ms] [colw] h2d
+[dbg     561.6 ms] [colw] csc
+[dbg     561.7 ms] [colw] count
+[dbg     561.7 ms] [colw] scan
+[dbg     562.0 ms] [colw] expand
+[dbg     563.0 ms] [colw] sort
+[dbg     563.3 ms] [colw] reduce
+[dbg     563.6 ms] [colw] final
+[dbg     563.7 ms] [colw] pack
+[dbg     564.9 ms] [colw] d2h
+[dbg     565.4 ms] T6 colwise self_product: done (C_nnz=205661)
+[dbg     565.6 ms] T7 inner self_product: start
+[dbg     565.7 ms] [inner] start
+[dbg     565.8 ms] [inner] h2d
+[dbg     566.2 ms] [inner] csc
+[dbg     566.3 ms] [inner] count
+[dbg     566.3 ms] [inner] scan
+[dbg     566.9 ms] [inner] expand
+[dbg     567.9 ms] [inner] sort
+[dbg     568.1 ms] [inner] reduce
+[dbg     568.5 ms] [inner] final
+[dbg     568.9 ms] [inner] numeric
+[dbg     569.0 ms] [inner] pack
+[dbg     570.2 ms] [inner] d2h
+[dbg     570.4 ms] T7 inner self_product: done (C_nnz=205661)
+Reading matrix from ./data/rep/mbeaflw.mtx...
+Input A: 496 x 496, nnz = 49920, sparsity = 79.71%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 496 x 496, nnz = 205661, sparsity = 16.40%
+Time: 2.760 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 496 x 496, nnz = 205661, sparsity = 16.40%
+Time: 4.026 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 496 x 496, nnz = 205661, sparsity = 16.40%
+Time: 4.289 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 496 x 496, nnz = 205661, sparsity = 16.40%
+Time: 4.355 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 496 x 496, nnz = 205661, sparsity = 16.40%
+Time: 4.792 ms
+
+=== All tests completed ===
+Processing mesh1e1 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     487.2 ms] CUDA context ready
+[dbg     487.4 ms] start read_matrix_market: ./data/rep/mesh1e1.mtx
+[dbg     487.4 ms] read done: 48 x 48, nnz=306
+[dbg     487.5 ms] [cu] start
+[dbg     495.9 ms] [cu] h2d (2644 B)
+[dbg     496.0 ms] cusparse: workEstimation begin
+[dbg     523.0 ms] [cu] workest (buf1=4735 B)
+[dbg     523.0 ms] cusparse: compute begin
+[dbg     523.7 ms] [cu] compute (buf2=53191 B)
+[dbg     523.7 ms] cusparse: C size = 48 x 48, nnz=772
+[dbg     523.7 ms] cusparse: copy begin
+[dbg     523.8 ms] [cu] copy
+[dbg     523.8 ms] [cu] pack
+[dbg     525.2 ms] self_product: C D2H begin (6372 B)
+[dbg     525.2 ms] [cu] d2h
+[dbg     525.7 ms] [gust] start
+[dbg     525.8 ms] [gust] h2d
+[dbg     525.8 ms] ESC: count intermediates begin
+[dbg     527.3 ms] [gust] count
+[dbg     527.6 ms] [gust] scan
+[dbg     527.6 ms] ESC: expand begin (2002 intermediates)
+[dbg     527.6 ms] [gust] expand
+[dbg     527.6 ms] ESC: sort_by_key begin
+[dbg     527.7 ms] [gust] sort
+[dbg     527.7 ms] ESC: reduce_by_key begin
+[dbg     527.9 ms] [gust] reduce
+[dbg     528.0 ms] [gust] final
+[dbg     528.0 ms] [gust] pack
+[dbg     529.3 ms] [gust] d2h
+[dbg     529.6 ms] [outer] start
+[dbg     529.8 ms] [outer] h2d
+[dbg     531.3 ms] [outer] csc
+[dbg     531.4 ms] [outer] count
+[dbg     531.4 ms] [outer] scan
+[dbg     531.4 ms] [outer] expand
+[dbg     531.5 ms] [outer] sort
+[dbg     531.5 ms] [outer] reduce
+[dbg     531.6 ms] [outer] final
+[dbg     531.6 ms] [outer] pack
+[dbg     532.7 ms] [outer] d2h
+[dbg     533.1 ms] [colw] start
+[dbg     533.2 ms] [colw] h2d
+[dbg     533.3 ms] [colw] csc
+[dbg     533.4 ms] [colw] count
+[dbg     533.4 ms] [colw] scan
+[dbg     533.4 ms] [colw] expand
+[dbg     533.5 ms] [colw] sort
+[dbg     533.5 ms] [colw] reduce
+[dbg     533.6 ms] [colw] final
+[dbg     533.6 ms] [colw] pack
+[dbg     534.5 ms] [colw] d2h
+[dbg     534.9 ms] [inner] start
+[dbg     535.0 ms] [inner] h2d
+[dbg     535.0 ms] [inner] csc
+[dbg     535.1 ms] [inner] count
+[dbg     535.1 ms] [inner] scan
+[dbg     535.1 ms] [inner] expand
+[dbg     535.2 ms] [inner] sort
+[dbg     535.2 ms] [inner] reduce
+[dbg     535.3 ms] [inner] final
+[dbg     535.3 ms] [inner] numeric
+[dbg     535.3 ms] [inner] pack
+[dbg     536.2 ms] [inner] d2h
+[dbg     536.5 ms] warmup done
+[dbg     536.6 ms] T1 cuSPARSE self_product: start
+[dbg     536.6 ms] [cu] start
+[dbg     536.7 ms] [cu] h2d (2644 B)
+[dbg     536.7 ms] cusparse: workEstimation begin
+[dbg     536.7 ms] [cu] workest (buf1=4735 B)
+[dbg     536.7 ms] cusparse: compute begin
+[dbg     536.9 ms] [cu] compute (buf2=53191 B)
+[dbg     536.9 ms] cusparse: C size = 48 x 48, nnz=772
+[dbg     536.9 ms] cusparse: copy begin
+[dbg     537.0 ms] [cu] copy
+[dbg     537.0 ms] [cu] pack
+[dbg     537.8 ms] self_product: C D2H begin (6372 B)
+[dbg     537.8 ms] [cu] d2h
+[dbg     537.9 ms] T1 cuSPARSE self_product: done (C_nnz=772)
+[dbg     538.2 ms] T4 manual self_product: start
+[dbg     538.2 ms] [gust] start
+[dbg     538.3 ms] [gust] h2d
+[dbg     538.3 ms] ESC: count intermediates begin
+[dbg     538.3 ms] [gust] count
+[dbg     538.3 ms] [gust] scan
+[dbg     538.3 ms] ESC: expand begin (2002 intermediates)
+[dbg     538.4 ms] [gust] expand
+[dbg     538.4 ms] ESC: sort_by_key begin
+[dbg     538.4 ms] [gust] sort
+[dbg     538.4 ms] ESC: reduce_by_key begin
+[dbg     538.4 ms] [gust] reduce
+[dbg     538.5 ms] [gust] final
+[dbg     538.5 ms] [gust] pack
+[dbg     539.3 ms] [gust] d2h
+[dbg     539.4 ms] T4 manual self_product: done (C_nnz=772)
+[dbg     539.8 ms] T5 outer self_product: start
+[dbg     539.8 ms] [outer] start
+[dbg     539.9 ms] [outer] h2d
+[dbg     539.9 ms] [outer] csc
+[dbg     540.0 ms] [outer] count
+[dbg     540.0 ms] [outer] scan
+[dbg     540.0 ms] [outer] expand
+[dbg     540.1 ms] [outer] sort
+[dbg     540.1 ms] [outer] reduce
+[dbg     540.1 ms] [outer] final
+[dbg     540.2 ms] [outer] pack
+[dbg     541.0 ms] [outer] d2h
+[dbg     541.1 ms] T5 outer self_product: done (C_nnz=772)
+[dbg     541.4 ms] T6 colwise self_product: start
+[dbg     541.4 ms] [colw] start
+[dbg     541.5 ms] [colw] h2d
+[dbg     541.5 ms] [colw] csc
+[dbg     541.6 ms] [colw] count
+[dbg     541.6 ms] [colw] scan
+[dbg     541.6 ms] [colw] expand
+[dbg     541.7 ms] [colw] sort
+[dbg     541.7 ms] [colw] reduce
+[dbg     541.8 ms] [colw] final
+[dbg     541.8 ms] [colw] pack
+[dbg     542.6 ms] [colw] d2h
+[dbg     542.7 ms] T6 colwise self_product: done (C_nnz=772)
+[dbg     543.0 ms] T7 inner self_product: start
+[dbg     543.0 ms] [inner] start
+[dbg     543.0 ms] [inner] h2d
+[dbg     543.1 ms] [inner] csc
+[dbg     543.1 ms] [inner] count
+[dbg     543.2 ms] [inner] scan
+[dbg     543.2 ms] [inner] expand
+[dbg     543.2 ms] [inner] sort
+[dbg     543.3 ms] [inner] reduce
+[dbg     543.3 ms] [inner] final
+[dbg     543.4 ms] [inner] numeric
+[dbg     543.4 ms] [inner] pack
+[dbg     544.2 ms] [inner] d2h
+[dbg     544.3 ms] T7 inner self_product: done (C_nnz=772)
+Reading matrix from ./data/rep/mesh1e1.mtx...
+Input A: 48 x 48, nnz = 306, sparsity = 86.72%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 48 x 48, nnz = 772, sparsity = 66.49%
+Time: 1.344 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 48 x 48, nnz = 772, sparsity = 66.49%
+Time: 1.249 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 48 x 48, nnz = 772, sparsity = 66.49%
+Time: 1.337 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 48 x 48, nnz = 772, sparsity = 66.49%
+Time: 1.303 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 48 x 48, nnz = 772, sparsity = 66.49%
+Time: 1.356 ms
+
+=== All tests completed ===
+Processing nemeth19 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     478.7 ms] CUDA context ready
+[dbg     478.9 ms] start read_matrix_market: ./data/rep/nemeth19.mtx
+[dbg     623.0 ms] read done: 9506 x 9506, nnz=818302
+[dbg     623.0 ms] [cu] start
+[dbg     632.7 ms] [cu] h2d (6584444 B)
+[dbg     632.9 ms] cusparse: workEstimation begin
+[dbg     659.3 ms] [cu] workest (buf1=9835279 B)
+[dbg     659.4 ms] cusparse: compute begin
+[dbg     662.9 ms] [cu] compute (buf2=1705066919 B)
+[dbg     662.9 ms] cusparse: C size = 9506 x 9506, nnz=1784266
+[dbg     663.1 ms] cusparse: copy begin
+[dbg     663.2 ms] [cu] copy
+[dbg     663.4 ms] [cu] pack
+[dbg     672.0 ms] self_product: C D2H begin (14312156 B)
+[dbg     673.3 ms] [cu] d2h
+[dbg     675.4 ms] [gust] start
+[dbg     676.4 ms] [gust] h2d
+[dbg     676.4 ms] ESC: count intermediates begin
+[dbg     677.7 ms] [gust] count
+[dbg     677.8 ms] [gust] scan
+[dbg     677.9 ms] ESC: expand begin (70982630 intermediates)
+[dbg     678.6 ms] [gust] expand
+[dbg     678.6 ms] ESC: sort_by_key begin
+[dbg     687.5 ms] [gust] sort
+[dbg     687.7 ms] ESC: reduce_by_key begin
+[dbg     688.5 ms] [gust] reduce
+[dbg     689.6 ms] [gust] final
+[dbg     689.7 ms] [gust] pack
+[dbg     695.8 ms] [gust] d2h
+[dbg     698.0 ms] [outer] start
+[dbg     699.0 ms] [outer] h2d
+[dbg     700.5 ms] [outer] csc
+[dbg     700.5 ms] [outer] count
+[dbg     700.5 ms] [outer] scan
+[dbg     701.3 ms] [outer] expand
+[dbg     710.1 ms] [outer] sort
+[dbg     711.0 ms] [outer] reduce
+[dbg     711.7 ms] [outer] final
+[dbg     711.8 ms] [outer] pack
+[dbg     717.7 ms] [outer] d2h
+[dbg     720.1 ms] [colw] start
+[dbg     721.3 ms] [colw] h2d
+[dbg     721.8 ms] [colw] csc
+[dbg     721.8 ms] [colw] count
+[dbg     721.9 ms] [colw] scan
+[dbg     722.8 ms] [colw] expand
+[dbg     731.6 ms] [colw] sort
+[dbg     732.4 ms] [colw] reduce
+[dbg     733.1 ms] [colw] final
+[dbg     733.2 ms] [colw] pack
+[dbg     739.0 ms] [colw] d2h
+[dbg     741.4 ms] [inner] start
+[dbg     742.6 ms] [inner] h2d
+[dbg     743.1 ms] [inner] csc
+[dbg     743.1 ms] [inner] count
+[dbg     743.1 ms] [inner] scan
+[dbg     744.0 ms] [inner] expand
+[dbg     752.8 ms] [inner] sort
+[dbg     753.7 ms] [inner] reduce
+[dbg     754.3 ms] [inner] final
+[dbg     755.2 ms] [inner] numeric
+[dbg     755.4 ms] [inner] pack
+[dbg     761.2 ms] [inner] d2h
+[dbg     763.2 ms] warmup done
+[dbg     763.2 ms] T1 cuSPARSE self_product: start
+[dbg     763.2 ms] [cu] start
+[dbg     764.3 ms] [cu] h2d (6584444 B)
+[dbg     764.4 ms] cusparse: workEstimation begin
+[dbg     764.6 ms] [cu] workest (buf1=9835279 B)
+[dbg     764.6 ms] cusparse: compute begin
+[dbg     767.3 ms] [cu] compute (buf2=1705066919 B)
+[dbg     767.3 ms] cusparse: C size = 9506 x 9506, nnz=1784266
+[dbg     767.4 ms] cusparse: copy begin
+[dbg     767.5 ms] [cu] copy
+[dbg     767.5 ms] [cu] pack
+[dbg     773.5 ms] self_product: C D2H begin (14312156 B)
+[dbg     774.0 ms] [cu] d2h
+[dbg     774.4 ms] T1 cuSPARSE self_product: done (C_nnz=1784266)
+[dbg     775.8 ms] T4 manual self_product: start
+[dbg     775.8 ms] [gust] start
+[dbg     776.8 ms] [gust] h2d
+[dbg     776.8 ms] ESC: count intermediates begin
+[dbg     777.0 ms] [gust] count
+[dbg     777.0 ms] [gust] scan
+[dbg     777.2 ms] ESC: expand begin (70982630 intermediates)
+[dbg     777.9 ms] [gust] expand
+[dbg     777.9 ms] ESC: sort_by_key begin
+[dbg     786.7 ms] [gust] sort
+[dbg     786.9 ms] ESC: reduce_by_key begin
+[dbg     787.6 ms] [gust] reduce
+[dbg     788.6 ms] [gust] final
+[dbg     788.7 ms] [gust] pack
+[dbg     794.4 ms] [gust] d2h
+[dbg     795.0 ms] T4 manual self_product: done (C_nnz=1784266)
+[dbg     796.4 ms] T5 outer self_product: start
+[dbg     796.4 ms] [outer] start
+[dbg     797.4 ms] [outer] h2d
+[dbg     797.8 ms] [outer] csc
+[dbg     797.9 ms] [outer] count
+[dbg     797.9 ms] [outer] scan
+[dbg     798.6 ms] [outer] expand
+[dbg     807.4 ms] [outer] sort
+[dbg     808.3 ms] [outer] reduce
+[dbg     809.0 ms] [outer] final
+[dbg     809.1 ms] [outer] pack
+[dbg     814.8 ms] [outer] d2h
+[dbg     815.8 ms] T5 outer self_product: done (C_nnz=1784266)
+[dbg     817.2 ms] T6 colwise self_product: start
+[dbg     817.2 ms] [colw] start
+[dbg     818.4 ms] [colw] h2d
+[dbg     818.8 ms] [colw] csc
+[dbg     818.9 ms] [colw] count
+[dbg     818.9 ms] [colw] scan
+[dbg     819.7 ms] [colw] expand
+[dbg     828.6 ms] [colw] sort
+[dbg     829.4 ms] [colw] reduce
+[dbg     830.1 ms] [colw] final
+[dbg     830.2 ms] [colw] pack
+[dbg     835.8 ms] [colw] d2h
+[dbg     836.8 ms] T6 colwise self_product: done (C_nnz=1784266)
+[dbg     838.2 ms] T7 inner self_product: start
+[dbg     838.2 ms] [inner] start
+[dbg     839.4 ms] [inner] h2d
+[dbg     839.9 ms] [inner] csc
+[dbg     839.9 ms] [inner] count
+[dbg     839.9 ms] [inner] scan
+[dbg     840.7 ms] [inner] expand
+[dbg     849.6 ms] [inner] sort
+[dbg     850.5 ms] [inner] reduce
+[dbg     851.1 ms] [inner] final
+[dbg     852.0 ms] [inner] numeric
+[dbg     852.2 ms] [inner] pack
+[dbg     857.9 ms] [inner] d2h
+[dbg     858.5 ms] T7 inner self_product: done (C_nnz=1784266)
+Reading matrix from ./data/rep/nemeth19.mtx...
+Input A: 9506 x 9506, nnz = 818302, sparsity = 99.09%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 9506 x 9506, nnz = 1784266, sparsity = 98.03%
+Time: 11.173 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 9506 x 9506, nnz = 1784266, sparsity = 98.03%
+Time: 19.246 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 9506 x 9506, nnz = 1784266, sparsity = 98.03%
+Time: 19.397 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 9506 x 9506, nnz = 1784266, sparsity = 98.03%
+Time: 19.572 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 9506 x 9506, nnz = 1784266, sparsity = 98.03%
+Time: 20.292 ms
+
+=== All tests completed ===
+Processing nemeth20 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     478.9 ms] CUDA context ready
+[dbg     479.0 ms] start read_matrix_market: ./data/rep/nemeth20.mtx
+[dbg     648.3 ms] read done: 9506 x 9506, nnz=971870
+[dbg     648.4 ms] [cu] start
+[dbg     658.4 ms] [cu] h2d (7812988 B)
+[dbg     658.6 ms] cusparse: workEstimation begin
+[dbg     684.9 ms] [cu] workest (buf1=11680655 B)
+[dbg     684.9 ms] cusparse: compute begin
+[dbg     689.2 ms] [cu] compute (buf2=2414923975 B)
+[dbg     689.2 ms] cusparse: C size = 9506 x 9506, nnz=2172140
+[dbg     689.4 ms] cusparse: copy begin
+[dbg     689.5 ms] [cu] copy
+[dbg     689.6 ms] [cu] pack
+[dbg     700.4 ms] self_product: C D2H begin (17415148 B)
+[dbg     702.2 ms] [cu] d2h
+[dbg     704.3 ms] [gust] start
+[dbg     705.6 ms] [gust] h2d
+[dbg     705.6 ms] ESC: count intermediates begin
+[dbg     706.9 ms] [gust] count
+[dbg     707.0 ms] [gust] scan
+[dbg     707.2 ms] ESC: expand begin (100534354 intermediates)
+[dbg     708.1 ms] [gust] expand
+[dbg     708.1 ms] ESC: sort_by_key begin
+[dbg     720.7 ms] [gust] sort
+[dbg     720.9 ms] ESC: reduce_by_key begin
+[dbg     722.0 ms] [gust] reduce
+[dbg     723.3 ms] [gust] final
+[dbg     723.4 ms] [gust] pack
+[dbg     731.1 ms] [gust] d2h
+[dbg     733.6 ms] [outer] start
+[dbg     734.8 ms] [outer] h2d
+[dbg     736.3 ms] [outer] csc
+[dbg     736.4 ms] [outer] count
+[dbg     736.4 ms] [outer] scan
+[dbg     737.4 ms] [outer] expand
+[dbg     749.9 ms] [outer] sort
+[dbg     751.1 ms] [outer] reduce
+[dbg     751.9 ms] [outer] final
+[dbg     752.1 ms] [outer] pack
+[dbg     759.5 ms] [outer] d2h
+[dbg     762.4 ms] [colw] start
+[dbg     764.4 ms] [colw] h2d
+[dbg     765.1 ms] [colw] csc
+[dbg     765.2 ms] [colw] count
+[dbg     765.2 ms] [colw] scan
+[dbg     766.4 ms] [colw] expand
+[dbg     778.9 ms] [colw] sort
+[dbg     780.0 ms] [colw] reduce
+[dbg     780.9 ms] [colw] final
+[dbg     781.0 ms] [colw] pack
+[dbg     788.4 ms] [colw] d2h
+[dbg     791.3 ms] [inner] start
+[dbg     793.3 ms] [inner] h2d
+[dbg     794.0 ms] [inner] csc
+[dbg     794.0 ms] [inner] count
+[dbg     794.0 ms] [inner] scan
+[dbg     795.1 ms] [inner] expand
+[dbg     807.6 ms] [inner] sort
+[dbg     808.8 ms] [inner] reduce
+[dbg     809.6 ms] [inner] final
+[dbg     810.7 ms] [inner] numeric
+[dbg     810.8 ms] [inner] pack
+[dbg     818.1 ms] [inner] d2h
+[dbg     820.7 ms] warmup done
+[dbg     820.7 ms] T1 cuSPARSE self_product: start
+[dbg     820.7 ms] [cu] start
+[dbg     821.9 ms] [cu] h2d (7812988 B)
+[dbg     822.1 ms] cusparse: workEstimation begin
+[dbg     822.3 ms] [cu] workest (buf1=11680655 B)
+[dbg     822.3 ms] cusparse: compute begin
+[dbg     825.7 ms] [cu] compute (buf2=2414923975 B)
+[dbg     825.7 ms] cusparse: C size = 9506 x 9506, nnz=2172140
+[dbg     825.9 ms] cusparse: copy begin
+[dbg     825.9 ms] [cu] copy
+[dbg     826.0 ms] [cu] pack
+[dbg     833.6 ms] self_product: C D2H begin (17415148 B)
+[dbg     834.2 ms] [cu] d2h
+[dbg     834.7 ms] T1 cuSPARSE self_product: done (C_nnz=2172140)
+[dbg     836.4 ms] T4 manual self_product: start
+[dbg     836.4 ms] [gust] start
+[dbg     837.6 ms] [gust] h2d
+[dbg     837.6 ms] ESC: count intermediates begin
+[dbg     837.8 ms] [gust] count
+[dbg     837.8 ms] [gust] scan
+[dbg     838.1 ms] ESC: expand begin (100534354 intermediates)
+[dbg     839.1 ms] [gust] expand
+[dbg     839.1 ms] ESC: sort_by_key begin
+[dbg     851.6 ms] [gust] sort
+[dbg     851.7 ms] ESC: reduce_by_key begin
+[dbg     852.7 ms] [gust] reduce
+[dbg     854.0 ms] [gust] final
+[dbg     854.1 ms] [gust] pack
+[dbg     861.3 ms] [gust] d2h
+[dbg     862.1 ms] T4 manual self_product: done (C_nnz=2172140)
+[dbg     863.8 ms] T5 outer self_product: start
+[dbg     863.8 ms] [outer] start
+[dbg     865.0 ms] [outer] h2d
+[dbg     865.5 ms] [outer] csc
+[dbg     865.5 ms] [outer] count
+[dbg     865.5 ms] [outer] scan
+[dbg     866.5 ms] [outer] expand
+[dbg     878.9 ms] [outer] sort
+[dbg     880.1 ms] [outer] reduce
+[dbg     881.0 ms] [outer] final
+[dbg     881.1 ms] [outer] pack
+[dbg     888.3 ms] [outer] d2h
+[dbg     889.5 ms] T5 outer self_product: done (C_nnz=2172140)
+[dbg     891.2 ms] T6 colwise self_product: start
+[dbg     891.2 ms] [colw] start
+[dbg     893.2 ms] [colw] h2d
+[dbg     893.9 ms] [colw] csc
+[dbg     893.9 ms] [colw] count
+[dbg     894.0 ms] [colw] scan
+[dbg     895.1 ms] [colw] expand
+[dbg     907.5 ms] [colw] sort
+[dbg     908.8 ms] [colw] reduce
+[dbg     913.0 ms] [colw] final
+[dbg     913.3 ms] [colw] pack
+[dbg     932.8 ms] [colw] d2h
+[dbg     935.1 ms] T6 colwise self_product: done (C_nnz=2172140)
+[dbg     939.7 ms] T7 inner self_product: start
+[dbg     939.7 ms] [inner] start
+[dbg     942.2 ms] [inner] h2d
+[dbg     943.1 ms] [inner] csc
+[dbg     943.2 ms] [inner] count
+[dbg     943.2 ms] [inner] scan
+[dbg     944.4 ms] [inner] expand
+[dbg     957.0 ms] [inner] sort
+[dbg     958.2 ms] [inner] reduce
+[dbg     959.1 ms] [inner] final
+[dbg     960.3 ms] [inner] numeric
+[dbg     960.6 ms] [inner] pack
+[dbg     968.5 ms] [inner] d2h
+[dbg     969.3 ms] T7 inner self_product: done (C_nnz=2172140)
+Reading matrix from ./data/rep/nemeth20.mtx...
+Input A: 9506 x 9506, nnz = 971870, sparsity = 98.92%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 9506 x 9506, nnz = 2172140, sparsity = 97.60%
+Time: 13.974 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 9506 x 9506, nnz = 2172140, sparsity = 97.60%
+Time: 25.739 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 9506 x 9506, nnz = 2172140, sparsity = 97.60%
+Time: 25.747 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 9506 x 9506, nnz = 2172140, sparsity = 97.60%
+Time: 43.931 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 9506 x 9506, nnz = 2172140, sparsity = 97.60%
+Time: 29.635 ms
+
+=== All tests completed ===
+Processing polbooks ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     465.0 ms] CUDA context ready
+[dbg     465.2 ms] start read_matrix_market: ./data/rep/polbooks.mtx
+[dbg     465.3 ms] read done: 105 x 105, nnz=882
+[dbg     465.3 ms] [cu] start
+[dbg     473.7 ms] [cu] h2d (7480 B)
+[dbg     473.8 ms] cusparse: workEstimation begin
+[dbg     500.6 ms] [cu] workest (buf1=11647 B)
+[dbg     500.6 ms] cusparse: compute begin
+[dbg     501.2 ms] [cu] compute (buf2=257767 B)
+[dbg     501.2 ms] cusparse: C size = 105 x 105, nnz=4073
+[dbg     501.2 ms] cusparse: copy begin
+[dbg     501.3 ms] [cu] copy
+[dbg     501.4 ms] [cu] pack
+[dbg     502.8 ms] self_product: C D2H begin (33008 B)
+[dbg     502.9 ms] [cu] d2h
+[dbg     503.3 ms] [gust] start
+[dbg     503.4 ms] [gust] h2d
+[dbg     503.4 ms] ESC: count intermediates begin
+[dbg     504.8 ms] [gust] count
+[dbg     505.1 ms] [gust] scan
+[dbg     505.1 ms] ESC: expand begin (10526 intermediates)
+[dbg     505.1 ms] [gust] expand
+[dbg     505.1 ms] ESC: sort_by_key begin
+[dbg     505.4 ms] [gust] sort
+[dbg     505.4 ms] ESC: reduce_by_key begin
+[dbg     505.5 ms] [gust] reduce
+[dbg     505.6 ms] [gust] final
+[dbg     505.6 ms] [gust] pack
+[dbg     507.0 ms] [gust] d2h
+[dbg     507.3 ms] [outer] start
+[dbg     507.4 ms] [outer] h2d
+[dbg     508.9 ms] [outer] csc
+[dbg     508.9 ms] [outer] count
+[dbg     509.0 ms] [outer] scan
+[dbg     509.0 ms] [outer] expand
+[dbg     509.1 ms] [outer] sort
+[dbg     509.2 ms] [outer] reduce
+[dbg     509.2 ms] [outer] final
+[dbg     509.2 ms] [outer] pack
+[dbg     510.2 ms] [outer] d2h
+[dbg     510.6 ms] [colw] start
+[dbg     510.7 ms] [colw] h2d
+[dbg     510.8 ms] [colw] csc
+[dbg     510.8 ms] [colw] count
+[dbg     510.9 ms] [colw] scan
+[dbg     510.9 ms] [colw] expand
+[dbg     511.0 ms] [colw] sort
+[dbg     511.1 ms] [colw] reduce
+[dbg     511.1 ms] [colw] final
+[dbg     511.2 ms] [colw] pack
+[dbg     512.0 ms] [colw] d2h
+[dbg     512.4 ms] [inner] start
+[dbg     512.5 ms] [inner] h2d
+[dbg     512.6 ms] [inner] csc
+[dbg     512.6 ms] [inner] count
+[dbg     512.6 ms] [inner] scan
+[dbg     512.7 ms] [inner] expand
+[dbg     512.8 ms] [inner] sort
+[dbg     512.8 ms] [inner] reduce
+[dbg     512.9 ms] [inner] final
+[dbg     512.9 ms] [inner] numeric
+[dbg     512.9 ms] [inner] pack
+[dbg     513.8 ms] [inner] d2h
+[dbg     514.1 ms] warmup done
+[dbg     514.1 ms] T1 cuSPARSE self_product: start
+[dbg     514.1 ms] [cu] start
+[dbg     514.2 ms] [cu] h2d (7480 B)
+[dbg     514.2 ms] cusparse: workEstimation begin
+[dbg     514.3 ms] [cu] workest (buf1=11647 B)
+[dbg     514.3 ms] cusparse: compute begin
+[dbg     514.5 ms] [cu] compute (buf2=257767 B)
+[dbg     514.5 ms] cusparse: C size = 105 x 105, nnz=4073
+[dbg     514.5 ms] cusparse: copy begin
+[dbg     514.5 ms] [cu] copy
+[dbg     514.5 ms] [cu] pack
+[dbg     515.4 ms] self_product: C D2H begin (33008 B)
+[dbg     515.4 ms] [cu] d2h
+[dbg     515.5 ms] T1 cuSPARSE self_product: done (C_nnz=4073)
+[dbg     515.8 ms] T4 manual self_product: start
+[dbg     515.8 ms] [gust] start
+[dbg     515.8 ms] [gust] h2d
+[dbg     515.8 ms] ESC: count intermediates begin
+[dbg     515.9 ms] [gust] count
+[dbg     515.9 ms] [gust] scan
+[dbg     515.9 ms] ESC: expand begin (10526 intermediates)
+[dbg     515.9 ms] [gust] expand
+[dbg     515.9 ms] ESC: sort_by_key begin
+[dbg     516.1 ms] [gust] sort
+[dbg     516.1 ms] ESC: reduce_by_key begin
+[dbg     516.1 ms] [gust] reduce
+[dbg     516.1 ms] [gust] final
+[dbg     516.2 ms] [gust] pack
+[dbg     516.9 ms] [gust] d2h
+[dbg     517.1 ms] T4 manual self_product: done (C_nnz=4073)
+[dbg     517.4 ms] T5 outer self_product: start
+[dbg     517.4 ms] [outer] start
+[dbg     517.5 ms] [outer] h2d
+[dbg     517.6 ms] [outer] csc
+[dbg     517.6 ms] [outer] count
+[dbg     517.6 ms] [outer] scan
+[dbg     517.6 ms] [outer] expand
+[dbg     517.7 ms] [outer] sort
+[dbg     517.8 ms] [outer] reduce
+[dbg     517.8 ms] [outer] final
+[dbg     517.9 ms] [outer] pack
+[dbg     518.7 ms] [outer] d2h
+[dbg     518.8 ms] T5 outer self_product: done (C_nnz=4073)
+[dbg     519.1 ms] T6 colwise self_product: start
+[dbg     519.1 ms] [colw] start
+[dbg     519.2 ms] [colw] h2d
+[dbg     519.3 ms] [colw] csc
+[dbg     519.3 ms] [colw] count
+[dbg     519.3 ms] [colw] scan
+[dbg     519.3 ms] [colw] expand
+[dbg     519.4 ms] [colw] sort
+[dbg     519.5 ms] [colw] reduce
+[dbg     519.5 ms] [colw] final
+[dbg     519.6 ms] [colw] pack
+[dbg     520.3 ms] [colw] d2h
+[dbg     520.5 ms] T6 colwise self_product: done (C_nnz=4073)
+[dbg     520.8 ms] T7 inner self_product: start
+[dbg     520.8 ms] [inner] start
+[dbg     520.9 ms] [inner] h2d
+[dbg     520.9 ms] [inner] csc
+[dbg     521.0 ms] [inner] count
+[dbg     521.0 ms] [inner] scan
+[dbg     521.0 ms] [inner] expand
+[dbg     521.1 ms] [inner] sort
+[dbg     521.2 ms] [inner] reduce
+[dbg     521.2 ms] [inner] final
+[dbg     521.2 ms] [inner] numeric
+[dbg     521.3 ms] [inner] pack
+[dbg     522.1 ms] [inner] d2h
+[dbg     522.2 ms] T7 inner self_product: done (C_nnz=4073)
+Reading matrix from ./data/rep/polbooks.mtx...
+Input A: 105 x 105, nnz = 882, sparsity = 92.00%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 105 x 105, nnz = 4073, sparsity = 63.06%
+Time: 1.335 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 105 x 105, nnz = 4073, sparsity = 63.06%
+Time: 1.305 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 105 x 105, nnz = 4073, sparsity = 63.06%
+Time: 1.409 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 105 x 105, nnz = 4073, sparsity = 63.06%
+Time: 1.399 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 105 x 105, nnz = 4073, sparsity = 63.06%
+Time: 1.415 ms
+
+=== All tests completed ===
+Processing poli_large ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     477.7 ms] CUDA context ready
+[dbg     477.9 ms] start read_matrix_market: ./data/rep/poli_large.mtx
+[dbg     486.4 ms] read done: 15575 x 15575, nnz=33074
+[dbg     486.4 ms] [cu] start
+[dbg     494.1 ms] [cu] h2d (326896 B)
+[dbg     494.2 ms] cusparse: workEstimation begin
+[dbg     520.2 ms] [cu] workest (buf1=398463 B)
+[dbg     520.2 ms] cusparse: compute begin
+[dbg     521.0 ms] [cu] compute (buf2=2024511 B)
+[dbg     521.0 ms] cusparse: C size = 15575 x 15575, nnz=59649
+[dbg     521.0 ms] cusparse: copy begin
+[dbg     521.1 ms] [cu] copy
+[dbg     521.2 ms] [cu] pack
+[dbg     522.6 ms] self_product: C D2H begin (539496 B)
+[dbg     522.7 ms] [cu] d2h
+[dbg     523.2 ms] [gust] start
+[dbg     523.3 ms] [gust] h2d
+[dbg     523.3 ms] ESC: count intermediates begin
+[dbg     524.8 ms] [gust] count
+[dbg     525.1 ms] [gust] scan
+[dbg     525.1 ms] ESC: expand begin (78904 intermediates)
+[dbg     525.2 ms] [gust] expand
+[dbg     525.2 ms] ESC: sort_by_key begin
+[dbg     525.6 ms] [gust] sort
+[dbg     525.7 ms] ESC: reduce_by_key begin
+[dbg     525.9 ms] [gust] reduce
+[dbg     526.0 ms] [gust] final
+[dbg     526.0 ms] [gust] pack
+[dbg     527.3 ms] [gust] d2h
+[dbg     527.7 ms] [outer] start
+[dbg     527.8 ms] [outer] h2d
+[dbg     529.6 ms] [outer] csc
+[dbg     529.6 ms] [outer] count
+[dbg     529.6 ms] [outer] scan
+[dbg     529.7 ms] [outer] expand
+[dbg     530.0 ms] [outer] sort
+[dbg     530.2 ms] [outer] reduce
+[dbg     530.2 ms] [outer] final
+[dbg     530.3 ms] [outer] pack
+[dbg     531.3 ms] [outer] d2h
+[dbg     531.8 ms] [colw] start
+[dbg     532.0 ms] [colw] h2d
+[dbg     532.3 ms] [colw] csc
+[dbg     532.3 ms] [colw] count
+[dbg     532.4 ms] [colw] scan
+[dbg     532.4 ms] [colw] expand
+[dbg     532.7 ms] [colw] sort
+[dbg     532.8 ms] [colw] reduce
+[dbg     532.9 ms] [colw] final
+[dbg     532.9 ms] [colw] pack
+[dbg     533.8 ms] [colw] d2h
+[dbg     534.3 ms] [inner] start
+[dbg     534.4 ms] [inner] h2d
+[dbg     534.7 ms] [inner] csc
+[dbg     534.7 ms] [inner] count
+[dbg     534.8 ms] [inner] scan
+[dbg     534.9 ms] [inner] expand
+[dbg     535.2 ms] [inner] sort
+[dbg     535.3 ms] [inner] reduce
+[dbg     535.4 ms] [inner] final
+[dbg     535.6 ms] [inner] numeric
+[dbg     535.6 ms] [inner] pack
+[dbg     536.5 ms] [inner] d2h
+[dbg     537.0 ms] warmup done
+[dbg     537.0 ms] T1 cuSPARSE self_product: start
+[dbg     537.0 ms] [cu] start
+[dbg     537.1 ms] [cu] h2d (326896 B)
+[dbg     537.1 ms] cusparse: workEstimation begin
+[dbg     537.2 ms] [cu] workest (buf1=398463 B)
+[dbg     537.2 ms] cusparse: compute begin
+[dbg     537.5 ms] [cu] compute (buf2=2024511 B)
+[dbg     537.5 ms] cusparse: C size = 15575 x 15575, nnz=59649
+[dbg     537.5 ms] cusparse: copy begin
+[dbg     537.6 ms] [cu] copy
+[dbg     537.6 ms] [cu] pack
+[dbg     538.5 ms] self_product: C D2H begin (539496 B)
+[dbg     538.6 ms] [cu] d2h
+[dbg     538.7 ms] T1 cuSPARSE self_product: done (C_nnz=59649)
+[dbg     538.9 ms] T4 manual self_product: start
+[dbg     538.9 ms] [gust] start
+[dbg     539.1 ms] [gust] h2d
+[dbg     539.1 ms] ESC: count intermediates begin
+[dbg     539.1 ms] [gust] count
+[dbg     539.2 ms] [gust] scan
+[dbg     539.2 ms] ESC: expand begin (78904 intermediates)
+[dbg     539.3 ms] [gust] expand
+[dbg     539.3 ms] ESC: sort_by_key begin
+[dbg     539.6 ms] [gust] sort
+[dbg     539.7 ms] ESC: reduce_by_key begin
+[dbg     539.7 ms] [gust] reduce
+[dbg     539.8 ms] [gust] final
+[dbg     539.8 ms] [gust] pack
+[dbg     540.7 ms] [gust] d2h
+[dbg     540.8 ms] T4 manual self_product: done (C_nnz=59649)
+[dbg     541.1 ms] T5 outer self_product: start
+[dbg     541.1 ms] [outer] start
+[dbg     541.2 ms] [outer] h2d
+[dbg     541.5 ms] [outer] csc
+[dbg     541.5 ms] [outer] count
+[dbg     541.6 ms] [outer] scan
+[dbg     541.6 ms] [outer] expand
+[dbg     542.0 ms] [outer] sort
+[dbg     542.1 ms] [outer] reduce
+[dbg     542.1 ms] [outer] final
+[dbg     542.2 ms] [outer] pack
+[dbg     543.0 ms] [outer] d2h
+[dbg     543.2 ms] T5 outer self_product: done (C_nnz=59649)
+[dbg     543.5 ms] T6 colwise self_product: start
+[dbg     543.5 ms] [colw] start
+[dbg     543.6 ms] [colw] h2d
+[dbg     543.9 ms] [colw] csc
+[dbg     543.9 ms] [colw] count
+[dbg     543.9 ms] [colw] scan
+[dbg     544.0 ms] [colw] expand
+[dbg     544.3 ms] [colw] sort
+[dbg     544.4 ms] [colw] reduce
+[dbg     544.4 ms] [colw] final
+[dbg     544.5 ms] [colw] pack
+[dbg     545.3 ms] [colw] d2h
+[dbg     545.5 ms] T6 colwise self_product: done (C_nnz=59649)
+[dbg     545.8 ms] T7 inner self_product: start
+[dbg     545.8 ms] [inner] start
+[dbg     545.9 ms] [inner] h2d
+[dbg     546.2 ms] [inner] csc
+[dbg     546.2 ms] [inner] count
+[dbg     546.3 ms] [inner] scan
+[dbg     546.3 ms] [inner] expand
+[dbg     546.7 ms] [inner] sort
+[dbg     546.8 ms] [inner] reduce
+[dbg     546.8 ms] [inner] final
+[dbg     547.0 ms] [inner] numeric
+[dbg     547.1 ms] [inner] pack
+[dbg     547.9 ms] [inner] d2h
+[dbg     548.1 ms] T7 inner self_product: done (C_nnz=59649)
+Reading matrix from ./data/rep/poli_large.mtx...
+Input A: 15575 x 15575, nnz = 33074, sparsity = 99.99%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 15575 x 15575, nnz = 59649, sparsity = 99.98%
+Time: 1.696 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 15575 x 15575, nnz = 59649, sparsity = 99.98%
+Time: 1.886 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 15575 x 15575, nnz = 59649, sparsity = 99.98%
+Time: 2.097 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 15575 x 15575, nnz = 59649, sparsity = 99.98%
+Time: 2.041 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 15575 x 15575, nnz = 59649, sparsity = 99.98%
+Time: 2.307 ms
+
+=== All tests completed ===
+Processing raefsky6 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     475.4 ms] CUDA context ready
+[dbg     475.5 ms] start read_matrix_market: ./data/rep/raefsky6.mtx
+[dbg     516.9 ms] read done: 3402 x 3402, nnz=137845
+[dbg     517.0 ms] [cu] start
+[dbg     524.9 ms] [cu] h2d (1116372 B)
+[dbg     525.0 ms] cusparse: workEstimation begin
+[dbg     551.4 ms] [cu] workest (buf1=1657507 B)
+[dbg     551.4 ms] cusparse: compute begin
+[dbg     552.7 ms] [cu] compute (buf2=91781375 B)
+[dbg     552.7 ms] cusparse: C size = 3402 x 3402, nnz=356032
+[dbg     552.9 ms] cusparse: copy begin
+[dbg     553.0 ms] [cu] copy
+[dbg     553.1 ms] [cu] pack
+[dbg     555.3 ms] self_product: C D2H begin (2861868 B)
+[dbg     555.6 ms] [cu] d2h
+[dbg     556.2 ms] [gust] start
+[dbg     556.6 ms] [gust] h2d
+[dbg     556.6 ms] ESC: count intermediates begin
+[dbg     558.3 ms] [gust] count
+[dbg     558.4 ms] [gust] scan
+[dbg     558.7 ms] ESC: expand begin (3820703 intermediates)
+[dbg     558.8 ms] [gust] expand
+[dbg     558.8 ms] ESC: sort_by_key begin
+[dbg     559.7 ms] [gust] sort
+[dbg     559.8 ms] ESC: reduce_by_key begin
+[dbg     560.0 ms] [gust] reduce
+[dbg     560.6 ms] [gust] final
+[dbg     560.8 ms] [gust] pack
+[dbg     562.7 ms] [gust] d2h
+[dbg     563.4 ms] [outer] start
+[dbg     563.7 ms] [outer] h2d
+[dbg     565.6 ms] [outer] csc
+[dbg     565.6 ms] [outer] count
+[dbg     565.6 ms] [outer] scan
+[dbg     565.9 ms] [outer] expand
+[dbg     566.6 ms] [outer] sort
+[dbg     566.8 ms] [outer] reduce
+[dbg     567.2 ms] [outer] final
+[dbg     567.4 ms] [outer] pack
+[dbg     569.1 ms] [outer] d2h
+[dbg     570.0 ms] [colw] start
+[dbg     570.3 ms] [colw] h2d
+[dbg     570.8 ms] [colw] csc
+[dbg     570.9 ms] [colw] count
+[dbg     570.9 ms] [colw] scan
+[dbg     571.2 ms] [colw] expand
+[dbg     571.9 ms] [colw] sort
+[dbg     572.1 ms] [colw] reduce
+[dbg     572.5 ms] [colw] final
+[dbg     572.6 ms] [colw] pack
+[dbg     574.4 ms] [colw] d2h
+[dbg     575.2 ms] [inner] start
+[dbg     575.5 ms] [inner] h2d
+[dbg     575.9 ms] [inner] csc
+[dbg     575.9 ms] [inner] count
+[dbg     576.0 ms] [inner] scan
+[dbg     576.2 ms] [inner] expand
+[dbg     576.9 ms] [inner] sort
+[dbg     577.1 ms] [inner] reduce
+[dbg     577.5 ms] [inner] final
+[dbg     577.8 ms] [inner] numeric
+[dbg     577.9 ms] [inner] pack
+[dbg     579.7 ms] [inner] d2h
+[dbg     580.4 ms] warmup done
+[dbg     580.4 ms] T1 cuSPARSE self_product: start
+[dbg     580.4 ms] [cu] start
+[dbg     580.7 ms] [cu] h2d (1116372 B)
+[dbg     580.7 ms] cusparse: workEstimation begin
+[dbg     580.9 ms] [cu] workest (buf1=1657507 B)
+[dbg     580.9 ms] cusparse: compute begin
+[dbg     581.5 ms] [cu] compute (buf2=91781375 B)
+[dbg     581.5 ms] cusparse: C size = 3402 x 3402, nnz=356032
+[dbg     581.6 ms] cusparse: copy begin
+[dbg     581.7 ms] [cu] copy
+[dbg     581.8 ms] [cu] pack
+[dbg     583.6 ms] self_product: C D2H begin (2861868 B)
+[dbg     583.8 ms] [cu] d2h
+[dbg     584.0 ms] T1 cuSPARSE self_product: done (C_nnz=356032)
+[dbg     584.4 ms] T4 manual self_product: start
+[dbg     584.4 ms] [gust] start
+[dbg     584.6 ms] [gust] h2d
+[dbg     584.6 ms] ESC: count intermediates begin
+[dbg     584.7 ms] [gust] count
+[dbg     584.8 ms] [gust] scan
+[dbg     585.0 ms] ESC: expand begin (3820703 intermediates)
+[dbg     585.1 ms] [gust] expand
+[dbg     585.1 ms] ESC: sort_by_key begin
+[dbg     585.9 ms] [gust] sort
+[dbg     586.0 ms] ESC: reduce_by_key begin
+[dbg     586.1 ms] [gust] reduce
+[dbg     586.6 ms] [gust] final
+[dbg     586.7 ms] [gust] pack
+[dbg     588.4 ms] [gust] d2h
+[dbg     588.7 ms] T4 manual self_product: done (C_nnz=356032)
+[dbg     589.1 ms] T5 outer self_product: start
+[dbg     589.1 ms] [outer] start
+[dbg     589.3 ms] [outer] h2d
+[dbg     589.7 ms] [outer] csc
+[dbg     589.7 ms] [outer] count
+[dbg     589.8 ms] [outer] scan
+[dbg     590.0 ms] [outer] expand
+[dbg     590.7 ms] [outer] sort
+[dbg     590.9 ms] [outer] reduce
+[dbg     591.2 ms] [outer] final
+[dbg     591.3 ms] [outer] pack
+[dbg     593.1 ms] [outer] d2h
+[dbg     593.6 ms] T5 outer self_product: done (C_nnz=356032)
+[dbg     593.9 ms] T6 colwise self_product: start
+[dbg     593.9 ms] [colw] start
+[dbg     594.2 ms] [colw] h2d
+[dbg     594.6 ms] [colw] csc
+[dbg     594.6 ms] [colw] count
+[dbg     594.6 ms] [colw] scan
+[dbg     594.8 ms] [colw] expand
+[dbg     595.6 ms] [colw] sort
+[dbg     595.8 ms] [colw] reduce
+[dbg     596.1 ms] [colw] final
+[dbg     596.2 ms] [colw] pack
+[dbg     597.9 ms] [colw] d2h
+[dbg     598.4 ms] T6 colwise self_product: done (C_nnz=356032)
+[dbg     598.8 ms] T7 inner self_product: start
+[dbg     598.8 ms] [inner] start
+[dbg     599.0 ms] [inner] h2d
+[dbg     599.4 ms] [inner] csc
+[dbg     599.4 ms] [inner] count
+[dbg     599.5 ms] [inner] scan
+[dbg     599.7 ms] [inner] expand
+[dbg     600.5 ms] [inner] sort
+[dbg     600.7 ms] [inner] reduce
+[dbg     601.0 ms] [inner] final
+[dbg     601.3 ms] [inner] numeric
+[dbg     601.4 ms] [inner] pack
+[dbg     603.1 ms] [inner] d2h
+[dbg     603.4 ms] T7 inner self_product: done (C_nnz=356032)
+Reading matrix from ./data/rep/raefsky6.mtx...
+Input A: 3402 x 3402, nnz = 137845, sparsity = 98.81%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 3402 x 3402, nnz = 356032, sparsity = 96.92%
+Time: 3.631 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 3402 x 3402, nnz = 356032, sparsity = 96.92%
+Time: 4.347 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 3402 x 3402, nnz = 356032, sparsity = 96.92%
+Time: 4.515 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 3402 x 3402, nnz = 356032, sparsity = 96.92%
+Time: 4.485 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 3402 x 3402, nnz = 356032, sparsity = 96.92%
+Time: 4.670 ms
+
+=== All tests completed ===
+Processing rgg010 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     490.1 ms] CUDA context ready
+[dbg     490.3 ms] start read_matrix_market: ./data/rep/rgg010.mtx
+[dbg     490.3 ms] read done: 10 x 10, nnz=76
+[dbg     490.3 ms] [cu] start
+[dbg     498.4 ms] [cu] h2d (652 B)
+[dbg     498.4 ms] cusparse: workEstimation begin
+[dbg     524.1 ms] [cu] workest (buf1=1975 B)
+[dbg     524.1 ms] cusparse: compute begin
+[dbg     524.7 ms] [cu] compute (buf2=18199 B)
+[dbg     524.7 ms] cusparse: C size = 10 x 10, nnz=100
+[dbg     524.8 ms] cusparse: copy begin
+[dbg     524.9 ms] [cu] copy
+[dbg     524.9 ms] [cu] pack
+[dbg     526.3 ms] self_product: C D2H begin (844 B)
+[dbg     526.4 ms] [cu] d2h
+[dbg     526.8 ms] [gust] start
+[dbg     526.9 ms] [gust] h2d
+[dbg     526.9 ms] ESC: count intermediates begin
+[dbg     528.5 ms] [gust] count
+[dbg     528.8 ms] [gust] scan
+[dbg     528.8 ms] ESC: expand begin (544 intermediates)
+[dbg     528.8 ms] [gust] expand
+[dbg     528.8 ms] ESC: sort_by_key begin
+[dbg     528.9 ms] [gust] sort
+[dbg     528.9 ms] ESC: reduce_by_key begin
+[dbg     529.1 ms] [gust] reduce
+[dbg     529.2 ms] [gust] final
+[dbg     529.2 ms] [gust] pack
+[dbg     530.5 ms] [gust] d2h
+[dbg     530.9 ms] [outer] start
+[dbg     531.0 ms] [outer] h2d
+[dbg     532.6 ms] [outer] csc
+[dbg     532.7 ms] [outer] count
+[dbg     532.7 ms] [outer] scan
+[dbg     532.8 ms] [outer] expand
+[dbg     532.8 ms] [outer] sort
+[dbg     532.9 ms] [outer] reduce
+[dbg     532.9 ms] [outer] final
+[dbg     532.9 ms] [outer] pack
+[dbg     534.0 ms] [outer] d2h
+[dbg     534.4 ms] [colw] start
+[dbg     534.5 ms] [colw] h2d
+[dbg     534.6 ms] [colw] csc
+[dbg     534.7 ms] [colw] count
+[dbg     534.7 ms] [colw] scan
+[dbg     534.7 ms] [colw] expand
+[dbg     534.8 ms] [colw] sort
+[dbg     534.8 ms] [colw] reduce
+[dbg     534.9 ms] [colw] final
+[dbg     534.9 ms] [colw] pack
+[dbg     535.8 ms] [colw] d2h
+[dbg     536.2 ms] [inner] start
+[dbg     536.3 ms] [inner] h2d
+[dbg     536.4 ms] [inner] csc
+[dbg     536.4 ms] [inner] count
+[dbg     536.4 ms] [inner] scan
+[dbg     536.5 ms] [inner] expand
+[dbg     536.5 ms] [inner] sort
+[dbg     536.6 ms] [inner] reduce
+[dbg     536.6 ms] [inner] final
+[dbg     536.7 ms] [inner] numeric
+[dbg     536.7 ms] [inner] pack
+[dbg     537.5 ms] [inner] d2h
+[dbg     538.0 ms] warmup done
+[dbg     538.0 ms] T1 cuSPARSE self_product: start
+[dbg     538.0 ms] [cu] start
+[dbg     538.1 ms] [cu] h2d (652 B)
+[dbg     538.1 ms] cusparse: workEstimation begin
+[dbg     538.2 ms] [cu] workest (buf1=1975 B)
+[dbg     538.2 ms] cusparse: compute begin
+[dbg     538.4 ms] [cu] compute (buf2=18199 B)
+[dbg     538.4 ms] cusparse: C size = 10 x 10, nnz=100
+[dbg     538.4 ms] cusparse: copy begin
+[dbg     538.4 ms] [cu] copy
+[dbg     538.5 ms] [cu] pack
+[dbg     539.3 ms] self_product: C D2H begin (844 B)
+[dbg     539.3 ms] [cu] d2h
+[dbg     539.4 ms] T1 cuSPARSE self_product: done (C_nnz=100)
+[dbg     539.7 ms] T4 manual self_product: start
+[dbg     539.7 ms] [gust] start
+[dbg     539.8 ms] [gust] h2d
+[dbg     539.8 ms] ESC: count intermediates begin
+[dbg     539.8 ms] [gust] count
+[dbg     539.8 ms] [gust] scan
+[dbg     539.9 ms] ESC: expand begin (544 intermediates)
+[dbg     539.9 ms] [gust] expand
+[dbg     539.9 ms] ESC: sort_by_key begin
+[dbg     539.9 ms] [gust] sort
+[dbg     539.9 ms] ESC: reduce_by_key begin
+[dbg     540.0 ms] [gust] reduce
+[dbg     540.0 ms] [gust] final
+[dbg     540.0 ms] [gust] pack
+[dbg     540.9 ms] [gust] d2h
+[dbg     541.0 ms] T4 manual self_product: done (C_nnz=100)
+[dbg     541.3 ms] T5 outer self_product: start
+[dbg     541.3 ms] [outer] start
+[dbg     541.4 ms] [outer] h2d
+[dbg     541.4 ms] [outer] csc
+[dbg     541.4 ms] [outer] count
+[dbg     541.5 ms] [outer] scan
+[dbg     541.5 ms] [outer] expand
+[dbg     541.6 ms] [outer] sort
+[dbg     541.6 ms] [outer] reduce
+[dbg     541.7 ms] [outer] final
+[dbg     541.7 ms] [outer] pack
+[dbg     542.5 ms] [outer] d2h
+[dbg     542.6 ms] T5 outer self_product: done (C_nnz=100)
+[dbg     542.9 ms] T6 colwise self_product: start
+[dbg     542.9 ms] [colw] start
+[dbg     543.0 ms] [colw] h2d
+[dbg     543.1 ms] [colw] csc
+[dbg     543.1 ms] [colw] count
+[dbg     543.1 ms] [colw] scan
+[dbg     543.2 ms] [colw] expand
+[dbg     543.2 ms] [colw] sort
+[dbg     543.2 ms] [colw] reduce
+[dbg     543.3 ms] [colw] final
+[dbg     543.3 ms] [colw] pack
+[dbg     544.1 ms] [colw] d2h
+[dbg     544.3 ms] T6 colwise self_product: done (C_nnz=100)
+[dbg     544.6 ms] T7 inner self_product: start
+[dbg     544.6 ms] [inner] start
+[dbg     544.7 ms] [inner] h2d
+[dbg     544.8 ms] [inner] csc
+[dbg     544.8 ms] [inner] count
+[dbg     544.9 ms] [inner] scan
+[dbg     544.9 ms] [inner] expand
+[dbg     544.9 ms] [inner] sort
+[dbg     545.0 ms] [inner] reduce
+[dbg     545.0 ms] [inner] final
+[dbg     545.0 ms] [inner] numeric
+[dbg     545.1 ms] [inner] pack
+[dbg     545.9 ms] [inner] d2h
+[dbg     546.0 ms] T7 inner self_product: done (C_nnz=100)
+Reading matrix from ./data/rep/rgg010.mtx...
+Input A: 10 x 10, nnz = 76, sparsity = 24.00%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 10 x 10, nnz = 100, sparsity = 0.00%
+Time: 1.354 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 10 x 10, nnz = 100, sparsity = 0.00%
+Time: 1.305 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 10 x 10, nnz = 100, sparsity = 0.00%
+Time: 1.369 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 10 x 10, nnz = 100, sparsity = 0.00%
+Time: 1.376 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 10 x 10, nnz = 100, sparsity = 0.00%
+Time: 1.448 ms
+
+=== All tests completed ===
+Processing sherman5 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     485.1 ms] CUDA context ready
+[dbg     485.3 ms] start read_matrix_market: ./data/rep/sherman5.mtx
+[dbg     491.2 ms] read done: 3312 x 3312, nnz=20793
+[dbg     491.3 ms] [cu] start
+[dbg     499.3 ms] [cu] h2d (179596 B)
+[dbg     499.4 ms] cusparse: workEstimation begin
+[dbg     526.9 ms] [cu] workest (buf1=250835 B)
+[dbg     526.9 ms] cusparse: compute begin
+[dbg     527.7 ms] [cu] compute (buf2=5742975 B)
+[dbg     527.7 ms] cusparse: C size = 3312 x 3312, nnz=78821
+[dbg     527.8 ms] cusparse: copy begin
+[dbg     527.9 ms] [cu] copy
+[dbg     527.9 ms] [cu] pack
+[dbg     529.4 ms] self_product: C D2H begin (643820 B)
+[dbg     529.5 ms] [cu] d2h
+[dbg     529.9 ms] [gust] start
+[dbg     530.1 ms] [gust] h2d
+[dbg     530.1 ms] ESC: count intermediates begin
+[dbg     531.7 ms] [gust] count
+[dbg     531.9 ms] [gust] scan
+[dbg     532.1 ms] ESC: expand begin (237936 intermediates)
+[dbg     532.1 ms] [gust] expand
+[dbg     532.1 ms] ESC: sort_by_key begin
+[dbg     532.6 ms] [gust] sort
+[dbg     532.7 ms] ESC: reduce_by_key begin
+[dbg     532.9 ms] [gust] reduce
+[dbg     533.0 ms] [gust] final
+[dbg     533.0 ms] [gust] pack
+[dbg     534.3 ms] [gust] d2h
+[dbg     534.8 ms] [outer] start
+[dbg     534.9 ms] [outer] h2d
+[dbg     536.6 ms] [outer] csc
+[dbg     536.6 ms] [outer] count
+[dbg     536.6 ms] [outer] scan
+[dbg     536.8 ms] [outer] expand
+[dbg     537.1 ms] [outer] sort
+[dbg     537.2 ms] [outer] reduce
+[dbg     537.5 ms] [outer] final
+[dbg     537.5 ms] [outer] pack
+[dbg     538.6 ms] [outer] d2h
+[dbg     539.2 ms] [colw] start
+[dbg     539.3 ms] [colw] h2d
+[dbg     539.4 ms] [colw] csc
+[dbg     539.5 ms] [colw] count
+[dbg     539.5 ms] [colw] scan
+[dbg     539.8 ms] [colw] expand
+[dbg     540.1 ms] [colw] sort
+[dbg     540.3 ms] [colw] reduce
+[dbg     540.5 ms] [colw] final
+[dbg     540.6 ms] [colw] pack
+[dbg     541.9 ms] [colw] d2h
+[dbg     542.4 ms] [inner] start
+[dbg     542.6 ms] [inner] h2d
+[dbg     542.7 ms] [inner] csc
+[dbg     542.7 ms] [inner] count
+[dbg     542.7 ms] [inner] scan
+[dbg     542.9 ms] [inner] expand
+[dbg     543.2 ms] [inner] sort
+[dbg     543.3 ms] [inner] reduce
+[dbg     543.5 ms] [inner] final
+[dbg     543.6 ms] [inner] numeric
+[dbg     543.6 ms] [inner] pack
+[dbg     544.8 ms] [inner] d2h
+[dbg     545.1 ms] warmup done
+[dbg     545.1 ms] T1 cuSPARSE self_product: start
+[dbg     545.1 ms] [cu] start
+[dbg     545.3 ms] [cu] h2d (179596 B)
+[dbg     545.3 ms] cusparse: workEstimation begin
+[dbg     545.4 ms] [cu] workest (buf1=250835 B)
+[dbg     545.4 ms] cusparse: compute begin
+[dbg     545.6 ms] [cu] compute (buf2=5742975 B)
+[dbg     545.6 ms] cusparse: C size = 3312 x 3312, nnz=78821
+[dbg     545.7 ms] cusparse: copy begin
+[dbg     545.7 ms] [cu] copy
+[dbg     545.7 ms] [cu] pack
+[dbg     546.7 ms] self_product: C D2H begin (643820 B)
+[dbg     546.7 ms] [cu] d2h
+[dbg     546.8 ms] T1 cuSPARSE self_product: done (C_nnz=78821)
+[dbg     547.1 ms] T4 manual self_product: start
+[dbg     547.1 ms] [gust] start
+[dbg     547.2 ms] [gust] h2d
+[dbg     547.2 ms] ESC: count intermediates begin
+[dbg     547.2 ms] [gust] count
+[dbg     547.3 ms] [gust] scan
+[dbg     547.4 ms] ESC: expand begin (237936 intermediates)
+[dbg     547.5 ms] [gust] expand
+[dbg     547.5 ms] ESC: sort_by_key begin
+[dbg     547.7 ms] [gust] sort
+[dbg     547.8 ms] ESC: reduce_by_key begin
+[dbg     547.9 ms] [gust] reduce
+[dbg     548.0 ms] [gust] final
+[dbg     548.0 ms] [gust] pack
+[dbg     549.2 ms] [gust] d2h
+[dbg     549.5 ms] T4 manual self_product: done (C_nnz=78821)
+[dbg     549.7 ms] T5 outer self_product: start
+[dbg     549.7 ms] [outer] start
+[dbg     549.8 ms] [outer] h2d
+[dbg     549.9 ms] [outer] csc
+[dbg     550.0 ms] [outer] count
+[dbg     550.0 ms] [outer] scan
+[dbg     550.1 ms] [outer] expand
+[dbg     550.4 ms] [outer] sort
+[dbg     550.6 ms] [outer] reduce
+[dbg     550.8 ms] [outer] final
+[dbg     550.8 ms] [outer] pack
+[dbg     551.8 ms] [outer] d2h
+[dbg     552.0 ms] T5 outer self_product: done (C_nnz=78821)
+[dbg     552.3 ms] T6 colwise self_product: start
+[dbg     552.3 ms] [colw] start
+[dbg     552.4 ms] [colw] h2d
+[dbg     552.5 ms] [colw] csc
+[dbg     552.6 ms] [colw] count
+[dbg     552.6 ms] [colw] scan
+[dbg     552.7 ms] [colw] expand
+[dbg     553.0 ms] [colw] sort
+[dbg     553.1 ms] [colw] reduce
+[dbg     553.4 ms] [colw] final
+[dbg     553.4 ms] [colw] pack
+[dbg     554.5 ms] [colw] d2h
+[dbg     554.7 ms] T6 colwise self_product: done (C_nnz=78821)
+[dbg     555.0 ms] T7 inner self_product: start
+[dbg     555.0 ms] [inner] start
+[dbg     555.1 ms] [inner] h2d
+[dbg     555.2 ms] [inner] csc
+[dbg     555.2 ms] [inner] count
+[dbg     555.3 ms] [inner] scan
+[dbg     555.4 ms] [inner] expand
+[dbg     555.7 ms] [inner] sort
+[dbg     555.8 ms] [inner] reduce
+[dbg     556.0 ms] [inner] final
+[dbg     556.1 ms] [inner] numeric
+[dbg     556.1 ms] [inner] pack
+[dbg     557.0 ms] [inner] d2h
+[dbg     557.1 ms] T7 inner self_product: done (C_nnz=78821)
+Reading matrix from ./data/rep/sherman5.mtx...
+Input A: 3312 x 3312, nnz = 20793, sparsity = 99.81%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 3312 x 3312, nnz = 78821, sparsity = 99.28%
+Time: 1.691 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 3312 x 3312, nnz = 78821, sparsity = 99.28%
+Time: 2.367 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 3312 x 3312, nnz = 78821, sparsity = 99.28%
+Time: 2.303 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 3312 x 3312, nnz = 78821, sparsity = 99.28%
+Time: 2.394 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 3312 x 3312, nnz = 78821, sparsity = 99.28%
+Time: 2.147 ms
+
+=== All tests completed ===
+Processing tomography ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     476.4 ms] CUDA context ready
+[dbg     476.5 ms] start read_matrix_market: ./data/rep/tomography.mtx
+[dbg     484.6 ms] read done: 500 x 500, nnz=28726
+[dbg     484.6 ms] [cu] start
+[dbg     493.0 ms] [cu] h2d (231812 B)
+[dbg     493.0 ms] cusparse: workEstimation begin
+[dbg     518.8 ms] [cu] workest (buf1=346287 B)
+[dbg     518.8 ms] cusparse: compute begin
+[dbg     519.8 ms] [cu] compute (buf2=87983879 B)
+[dbg     519.8 ms] cusparse: C size = 500 x 500, nnz=208298
+[dbg     519.9 ms] cusparse: copy begin
+[dbg     520.0 ms] [cu] copy
+[dbg     520.1 ms] [cu] pack
+[dbg     521.6 ms] self_product: C D2H begin (1668388 B)
+[dbg     521.8 ms] [cu] d2h
+[dbg     522.3 ms] [gust] start
+[dbg     522.5 ms] [gust] h2d
+[dbg     522.5 ms] ESC: count intermediates begin
+[dbg     524.0 ms] [gust] count
+[dbg     524.3 ms] [gust] scan
+[dbg     524.4 ms] ESC: expand begin (3662602 intermediates)
+[dbg     524.6 ms] [gust] expand
+[dbg     524.6 ms] ESC: sort_by_key begin
+[dbg     525.5 ms] [gust] sort
+[dbg     525.7 ms] ESC: reduce_by_key begin
+[dbg     525.9 ms] [gust] reduce
+[dbg     526.3 ms] [gust] final
+[dbg     526.4 ms] [gust] pack
+[dbg     527.7 ms] [gust] d2h
+[dbg     528.1 ms] [outer] start
+[dbg     528.3 ms] [outer] h2d
+[dbg     530.0 ms] [outer] csc
+[dbg     530.0 ms] [outer] count
+[dbg     530.0 ms] [outer] scan
+[dbg     530.4 ms] [outer] expand
+[dbg     531.1 ms] [outer] sort
+[dbg     531.4 ms] [outer] reduce
+[dbg     531.7 ms] [outer] final
+[dbg     531.8 ms] [outer] pack
+[dbg     532.9 ms] [outer] d2h
+[dbg     533.6 ms] [colw] start
+[dbg     533.7 ms] [colw] h2d
+[dbg     534.0 ms] [colw] csc
+[dbg     534.1 ms] [colw] count
+[dbg     534.1 ms] [colw] scan
+[dbg     534.6 ms] [colw] expand
+[dbg     535.3 ms] [colw] sort
+[dbg     535.5 ms] [colw] reduce
+[dbg     535.8 ms] [colw] final
+[dbg     535.9 ms] [colw] pack
+[dbg     537.0 ms] [colw] d2h
+[dbg     537.6 ms] [inner] start
+[dbg     537.8 ms] [inner] h2d
+[dbg     538.0 ms] [inner] csc
+[dbg     538.1 ms] [inner] count
+[dbg     538.1 ms] [inner] scan
+[dbg     538.5 ms] [inner] expand
+[dbg     539.2 ms] [inner] sort
+[dbg     539.4 ms] [inner] reduce
+[dbg     539.7 ms] [inner] final
+[dbg     540.1 ms] [inner] numeric
+[dbg     540.2 ms] [inner] pack
+[dbg     541.1 ms] [inner] d2h
+[dbg     541.6 ms] warmup done
+[dbg     541.7 ms] T1 cuSPARSE self_product: start
+[dbg     541.7 ms] [cu] start
+[dbg     541.8 ms] [cu] h2d (231812 B)
+[dbg     541.8 ms] cusparse: workEstimation begin
+[dbg     541.9 ms] [cu] workest (buf1=346287 B)
+[dbg     541.9 ms] cusparse: compute begin
+[dbg     542.4 ms] [cu] compute (buf2=87983879 B)
+[dbg     542.4 ms] cusparse: C size = 500 x 500, nnz=208298
+[dbg     542.5 ms] cusparse: copy begin
+[dbg     542.5 ms] [cu] copy
+[dbg     542.6 ms] [cu] pack
+[dbg     543.5 ms] self_product: C D2H begin (1668388 B)
+[dbg     543.7 ms] [cu] d2h
+[dbg     543.9 ms] T1 cuSPARSE self_product: done (C_nnz=208298)
+[dbg     544.1 ms] T4 manual self_product: start
+[dbg     544.1 ms] [gust] start
+[dbg     544.3 ms] [gust] h2d
+[dbg     544.3 ms] ESC: count intermediates begin
+[dbg     544.3 ms] [gust] count
+[dbg     544.4 ms] [gust] scan
+[dbg     544.6 ms] ESC: expand begin (3662602 intermediates)
+[dbg     544.7 ms] [gust] expand
+[dbg     544.7 ms] ESC: sort_by_key begin
+[dbg     545.4 ms] [gust] sort
+[dbg     545.6 ms] ESC: reduce_by_key begin
+[dbg     545.7 ms] [gust] reduce
+[dbg     546.1 ms] [gust] final
+[dbg     546.2 ms] [gust] pack
+[dbg     547.1 ms] [gust] d2h
+[dbg     547.3 ms] T4 manual self_product: done (C_nnz=208298)
+[dbg     547.5 ms] T5 outer self_product: start
+[dbg     547.5 ms] [outer] start
+[dbg     547.6 ms] [outer] h2d
+[dbg     547.9 ms] [outer] csc
+[dbg     547.9 ms] [outer] count
+[dbg     548.0 ms] [outer] scan
+[dbg     548.3 ms] [outer] expand
+[dbg     549.0 ms] [outer] sort
+[dbg     549.2 ms] [outer] reduce
+[dbg     549.6 ms] [outer] final
+[dbg     549.6 ms] [outer] pack
+[dbg     550.6 ms] [outer] d2h
+[dbg     551.0 ms] T5 outer self_product: done (C_nnz=208298)
+[dbg     551.3 ms] T6 colwise self_product: start
+[dbg     551.3 ms] [colw] start
+[dbg     551.4 ms] [colw] h2d
+[dbg     551.7 ms] [colw] csc
+[dbg     551.7 ms] [colw] count
+[dbg     551.7 ms] [colw] scan
+[dbg     552.0 ms] [colw] expand
+[dbg     552.8 ms] [colw] sort
+[dbg     553.0 ms] [colw] reduce
+[dbg     553.3 ms] [colw] final
+[dbg     553.4 ms] [colw] pack
+[dbg     554.3 ms] [colw] d2h
+[dbg     554.7 ms] T6 colwise self_product: done (C_nnz=208298)
+[dbg     555.0 ms] T7 inner self_product: start
+[dbg     555.0 ms] [inner] start
+[dbg     555.1 ms] [inner] h2d
+[dbg     555.4 ms] [inner] csc
+[dbg     555.4 ms] [inner] count
+[dbg     555.4 ms] [inner] scan
+[dbg     555.7 ms] [inner] expand
+[dbg     556.5 ms] [inner] sort
+[dbg     556.7 ms] [inner] reduce
+[dbg     557.0 ms] [inner] final
+[dbg     557.3 ms] [inner] numeric
+[dbg     557.4 ms] [inner] pack
+[dbg     558.3 ms] [inner] d2h
+[dbg     558.5 ms] T7 inner self_product: done (C_nnz=208298)
+Reading matrix from ./data/rep/tomography.mtx...
+Input A: 500 x 500, nnz = 28726, sparsity = 88.51%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 500 x 500, nnz = 208298, sparsity = 16.68%
+Time: 2.208 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 500 x 500, nnz = 208298, sparsity = 16.68%
+Time: 3.115 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 500 x 500, nnz = 208298, sparsity = 16.68%
+Time: 3.447 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 500 x 500, nnz = 208298, sparsity = 16.68%
+Time: 3.432 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 500 x 500, nnz = 208298, sparsity = 16.68%
+Time: 3.583 ms
+
+=== All tests completed ===
+Processing tumorAntiAngiogenesis_5 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     477.1 ms] CUDA context ready
+[dbg     477.3 ms] start read_matrix_market: ./data/rep/tumorAntiAngiogenesis_5.mtx
+[dbg     478.2 ms] read done: 460 x 460, nnz=4690
+[dbg     478.2 ms] [cu] start
+[dbg     486.4 ms] [cu] h2d (39364 B)
+[dbg     486.5 ms] cusparse: workEstimation begin
+[dbg     512.6 ms] [cu] workest (buf1=57343 B)
+[dbg     512.7 ms] cusparse: compute begin
+[dbg     513.5 ms] [cu] compute (buf2=6233959 B)
+[dbg     513.5 ms] cusparse: C size = 460 x 460, nnz=208190
+[dbg     513.5 ms] cusparse: copy begin
+[dbg     513.6 ms] [cu] copy
+[dbg     513.8 ms] [cu] pack
+[dbg     515.2 ms] self_product: C D2H begin (1667364 B)
+[dbg     515.4 ms] [cu] d2h
+[dbg     515.9 ms] [gust] start
+[dbg     516.0 ms] [gust] h2d
+[dbg     516.0 ms] ESC: count intermediates begin
+[dbg     517.5 ms] [gust] count
+[dbg     517.7 ms] [gust] scan
+[dbg     517.8 ms] ESC: expand begin (259310 intermediates)
+[dbg     517.9 ms] [gust] expand
+[dbg     517.9 ms] ESC: sort_by_key begin
+[dbg     518.3 ms] [gust] sort
+[dbg     518.5 ms] ESC: reduce_by_key begin
+[dbg     518.7 ms] [gust] reduce
+[dbg     518.9 ms] [gust] final
+[dbg     518.9 ms] [gust] pack
+[dbg     520.2 ms] [gust] d2h
+[dbg     520.8 ms] [outer] start
+[dbg     520.9 ms] [outer] h2d
+[dbg     522.5 ms] [outer] csc
+[dbg     522.6 ms] [outer] count
+[dbg     522.6 ms] [outer] scan
+[dbg     522.9 ms] [outer] expand
+[dbg     523.2 ms] [outer] sort
+[dbg     523.3 ms] [outer] reduce
+[dbg     523.5 ms] [outer] final
+[dbg     523.5 ms] [outer] pack
+[dbg     524.7 ms] [outer] d2h
+[dbg     525.2 ms] [colw] start
+[dbg     525.3 ms] [colw] h2d
+[dbg     525.6 ms] [colw] csc
+[dbg     525.7 ms] [colw] count
+[dbg     525.7 ms] [colw] scan
+[dbg     525.9 ms] [colw] expand
+[dbg     526.2 ms] [colw] sort
+[dbg     526.4 ms] [colw] reduce
+[dbg     526.5 ms] [colw] final
+[dbg     526.5 ms] [colw] pack
+[dbg     527.6 ms] [colw] d2h
+[dbg     528.2 ms] [inner] start
+[dbg     528.3 ms] [inner] h2d
+[dbg     528.5 ms] [inner] csc
+[dbg     528.5 ms] [inner] count
+[dbg     528.6 ms] [inner] scan
+[dbg     528.8 ms] [inner] expand
+[dbg     529.1 ms] [inner] sort
+[dbg     529.2 ms] [inner] reduce
+[dbg     529.3 ms] [inner] final
+[dbg     529.6 ms] [inner] numeric
+[dbg     529.6 ms] [inner] pack
+[dbg     530.6 ms] [inner] d2h
+[dbg     531.1 ms] warmup done
+[dbg     531.2 ms] T1 cuSPARSE self_product: start
+[dbg     531.2 ms] [cu] start
+[dbg     531.3 ms] [cu] h2d (39364 B)
+[dbg     531.3 ms] cusparse: workEstimation begin
+[dbg     531.3 ms] [cu] workest (buf1=57343 B)
+[dbg     531.4 ms] cusparse: compute begin
+[dbg     531.7 ms] [cu] compute (buf2=6233959 B)
+[dbg     531.7 ms] cusparse: C size = 460 x 460, nnz=208190
+[dbg     531.7 ms] cusparse: copy begin
+[dbg     531.7 ms] [cu] copy
+[dbg     531.8 ms] [cu] pack
+[dbg     532.7 ms] self_product: C D2H begin (1667364 B)
+[dbg     532.9 ms] [cu] d2h
+[dbg     533.1 ms] T1 cuSPARSE self_product: done (C_nnz=208190)
+[dbg     533.3 ms] T4 manual self_product: start
+[dbg     533.4 ms] [gust] start
+[dbg     533.5 ms] [gust] h2d
+[dbg     533.5 ms] ESC: count intermediates begin
+[dbg     533.5 ms] [gust] count
+[dbg     533.6 ms] [gust] scan
+[dbg     533.7 ms] ESC: expand begin (259310 intermediates)
+[dbg     533.8 ms] [gust] expand
+[dbg     533.8 ms] ESC: sort_by_key begin
+[dbg     534.0 ms] [gust] sort
+[dbg     534.1 ms] ESC: reduce_by_key begin
+[dbg     534.2 ms] [gust] reduce
+[dbg     534.4 ms] [gust] final
+[dbg     534.4 ms] [gust] pack
+[dbg     535.4 ms] [gust] d2h
+[dbg     535.6 ms] T4 manual self_product: done (C_nnz=208190)
+[dbg     535.9 ms] T5 outer self_product: start
+[dbg     535.9 ms] [outer] start
+[dbg     536.0 ms] [outer] h2d
+[dbg     536.2 ms] [outer] csc
+[dbg     536.3 ms] [outer] count
+[dbg     536.3 ms] [outer] scan
+[dbg     536.5 ms] [outer] expand
+[dbg     536.8 ms] [outer] sort
+[dbg     537.0 ms] [outer] reduce
+[dbg     537.1 ms] [outer] final
+[dbg     537.1 ms] [outer] pack
+[dbg     538.1 ms] [outer] d2h
+[dbg     538.4 ms] T5 outer self_product: done (C_nnz=208190)
+[dbg     538.7 ms] T6 colwise self_product: start
+[dbg     538.7 ms] [colw] start
+[dbg     538.8 ms] [colw] h2d
+[dbg     539.1 ms] [colw] csc
+[dbg     539.1 ms] [colw] count
+[dbg     539.2 ms] [colw] scan
+[dbg     539.3 ms] [colw] expand
+[dbg     539.6 ms] [colw] sort
+[dbg     539.8 ms] [colw] reduce
+[dbg     539.9 ms] [colw] final
+[dbg     539.9 ms] [colw] pack
+[dbg     540.9 ms] [colw] d2h
+[dbg     541.2 ms] T6 colwise self_product: done (C_nnz=208190)
+[dbg     541.4 ms] T7 inner self_product: start
+[dbg     541.4 ms] [inner] start
+[dbg     541.6 ms] [inner] h2d
+[dbg     541.8 ms] [inner] csc
+[dbg     541.8 ms] [inner] count
+[dbg     541.9 ms] [inner] scan
+[dbg     542.0 ms] [inner] expand
+[dbg     542.3 ms] [inner] sort
+[dbg     542.5 ms] [inner] reduce
+[dbg     542.6 ms] [inner] final
+[dbg     542.8 ms] [inner] numeric
+[dbg     542.8 ms] [inner] pack
+[dbg     543.8 ms] [inner] d2h
+[dbg     544.0 ms] T7 inner self_product: done (C_nnz=208190)
+Reading matrix from ./data/rep/tumorAntiAngiogenesis_5.mtx...
+Input A: 460 x 460, nnz = 4690, sparsity = 97.78%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 460 x 460, nnz = 208190, sparsity = 1.61%
+Time: 1.905 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 460 x 460, nnz = 208190, sparsity = 1.61%
+Time: 2.255 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 460 x 460, nnz = 208190, sparsity = 1.61%
+Time: 2.530 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 460 x 460, nnz = 208190, sparsity = 1.61%
+Time: 2.447 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 460 x 460, nnz = 208190, sparsity = 1.61%
+Time: 2.556 ms
+
+=== All tests completed ===
+Processing vsp_bcsstk30_500sep_10in_1Kout ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     480.5 ms] CUDA context ready
+[dbg     480.6 ms] start read_matrix_market: ./data/rep/vsp_bcsstk30_500sep_10in_1Kout.mtx
+[dbg     979.5 ms] read done: 58348 x 58348, nnz=4033156
+[dbg     979.5 ms] [cu] start
+[dbg     996.4 ms] [cu] h2d (32498644 B)
+[dbg     996.6 ms] cusparse: workEstimation begin
+[dbg    1016.9 ms] [cu] workest (buf1=48470871 B)
+[dbg    1016.9 ms] cusparse: compute begin
+[dbg    1035.4 ms] [cu] compute (buf2=8146314983 B)
+[dbg    1035.4 ms] cusparse: C size = 58348 x 58348, nnz=18175907
+[dbg    1035.6 ms] cusparse: copy begin
+[dbg    1035.9 ms] [cu] copy
+[dbg    1036.1 ms] [cu] pack
+[dbg    1119.3 ms] self_product: C D2H begin (145640652 B)
+[dbg    1125.3 ms] [cu] d2h
+[dbg    1139.0 ms] [gust] start
+[dbg    1156.0 ms] [gust] h2d
+[dbg    1156.0 ms] ESC: count intermediates begin
+[dbg    1157.1 ms] [gust] count
+[dbg    1157.2 ms] [gust] scan
+[dbg    1157.6 ms] ESC: expand begin (339135198 intermediates)
+[dbg    1163.3 ms] [gust] expand
+[dbg    1163.3 ms] ESC: sort_by_key begin
+[dbg    1206.9 ms] [gust] sort
+[dbg    1207.2 ms] ESC: reduce_by_key begin
+[dbg    1210.3 ms] [gust] reduce
+[dbg    1216.3 ms] [gust] final
+[dbg    1216.4 ms] [gust] pack
+[dbg    1294.1 ms] [gust] d2h
+[dbg    1309.7 ms] [outer] start
+[dbg    1314.8 ms] [outer] h2d
+[dbg    1316.2 ms] [outer] csc
+[dbg    1316.2 ms] [outer] count
+[dbg    1316.3 ms] [outer] scan
+[dbg    1319.3 ms] [outer] expand
+[dbg    1361.6 ms] [outer] sort
+[dbg    1365.4 ms] [outer] reduce
+[dbg    1368.7 ms] [outer] final
+[dbg    1368.8 ms] [outer] pack
+[dbg    1440.4 ms] [outer] d2h
+[dbg    1457.0 ms] [colw] start
+[dbg    1462.7 ms] [colw] h2d
+[dbg    1463.4 ms] [colw] csc
+[dbg    1463.5 ms] [colw] count
+[dbg    1463.6 ms] [colw] scan
+[dbg    1469.9 ms] [colw] expand
+[dbg    1511.7 ms] [colw] sort
+[dbg    1515.5 ms] [colw] reduce
+[dbg    1518.9 ms] [colw] final
+[dbg    1518.9 ms] [colw] pack
+[dbg    1590.5 ms] [colw] d2h
+[dbg    1607.4 ms] [inner] start
+[dbg    1612.9 ms] [inner] h2d
+[dbg    1613.7 ms] [inner] csc
+[dbg    1613.8 ms] [inner] count
+[dbg    1613.8 ms] [inner] scan
+[dbg    1619.8 ms] [inner] expand
+[dbg    1662.3 ms] [inner] sort
+[dbg    1666.1 ms] [inner] reduce
+[dbg    1669.6 ms] [inner] final
+[dbg    1677.6 ms] [inner] numeric
+[dbg    1678.2 ms] [inner] pack
+[dbg    1747.2 ms] [inner] d2h
+[dbg    1762.2 ms] warmup done
+[dbg    1762.2 ms] T1 cuSPARSE self_product: start
+[dbg    1762.2 ms] [cu] start
+[dbg    1767.2 ms] [cu] h2d (32498644 B)
+[dbg    1767.4 ms] cusparse: workEstimation begin
+[dbg    1767.6 ms] [cu] workest (buf1=48470871 B)
+[dbg    1767.6 ms] cusparse: compute begin
+[dbg    1785.5 ms] [cu] compute (buf2=8146314983 B)
+[dbg    1785.5 ms] cusparse: C size = 58348 x 58348, nnz=18175907
+[dbg    1785.7 ms] cusparse: copy begin
+[dbg    1785.9 ms] [cu] copy
+[dbg    1786.0 ms] [cu] pack
+[dbg    1849.0 ms] self_product: C D2H begin (145640652 B)
+[dbg    1854.6 ms] [cu] d2h
+[dbg    1854.8 ms] T1 cuSPARSE self_product: done (C_nnz=18175907)
+[dbg    1868.4 ms] T4 manual self_product: start
+[dbg    1868.4 ms] [gust] start
+[dbg    1884.9 ms] [gust] h2d
+[dbg    1884.9 ms] ESC: count intermediates begin
+[dbg    1885.8 ms] [gust] count
+[dbg    1885.9 ms] [gust] scan
+[dbg    1886.3 ms] ESC: expand begin (339135198 intermediates)
+[dbg    1892.0 ms] [gust] expand
+[dbg    1892.0 ms] ESC: sort_by_key begin
+[dbg    1935.6 ms] [gust] sort
+[dbg    1935.9 ms] ESC: reduce_by_key begin
+[dbg    1938.9 ms] [gust] reduce
+[dbg    1943.6 ms] [gust] final
+[dbg    1943.7 ms] [gust] pack
+[dbg    2019.4 ms] [gust] d2h
+[dbg    2023.1 ms] T4 manual self_product: done (C_nnz=18175907)
+[dbg    2036.5 ms] T5 outer self_product: start
+[dbg    2036.5 ms] [outer] start
+[dbg    2048.8 ms] [outer] h2d
+[dbg    2049.7 ms] [outer] csc
+[dbg    2049.7 ms] [outer] count
+[dbg    2049.7 ms] [outer] scan
+[dbg    2052.7 ms] [outer] expand
+[dbg    2094.8 ms] [outer] sort
+[dbg    2098.7 ms] [outer] reduce
+[dbg    2102.0 ms] [outer] final
+[dbg    2102.1 ms] [outer] pack
+[dbg    2174.0 ms] [outer] d2h
+[dbg    2177.2 ms] T5 outer self_product: done (C_nnz=18175907)
+[dbg    2190.6 ms] T6 colwise self_product: start
+[dbg    2190.6 ms] [colw] start
+[dbg    2196.2 ms] [colw] h2d
+[dbg    2197.0 ms] [colw] csc
+[dbg    2197.0 ms] [colw] count
+[dbg    2197.1 ms] [colw] scan
+[dbg    2203.5 ms] [colw] expand
+[dbg    2245.4 ms] [colw] sort
+[dbg    2249.2 ms] [colw] reduce
+[dbg    2252.5 ms] [colw] final
+[dbg    2252.6 ms] [colw] pack
+[dbg    2321.3 ms] [colw] d2h
+[dbg    2324.3 ms] T6 colwise self_product: done (C_nnz=18175907)
+[dbg    2337.6 ms] T7 inner self_product: start
+[dbg    2337.6 ms] [inner] start
+[dbg    2343.1 ms] [inner] h2d
+[dbg    2343.9 ms] [inner] csc
+[dbg    2344.0 ms] [inner] count
+[dbg    2344.0 ms] [inner] scan
+[dbg    2350.0 ms] [inner] expand
+[dbg    2392.5 ms] [inner] sort
+[dbg    2396.3 ms] [inner] reduce
+[dbg    2399.7 ms] [inner] final
+[dbg    2408.0 ms] [inner] numeric
+[dbg    2408.7 ms] [inner] pack
+[dbg    2481.3 ms] [inner] d2h
+[dbg    2483.0 ms] T7 inner self_product: done (C_nnz=18175907)
+Reading matrix from ./data/rep/vsp_bcsstk30_500sep_10in_1Kout.mtx...
+Input A: 58348 x 58348, nnz = 4033156, sparsity = 99.88%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 58348 x 58348, nnz = 18175907, sparsity = 99.47%
+Time: 92.600 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 58348 x 58348, nnz = 18175907, sparsity = 99.47%
+Time: 154.688 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 58348 x 58348, nnz = 18175907, sparsity = 99.47%
+Time: 140.658 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 58348 x 58348, nnz = 18175907, sparsity = 99.47%
+Time: 133.664 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 58348 x 58348, nnz = 18175907, sparsity = 99.47%
+Time: 145.417 ms
+
+=== All tests completed ===
+Processing wi2010 ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     479.8 ms] CUDA context ready
+[dbg     480.0 ms] start read_matrix_market: ./data/rep/wi2010.mtx
+[dbg     699.1 ms] read done: 253096 x 253096, nnz=1209404
+[dbg     699.1 ms] [cu] start
+[dbg     730.3 ms] [cu] h2d (10687620 B)
+[dbg     730.5 ms] cusparse: workEstimation begin
+[dbg     754.3 ms] [cu] workest (buf1=14535415 B)
+[dbg     754.3 ms] cusparse: compute begin
+[dbg     755.6 ms] [cu] compute (buf2=182244255 B)
+[dbg     755.6 ms] cusparse: C size = 253096 x 253096, nnz=4989650
+[dbg     755.8 ms] cusparse: copy begin
+[dbg     756.0 ms] [cu] copy
+[dbg     756.1 ms] [cu] pack
+[dbg     779.3 ms] self_product: C D2H begin (40929588 B)
+[dbg     782.7 ms] [cu] d2h
+[dbg     786.9 ms] [gust] start
+[dbg     788.6 ms] [gust] h2d
+[dbg     788.6 ms] ESC: count intermediates begin
+[dbg     789.6 ms] [gust] count
+[dbg     789.7 ms] [gust] scan
+[dbg     789.9 ms] ESC: expand begin (7508828 intermediates)
+[dbg     790.3 ms] [gust] expand
+[dbg     790.3 ms] ESC: sort_by_key begin
+[dbg     791.5 ms] [gust] sort
+[dbg     791.7 ms] ESC: reduce_by_key begin
+[dbg     791.9 ms] [gust] reduce
+[dbg     792.5 ms] [gust] final
+[dbg     792.6 ms] [gust] pack
+[dbg     811.0 ms] [gust] d2h
+[dbg     815.3 ms] [outer] start
+[dbg     817.0 ms] [outer] h2d
+[dbg     818.6 ms] [outer] csc
+[dbg     818.7 ms] [outer] count
+[dbg     818.8 ms] [outer] scan
+[dbg     819.3 ms] [outer] expand
+[dbg     820.5 ms] [outer] sort
+[dbg     820.8 ms] [outer] reduce
+[dbg     821.3 ms] [outer] final
+[dbg     821.4 ms] [outer] pack
+[dbg     839.2 ms] [outer] d2h
+[dbg     843.7 ms] [colw] start
+[dbg     845.4 ms] [colw] h2d
+[dbg     845.9 ms] [colw] csc
+[dbg     846.0 ms] [colw] count
+[dbg     846.1 ms] [colw] scan
+[dbg     846.7 ms] [colw] expand
+[dbg     847.8 ms] [colw] sort
+[dbg     848.1 ms] [colw] reduce
+[dbg     848.6 ms] [colw] final
+[dbg     848.6 ms] [colw] pack
+[dbg     866.7 ms] [colw] d2h
+[dbg     871.2 ms] [inner] start
+[dbg     872.9 ms] [inner] h2d
+[dbg     873.5 ms] [inner] csc
+[dbg     873.6 ms] [inner] count
+[dbg     873.7 ms] [inner] scan
+[dbg     874.2 ms] [inner] expand
+[dbg     875.4 ms] [inner] sort
+[dbg     875.6 ms] [inner] reduce
+[dbg     876.1 ms] [inner] final
+[dbg     876.7 ms] [inner] numeric
+[dbg     876.8 ms] [inner] pack
+[dbg     895.0 ms] [inner] d2h
+[dbg     899.2 ms] warmup done
+[dbg     899.3 ms] T1 cuSPARSE self_product: start
+[dbg     899.3 ms] [cu] start
+[dbg     900.9 ms] [cu] h2d (10687620 B)
+[dbg     901.1 ms] cusparse: workEstimation begin
+[dbg     901.3 ms] [cu] workest (buf1=14535415 B)
+[dbg     901.3 ms] cusparse: compute begin
+[dbg     901.9 ms] [cu] compute (buf2=182244255 B)
+[dbg     901.9 ms] cusparse: C size = 253096 x 253096, nnz=4989650
+[dbg     902.0 ms] cusparse: copy begin
+[dbg     902.2 ms] [cu] copy
+[dbg     902.2 ms] [cu] pack
+[dbg     918.5 ms] self_product: C D2H begin (40929588 B)
+[dbg     920.6 ms] [cu] d2h
+[dbg     920.8 ms] T1 cuSPARSE self_product: done (C_nnz=4989650)
+[dbg     924.5 ms] T4 manual self_product: start
+[dbg     924.5 ms] [gust] start
+[dbg     926.2 ms] [gust] h2d
+[dbg     926.2 ms] ESC: count intermediates begin
+[dbg     926.3 ms] [gust] count
+[dbg     926.4 ms] [gust] scan
+[dbg     926.6 ms] ESC: expand begin (7508828 intermediates)
+[dbg     927.0 ms] [gust] expand
+[dbg     927.0 ms] ESC: sort_by_key begin
+[dbg     928.2 ms] [gust] sort
+[dbg     928.3 ms] ESC: reduce_by_key begin
+[dbg     928.5 ms] [gust] reduce
+[dbg     929.1 ms] [gust] final
+[dbg     929.2 ms] [gust] pack
+[dbg     947.3 ms] [gust] d2h
+[dbg     947.7 ms] T4 manual self_product: done (C_nnz=4989650)
+[dbg     951.6 ms] T5 outer self_product: start
+[dbg     951.6 ms] [outer] start
+[dbg     953.2 ms] [outer] h2d
+[dbg     953.8 ms] [outer] csc
+[dbg     953.9 ms] [outer] count
+[dbg     953.9 ms] [outer] scan
+[dbg     954.4 ms] [outer] expand
+[dbg     955.6 ms] [outer] sort
+[dbg     955.9 ms] [outer] reduce
+[dbg     956.4 ms] [outer] final
+[dbg     956.5 ms] [outer] pack
+[dbg     974.4 ms] [outer] d2h
+[dbg     975.1 ms] T5 outer self_product: done (C_nnz=4989650)
+[dbg     978.9 ms] T6 colwise self_product: start
+[dbg     978.9 ms] [colw] start
+[dbg     980.5 ms] [colw] h2d
+[dbg     981.0 ms] [colw] csc
+[dbg     981.1 ms] [colw] count
+[dbg     981.2 ms] [colw] scan
+[dbg     981.7 ms] [colw] expand
+[dbg     982.9 ms] [colw] sort
+[dbg     983.2 ms] [colw] reduce
+[dbg     983.6 ms] [colw] final
+[dbg     983.7 ms] [colw] pack
+[dbg    1001.6 ms] [colw] d2h
+[dbg    1002.3 ms] T6 colwise self_product: done (C_nnz=4989650)
+[dbg    1006.1 ms] T7 inner self_product: start
+[dbg    1006.1 ms] [inner] start
+[dbg    1007.7 ms] [inner] h2d
+[dbg    1008.2 ms] [inner] csc
+[dbg    1008.3 ms] [inner] count
+[dbg    1008.4 ms] [inner] scan
+[dbg    1008.9 ms] [inner] expand
+[dbg    1010.1 ms] [inner] sort
+[dbg    1010.3 ms] [inner] reduce
+[dbg    1010.8 ms] [inner] final
+[dbg    1011.4 ms] [inner] numeric
+[dbg    1011.5 ms] [inner] pack
+[dbg    1029.5 ms] [inner] d2h
+[dbg    1030.0 ms] T7 inner self_product: done (C_nnz=4989650)
+Reading matrix from ./data/rep/wi2010.mtx...
+Input A: 253096 x 253096, nnz = 1209404, sparsity = 100.00%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 253096 x 253096, nnz = 4989650, sparsity = 99.99%
+Time: 21.495 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 253096 x 253096, nnz = 4989650, sparsity = 99.99%
+Time: 23.175 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 253096 x 253096, nnz = 4989650, sparsity = 99.99%
+Time: 23.516 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 253096 x 253096, nnz = 4989650, sparsity = 99.99%
+Time: 23.424 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 253096 x 253096, nnz = 4989650, sparsity = 99.99%
+Time: 23.884 ms
+
+=== All tests completed ===
+Processing Zewail ... (max 600s)
+[dbg       0.0 ms] main entry, initializing CUDA context...
+[dbg     487.6 ms] CUDA context ready
+[dbg     487.7 ms] start read_matrix_market: ./data/rep/Zewail.mtx
+[dbg     499.2 ms] read done: 6752 x 6752, nnz=54233
+[dbg     499.2 ms] [cu] start
+[dbg     507.5 ms] [cu] h2d (460876 B)
+[dbg     507.6 ms] cusparse: workEstimation begin
+[dbg     532.5 ms] [cu] workest (buf1=652627 B)
+[dbg     532.5 ms] cusparse: compute begin
+[dbg     533.7 ms] [cu] compute (buf2=15095127 B)
+[dbg     533.7 ms] cusparse: C size = 6752 x 6752, nnz=380303
+[dbg     533.9 ms] cusparse: copy begin
+[dbg     534.0 ms] [cu] copy
+[dbg     534.1 ms] [cu] pack
+[dbg     536.3 ms] self_product: C D2H begin (3069436 B)
+[dbg     536.6 ms] [cu] d2h
+[dbg     537.2 ms] [gust] start
+[dbg     537.4 ms] [gust] h2d
+[dbg     537.5 ms] ESC: count intermediates begin
+[dbg     539.1 ms] [gust] count
+[dbg     539.3 ms] [gust] scan
+[dbg     539.5 ms] ESC: expand begin (626457 intermediates)
+[dbg     539.5 ms] [gust] expand
+[dbg     539.6 ms] ESC: sort_by_key begin
+[dbg     540.0 ms] [gust] sort
+[dbg     540.2 ms] ESC: reduce_by_key begin
+[dbg     540.3 ms] [gust] reduce
+[dbg     540.8 ms] [gust] final
+[dbg     540.9 ms] [gust] pack
+[dbg     543.0 ms] [gust] d2h
+[dbg     543.6 ms] [outer] start
+[dbg     543.8 ms] [outer] h2d
+[dbg     545.6 ms] [outer] csc
+[dbg     545.6 ms] [outer] count
+[dbg     545.6 ms] [outer] scan
+[dbg     545.9 ms] [outer] expand
+[dbg     546.2 ms] [outer] sort
+[dbg     546.4 ms] [outer] reduce
+[dbg     546.8 ms] [outer] final
+[dbg     546.9 ms] [outer] pack
+[dbg     548.9 ms] [outer] d2h
+[dbg     549.8 ms] [colw] start
+[dbg     549.9 ms] [colw] h2d
+[dbg     550.1 ms] [colw] csc
+[dbg     550.2 ms] [colw] count
+[dbg     550.2 ms] [colw] scan
+[dbg     550.5 ms] [colw] expand
+[dbg     550.8 ms] [colw] sort
+[dbg     550.9 ms] [colw] reduce
+[dbg     551.4 ms] [colw] final
+[dbg     551.5 ms] [colw] pack
+[dbg     553.3 ms] [colw] d2h
+[dbg     554.2 ms] [inner] start
+[dbg     554.3 ms] [inner] h2d
+[dbg     554.5 ms] [inner] csc
+[dbg     554.6 ms] [inner] count
+[dbg     554.6 ms] [inner] scan
+[dbg     555.0 ms] [inner] expand
+[dbg     555.3 ms] [inner] sort
+[dbg     555.5 ms] [inner] reduce
+[dbg     555.9 ms] [inner] final
+[dbg     556.3 ms] [inner] numeric
+[dbg     556.4 ms] [inner] pack
+[dbg     558.4 ms] [inner] d2h
+[dbg     559.1 ms] warmup done
+[dbg     559.1 ms] T1 cuSPARSE self_product: start
+[dbg     559.1 ms] [cu] start
+[dbg     559.3 ms] [cu] h2d (460876 B)
+[dbg     559.3 ms] cusparse: workEstimation begin
+[dbg     559.4 ms] [cu] workest (buf1=652627 B)
+[dbg     559.4 ms] cusparse: compute begin
+[dbg     559.8 ms] [cu] compute (buf2=15095127 B)
+[dbg     559.8 ms] cusparse: C size = 6752 x 6752, nnz=380303
+[dbg     560.0 ms] cusparse: copy begin
+[dbg     560.0 ms] [cu] copy
+[dbg     560.2 ms] [cu] pack
+[dbg     561.9 ms] self_product: C D2H begin (3069436 B)
+[dbg     562.2 ms] [cu] d2h
+[dbg     562.4 ms] T1 cuSPARSE self_product: done (C_nnz=380303)
+[dbg     562.8 ms] T4 manual self_product: start
+[dbg     562.8 ms] [gust] start
+[dbg     562.9 ms] [gust] h2d
+[dbg     562.9 ms] ESC: count intermediates begin
+[dbg     563.0 ms] [gust] count
+[dbg     563.0 ms] [gust] scan
+[dbg     563.2 ms] ESC: expand begin (626457 intermediates)
+[dbg     563.3 ms] [gust] expand
+[dbg     563.3 ms] ESC: sort_by_key begin
+[dbg     563.6 ms] [gust] sort
+[dbg     563.7 ms] ESC: reduce_by_key begin
+[dbg     563.8 ms] [gust] reduce
+[dbg     564.2 ms] [gust] final
+[dbg     564.3 ms] [gust] pack
+[dbg     566.2 ms] [gust] d2h
+[dbg     566.4 ms] T4 manual self_product: done (C_nnz=380303)
+[dbg     566.8 ms] T5 outer self_product: start
+[dbg     566.8 ms] [outer] start
+[dbg     566.9 ms] [outer] h2d
+[dbg     567.1 ms] [outer] csc
+[dbg     567.1 ms] [outer] count
+[dbg     567.2 ms] [outer] scan
+[dbg     567.4 ms] [outer] expand
+[dbg     567.7 ms] [outer] sort
+[dbg     567.9 ms] [outer] reduce
+[dbg     568.3 ms] [outer] final
+[dbg     568.4 ms] [outer] pack
+[dbg     570.2 ms] [outer] d2h
+[dbg     570.7 ms] T5 outer self_product: done (C_nnz=380303)
+[dbg     571.1 ms] T6 colwise self_product: start
+[dbg     571.1 ms] [colw] start
+[dbg     571.2 ms] [colw] h2d
+[dbg     571.4 ms] [colw] csc
+[dbg     571.5 ms] [colw] count
+[dbg     571.5 ms] [colw] scan
+[dbg     571.8 ms] [colw] expand
+[dbg     572.1 ms] [colw] sort
+[dbg     572.2 ms] [colw] reduce
+[dbg     572.6 ms] [colw] final
+[dbg     572.7 ms] [colw] pack
+[dbg     574.7 ms] [colw] d2h
+[dbg     575.2 ms] T6 colwise self_product: done (C_nnz=380303)
+[dbg     575.5 ms] T7 inner self_product: start
+[dbg     575.5 ms] [inner] start
+[dbg     575.7 ms] [inner] h2d
+[dbg     575.9 ms] [inner] csc
+[dbg     575.9 ms] [inner] count
+[dbg     575.9 ms] [inner] scan
+[dbg     576.2 ms] [inner] expand
+[dbg     576.5 ms] [inner] sort
+[dbg     576.7 ms] [inner] reduce
+[dbg     577.1 ms] [inner] final
+[dbg     577.5 ms] [inner] numeric
+[dbg     577.5 ms] [inner] pack
+[dbg     579.3 ms] [inner] d2h
+[dbg     579.7 ms] T7 inner self_product: done (C_nnz=380303)
+Reading matrix from ./data/rep/Zewail.mtx...
+Input A: 6752 x 6752, nnz = 54233, sparsity = 99.88%
+===============WARMING UP===============
+=== Computing C = A x A (cuSPARSE) ===
+Result C: 6752 x 6752, nnz = 380303, sparsity = 99.17%
+Time: 3.265 ms
+
+=== Computing C = A x A (Manual) ===
+Result C: 6752 x 6752, nnz = 380303, sparsity = 99.17%
+Time: 3.650 ms
+
+=== Computing C = A x A (Outer) ===
+Result C: 6752 x 6752, nnz = 380303, sparsity = 99.17%
+Time: 3.917 ms
+
+=== Computing C = A x A (Colwise) ===
+Result C: 6752 x 6752, nnz = 380303, sparsity = 99.17%
+Time: 4.081 ms
+
+=== Computing C = A x A (Inner) ===
+Result C: 6752 x 6752, nnz = 380303, sparsity = 99.17%
+Time: 4.149 ms
+
+=== All tests completed ===
+
+=============================
+Total:    30
+OK:       30
+FAIL:     0
+TIMEOUT:  0  (>600s 自动跳过)
+=============================
+
+Summary: ./results/rep/summary.csv
+Per-matrix logs: ./results/rep/log/<name>.log
+Matrix outputs:  ./results/rep/matrices/<name>/

@@ -1,3 +1,4 @@
 /results/
 /data/
 .venv/
+/suitesparse_crawl/__pycache__

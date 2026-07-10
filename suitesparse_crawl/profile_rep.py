@@ -53,6 +53,7 @@ def parse_log(path):
     a_nnz = a_rows = None
     times = []        # stdout "Time:"(cuSPARSE, manual)
     result_cnnz = []  # stdout "Result C: nnz="(cuSPARSE, manual)
+    phases = {}       # (tag, phase) -> ms(取最后一次 = 计时那次,跳过 warmup)
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         m = re.match(r"\[dbg\s+([\d.]+)\s+ms\]\s+(.*)", line)
         if m:
@@ -91,6 +92,9 @@ def parse_log(path):
             elif "T4 write done" in msg: tag = "t4w_d"
             if tag:
                 ev[tag] = ms
+            mph = re.match(r"\[(cu|gust|outer|colw|inner)\]\s+(\w+)", msg)
+            if mph:
+                phases[(mph.group(1), mph.group(2))] = ms
         else:
             mt = re.search(r"^Time:\s+([\d.]+)\s+ms", line)
             if mt:
@@ -124,7 +128,106 @@ def parse_log(path):
         "colw_cnnz": result_cnnz[3] if len(result_cnnz) >= 4 else np.nan,
         "inner_cnnz": result_cnnz[4] if len(result_cnnz) >= 5 else np.nan,
         "buf2": buf2,
+        "phases": phases,
     }
+
+
+PHASE_ORDER = ["h2d", "csc", "count", "scan", "expand",
+               "sort", "reduce", "final", "numeric", "pack", "d2h"]
+CU_PHASES = ["h2d", "workest", "compute", "copy", "pack", "d2h"]
+ALL_PHASES = ["h2d", "csc", "count", "scan", "expand", "workest", "compute", "copy",
+              "sort", "reduce", "final", "numeric", "pack", "d2h"]
+METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "outer": "外积",
+               "colw": "列向", "inner": "内积"}
+# 阶段分组(用于堆叠图与汇总表);cuSPARSE 的 workest/compute/copy 归入"计算"
+PHASE_GROUP = {
+    "h2d": "传输", "d2h": "传输",
+    "csc": "符号", "count": "符号", "scan": "符号",
+    "expand": "计算", "workest": "计算", "compute": "计算", "copy": "计算",
+    "sort": "合并", "reduce": "合并", "final": "合并",
+    "numeric": "数值归并", "pack": "打包",
+}
+GROUP_ORDER = ["传输", "符号", "计算", "合并", "数值归并", "打包"]
+GROUP_COLOR = {"传输": "#898781", "符号": "#1baf7a", "计算": "#2a78d6",
+               "合并": "#eda100", "数值归并": "#e34948", "打包": "#4a3aa7"}
+
+
+def phase_order_for(tag):
+    return CU_PHASES if tag == "cu" else PHASE_ORDER
+
+
+def method_durations(phases, tag):
+    """从 [tag] phase 时间戳算该方法的各阶段耗时(ms)。"""
+    order = ["start"] + phase_order_for(tag)
+    present = [p for p in order if (tag, p) in phases]
+    if len(present) < 2:
+        return {}
+    ts = [phases[(tag, p)] for p in present]
+    return {present[i]: ts[i] - ts[i - 1] for i in range(1, len(present))}
+
+
+def phase_breakdown(df):
+    TAGS = ["cu", "gust", "outer", "colw", "inner"]
+    rows = []
+    for _, r in df.iterrows():
+        ph = r.get("phases", {}) or {}
+        for tag in TAGS:
+            d = method_durations(ph, tag)
+            if not d:
+                continue
+            row = {"name": r["name"], "class": r["class"], "tag": tag,
+                   "n": r["n"], "A_nnz": r["A_nnz"]}
+            for p in ALL_PHASES:
+                row[p] = d.get(p, np.nan)
+            rows.append(row)
+    if not rows:
+        print("\n(无 [tag] phase 数据:确认 DBG=1 且日志带分阶段桩)")
+        return
+    pdf = pd.DataFrame(rows)
+    pdf.to_csv(Path(__file__).resolve().parent / "profile_phases.csv", index=False)
+
+    # ---- 按方法聚合:分组成 传输/符号/计算/合并/数值归并/打包(均值 ms)----
+    print("\n" + "=" * 88)
+    print("分阶段构成(各矩阵均值,ms)— 按阶段分组,五法可比")
+    print("-" * 88)
+    print(f"{'方法':<12}" + "".join(f"{g:>10}" for g in GROUP_ORDER) + f"{'合计':>10}")
+    agg = {}
+    for tag in TAGS:
+        sub = pdf[pdf["tag"] == tag]
+        if len(sub) == 0:
+            continue
+        gvals = {}
+        for g in GROUP_ORDER:
+            cols = [p for p in ALL_PHASES if PHASE_GROUP.get(p) == g]
+            gvals[g] = float(sub[cols].sum(axis=1).mean()) if cols else 0.0
+        agg[tag] = gvals
+        tot = sum(gvals.values())
+        parts = [("    --   " if (pd.isna(gvals[g]) or gvals[g] == 0) else f"{gvals[g]:>10.2f}")
+                 for g in GROUP_ORDER]
+        print(f"{METHOD_NAME[tag]:<12}" + "".join(parts) + f"{tot:>10.2f}")
+
+    # ---- 堆叠图:每方法的阶段构成 ----
+    present_tags = [t for t in TAGS if t in agg]
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    y = np.arange(len(present_tags))
+    bottom = np.zeros(len(present_tags))
+    for g in GROUP_ORDER:
+        vals = np.array([agg[t].get(g, 0.0) or 0.0 for t in present_tags])
+        if np.nanmax(vals) <= 0:
+            continue
+        ax.barh(y, vals, left=bottom, color=GROUP_COLOR[g], height=0.6,
+                label=g, zorder=3)
+        bottom += np.nan_to_num(vals)
+    ax.set_yticks(y); ax.set_yticklabels([METHOD_NAME[t] for t in present_tags])
+    ax.invert_yaxis()
+    ax.set_xlabel("耗时 (ms, 各矩阵均值)")
+    ax.set_title("各 SpGEMM 公式的阶段构成(分阶段打桩,含 cuSPARSE)")
+    ax.legend(frameon=False, fontsize=8, ncol=3, loc="lower right")
+    ax.grid(axis="y", visible=False)
+    fig.tight_layout()
+    fig.savefig(CHART_DIR / "profile_phases.png", bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n分阶段明细: profile_phases.csv ; 图: charts/profile_phases.png")
 
 
 def main():
@@ -154,7 +257,7 @@ def main():
             "cnnz_gap_pct", "buf2",
             "cu_we", "cu_compute", "cu_copy", "cu_d2h", "cu_kernel", "cu_time",
             "cu_write", "man_count", "man_fill", "man_kernel", "man_time", "man_write",
-            "outer_time", "colw_time", "inner_time"]
+            "outer_time", "colw_time", "inner_time", "phases"]
     df = df[[c for c in cols if c in df.columns]]
     # 按稀疏度排列:密度从高到低(稠密→稀疏,即 D→MS→HS→ES)
     df = df.sort_values(["density_pct", "name"], ascending=[False, True])
@@ -193,6 +296,7 @@ def main():
               f"{g(s['cnnz_gap_pct'],8,2)}")
 
     charts(df)
+    phase_breakdown(df)
     print(f"\n图表在 {CHART_DIR}")
 
 

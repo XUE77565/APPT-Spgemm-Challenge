@@ -92,6 +92,7 @@ int main(int argc, char **argv) {
 
     // ---- 预热:正式计时前各方法空跑一次,摊掉 thrust 工作区 / cuSPARSE handle /
     //   CUDA allocator 的一次性冷启动开销,使 T1–T7 测的是稳态性能(不打印、不计时)----
+    printf("===============WARMING UP===============");
     {
         void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;
         spgemm_self_product(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);

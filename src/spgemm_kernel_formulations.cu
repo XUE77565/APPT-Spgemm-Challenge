@@ -24,6 +24,10 @@
     } \
 } while(0)
 
+// profiling:当前方法标签(各 host 入口设置),共享 helper 用它打统一 [tag] phase 桩。
+// parser 按相邻两戳相减得各阶段耗时。
+static const char *g_tag = "?";
+
 // ===================== CSR -> CSC(自包含,不依赖 cusparse 版本)=====================
 
 __global__ void csc_count_kernel(const int *col_idx, int nnz, int *col_count)
@@ -81,6 +85,7 @@ static void build_csc(const int *d_row_ptr, const int *d_col_idx, const float *d
                                        d_tmp, d_csc_row, d_csc_val);
     }
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[%s] csc\n", g_tag);
     cudaFree(d_col_count);
     cudaFree(d_tmp);
     *col_ptr_out = d_col_ptr;
@@ -110,6 +115,7 @@ static int esc_merge(unsigned long long *d_key, float *d_val, int total, int A_r
     thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
                         thrust::device_ptr<unsigned long long>(d_key + total),
                         thrust::device_ptr<float>(d_val));
+    dbg("[%s] sort\n", g_tag);
     unsigned long long *d_rk; float *d_rv;
     CHECK_CUDA(cudaMalloc(&d_rk, (size_t)total * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_rv, (size_t)total * sizeof(float)));
@@ -123,6 +129,7 @@ static int esc_merge(unsigned long long *d_key, float *d_val, int total, int A_r
             thrust::device_ptr<float>(d_rv));
     int Cnnz = (int)(e.first - thrust::device_ptr<unsigned long long>(d_rk));
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[%s] reduce\n", g_tag);
 
     int *c_col; float *c_val; int *c_row_nnz;
     CHECK_CUDA(cudaMalloc(&c_col, (size_t)Cnnz * sizeof(int)));
@@ -143,6 +150,7 @@ static int esc_merge(unsigned long long *d_key, float *d_val, int total, int A_r
                            thrust::device_ptr<int>(c_row_nnz + A_rows),
                            thrust::device_ptr<int>(c_row_ptr + 1));
     cudaFree(c_row_nnz);
+    dbg("[%s] final\n", g_tag);
     *dC_col_idx = c_col; *dC_val = c_val; *dC_row_ptr = c_row_ptr;
     return Cnnz;
 }
@@ -163,9 +171,11 @@ static void *pack_and_download(int *d_row_ptr, int *d_col_idx, float *d_val,
     CHECK_CUDA(cudaMemcpy(base, d_row_ptr, rp, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(base + rp_a, d_col_idx, ci, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(base + rp_a + ci_a, d_val, vv, cudaMemcpyDeviceToDevice));
+    dbg("[%s] pack\n", g_tag);
     void *hb = nullptr;
     CHECK_CUDA(cudaMallocHost(&hb, total));
     CHECK_CUDA(cudaMemcpy(hb, db, total, cudaMemcpyDeviceToHost));
+    dbg("[%s] d2h\n", g_tag);
     cudaFree(db);
     return hb;
 }
@@ -213,22 +223,24 @@ void spgemm_self_product_outer(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
+    g_tag = "outer"; dbg("[outer] start\n");
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = A_nnz * sizeof(int);
     size_t vv = A_nnz * sizeof(float);
     size_t totalA = rp + ci + vv;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, totalA));
     CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
+    dbg("[outer] h2d\n");
     char *b = (char*)dA;
     int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); float *d_v = (float*)(b + rp + ci);
 
     int *d_csc_cp, *d_csc_ri; float *d_csc_v;
-    build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);
+    build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [outer] csc
 
-    dbg("outer: count begin\n");
     int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
     count_outer_kernel<<<(A_rows + 255) / 256, 256>>>(d_rp, d_csc_cp, A_rows, d_ub);
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[outer] count\n");
 
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
@@ -236,23 +248,20 @@ void spgemm_self_product_outer(
                            thrust::device_ptr<int>(d_ub + A_rows),
                            thrust::device_ptr<int>(d_off + 1));
     int total; CHECK_CUDA(cudaMemcpy(&total, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("outer: total intermediates = %d\n", total);
+    dbg("[outer] scan\n");
 
     unsigned long long *d_key; float *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(float)));
-    dbg("outer: expand begin\n");
     expand_outer_kernel<<<A_rows, 256>>>(d_rp, d_ci, d_v, d_csc_cp, d_csc_ri, d_csc_v,
                                          A_rows, d_off, d_key, d_val);
     CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("outer: expand done\n");
+    dbg("[outer] expand\n");
 
     int *c_col; float *c_val; int *c_rp;
-    dbg("outer: merge begin\n");
-    int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);
-    dbg("outer: merge done, C_nnz=%d\n", Cnnz);
+    int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
 
-    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
+    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);        // -> pack/d2h
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
 
     cudaFree(dA); cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_v);
@@ -307,22 +316,24 @@ void spgemm_self_product_colwise(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
+    g_tag = "colw"; dbg("[colw] start\n");
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = A_nnz * sizeof(int);
     size_t vv = A_nnz * sizeof(float);
     size_t totalA = rp + ci + vv;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, totalA));
     CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
+    dbg("[colw] h2d\n");
     char *b = (char*)dA;
     int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); float *d_v = (float*)(b + rp + ci);
 
     int *d_csc_cp, *d_csc_ri; float *d_csc_v;
-    build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);
+    build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [colw] csc
 
-    dbg("colwise: count begin\n");
     int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
     count_colwise_kernel<<<(A_rows + 255) / 256, 256>>>(d_csc_cp, d_csc_ri, A_rows, d_ub);
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[colw] count\n");
 
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
@@ -330,22 +341,19 @@ void spgemm_self_product_colwise(
                            thrust::device_ptr<int>(d_ub + A_rows),
                            thrust::device_ptr<int>(d_off + 1));
     int total; CHECK_CUDA(cudaMemcpy(&total, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("colwise: total intermediates = %d\n", total);
+    dbg("[colw] scan\n");
 
     unsigned long long *d_key; float *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(float)));
-    dbg("colwise: expand begin\n");
     expand_colwise_kernel<<<A_rows, 256>>>(d_csc_cp, d_csc_ri, d_csc_v, A_rows, d_off, d_key, d_val);
     CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("colwise: expand done\n");
+    dbg("[colw] expand\n");
 
     int *c_col; float *c_val; int *c_rp;
-    dbg("colwise: merge begin\n");
-    int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);
-    dbg("colwise: merge done, C_nnz=%d\n", Cnnz);
+    int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
 
-    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
+    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);        // -> pack/d2h
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
 
     cudaFree(dA); cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_v);
@@ -408,36 +416,40 @@ void spgemm_self_product_inner(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
+    g_tag = "inner"; dbg("[inner] start\n");
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = A_nnz * sizeof(int);
     size_t vv = A_nnz * sizeof(float);
     size_t totalA = rp + ci + vv;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, totalA));
     CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
+    dbg("[inner] h2d\n");
     char *b = (char*)dA;
     int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); float *d_v = (float*)(b + rp + ci);
 
     int *d_csc_cp, *d_csc_ri; float *d_csc_v;
-    build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);
+    build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [inner] csc
 
-    // ---- 符号阶段:ESC 展开+排序+去重,只取结构 (c_col 已按 (行,列) 有序) ----
-    dbg("inner: symbolic(ESC) begin\n");
+    // ---- 符号阶段:ESC 展开+排序+去重,只取结构 ----
     int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
     count_intermediates_kernel<<<(A_rows + 255) / 256, 256>>>(d_rp, d_ci, A_rows, d_ub);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[inner] count\n");
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
     thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
                            thrust::device_ptr<int>(d_ub + A_rows),
                            thrust::device_ptr<int>(d_off + 1));
     int total; CHECK_CUDA(cudaMemcpy(&total, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("[inner] scan\n");
     unsigned long long *d_key; float *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(float)));
     expand_intermediates_kernel<<<A_rows, 256>>>(d_rp, d_ci, d_v, A_rows, d_off, d_key, d_val);
     CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[inner] expand\n");
     int *c_col; float *c_val; int *c_rp;
-    int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);  // c_val 暂存,会被覆盖
-    dbg("inner: structure C_nnz=%d, numeric(merge) begin\n", Cnnz);
+    int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
     cudaFree(d_ub); cudaFree(d_off); cudaFree(d_key); cudaFree(d_val);
 
     // ---- 数值阶段(内积本体):逐元素归并 row_i 与 col_j,重算 c_val ----
@@ -445,9 +457,9 @@ void spgemm_self_product_inner(
                                           d_csc_cp, d_csc_ri, d_csc_v,
                                           A_rows, c_rp, c_col, c_val);
     CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("inner: numeric done\n");
+    dbg("[inner] numeric\n");
 
-    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
+    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);        // -> pack/d2h
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
 
     cudaFree(dA); cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_v);
