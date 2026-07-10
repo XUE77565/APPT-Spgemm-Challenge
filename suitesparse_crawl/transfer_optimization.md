@@ -171,4 +171,4 @@ cd suitesparse_crawl
 nvcc -O2 -o bw_test bw_test.cu
 for mb in 10 100 333 666; do ./bw_test $mb; done
 ```
-分阶段 d2h 数据:`suitesparse_crawl/profile_phases.csv`(列 `d2h`,按 `tag`/`name` 过滤)。
+分阶段 d2h 数据:`suitesparse_crawl/profile_aa.csv`(列 `d2h`,按 `tag`/`name` 过滤)。

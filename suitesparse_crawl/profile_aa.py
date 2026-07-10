@@ -41,7 +41,7 @@ plt.rcParams.update({
 })
 
 REPO = Path(__file__).resolve().parent.parent
-LOG_DIR = Path(os.environ.get("REP_LOG_DIR", str(REPO / "results" / "rep" / "log")))
+LOG_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("REP_LOG_DIR", str(REPO / "results" / "first100" / "log")))
 REPS_CSV = Path(__file__).resolve().parent / "representatives.csv"
 OUT_CSV = Path(__file__).resolve().parent / "profile_rep.csv"
 CHART_DIR = Path(__file__).resolve().parent / "charts"
@@ -173,21 +173,38 @@ def phase_breakdown(df):
     for _, r in df.iterrows():
         ph = r.get("phases", {}) or {}
         for tag in TAGS:
-            d = method_durations(ph, tag)
-            if not d:
-                continue
             row = {"name": r["name"], "class": r["class"], "tag": tag,
                    "n": r["n"], "A_nnz": r["A_nnz"]}
-            for p in ALL_PHASES:
-                row[p] = d.get(p, np.nan)
+            
+            if tag == "cu":
+                # 【核心修复】直接使用主流程中已经精确解析的 cuSPARSE 各阶段真实耗时（无视时间戳错位）
+                for p in ALL_PHASES:
+                    row[p] = np.nan
+                row["workest"] = r.get("cu_we", np.nan)
+                row["compute"] = r.get("cu_compute", np.nan)
+                row["copy"] = r.get("cu_copy", np.nan)
+                row["d2h"] = r.get("cu_d2h", np.nan)
+                
+                # 如果没有任何 cuSPARSE 耗时数据，则跳过
+                if all(pd.isna(row[p]) for p in ["workest", "compute", "copy", "d2h"]):
+                    continue
+            else:
+                # 其它 manual 方法继续沿用原本的打桩时间戳减法逻辑
+                d = method_durations(ph, tag)
+                if not d:
+                    continue
+                for p in ALL_PHASES:
+                    row[p] = d.get(p, np.nan)
+            
             rows.append(row)
+            
     if not rows:
         print("\n(无 [tag] phase 数据:确认 DBG=1 且日志带分阶段桩)")
         return
     pdf = pd.DataFrame(rows)
-    pdf.to_csv(Path(__file__).resolve().parent / "profile_phases.csv", index=False)
+    pdf.to_csv(Path(__file__).resolve().parent / "profile_aa.csv", index=False)
 
-    # ---- 按方法聚合:分组成 传输/符号/计算/合并/数值归并/打包(均值 ms)----
+    # ---- 以下的聚合与画图逻辑完全保持不变 ----
     print("\n" + "=" * 88)
     print("分阶段构成(各矩阵均值,ms)— 按阶段分组,五法可比")
     print("-" * 88)
@@ -226,9 +243,9 @@ def phase_breakdown(df):
     ax.legend(frameon=False, fontsize=8, ncol=3, loc="lower right")
     ax.grid(axis="y", visible=False)
     fig.tight_layout()
-    fig.savefig(CHART_DIR / "profile_phases.png", bbox_inches="tight")
+    fig.savefig(CHART_DIR / "profile_aa.png", bbox_inches="tight")
     plt.close(fig)
-    print(f"\n分阶段明细: profile_phases.csv ; 图: charts/profile_phases.png")
+    print(f"\n分阶段明细: profile_aa.csv ; 图: charts/profile_aa.png")
 
 
 def main():

@@ -6,6 +6,7 @@ A·Aᵀ 上三角 profiling:解析 `./spgemm_test <mtx> att` 日志(results/rep_
 """
 import re
 import os
+import sys
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
@@ -30,7 +31,7 @@ plt.rcParams.update({
 })
 
 REPO = Path(__file__).resolve().parent.parent
-LOG_DIR = Path(os.environ.get("ATT_LOG_DIR", str(REPO / "results" / "rep_att" / "log")))
+LOG_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ATT_LOG_DIR", str(REPO / "results" / "first100_att" / "log")))
 REPS_CSV = Path(__file__).resolve().parent / "representatives.csv"
 OUT_CSV = Path(__file__).resolve().parent / "profile_att.csv"
 CHART_DIR = Path(__file__).resolve().parent / "charts"
