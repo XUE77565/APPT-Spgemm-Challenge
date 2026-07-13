@@ -42,7 +42,7 @@ plt.rcParams.update({
 
 REPO = Path(__file__).resolve().parent.parent
 HERE = Path(__file__).resolve().parent
-# run_aa.sh 把日志写到 results/aa/first100_aa/log;可用 argv[1] 或 AA_LOG_DIR 覆盖
+# scripts/run_aa.sh 把日志写到 results/aa/first100_aa/log;可用 argv[1] 或 AA_LOG_DIR 覆盖
 LOG_DIR = Path(sys.argv[1] if len(sys.argv) > 1
               else os.environ.get("AA_LOG_DIR",
                                   str(REPO / "results" / "aa" / "first100_aa" / "log")))

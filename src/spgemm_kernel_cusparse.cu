@@ -198,7 +198,7 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     size_t C_total_size = C_row_ptr_size_aligned + C_col_idx_size_aligned + C_val_size;
 
     void *C_buffer;
-    CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
+    CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
     dbg("self_product: C D2H begin (%zu B)\n", C_total_size);
     CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
     dbg("[cu] d2h\n");
@@ -301,7 +301,7 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     size_t C_total_size = C_row_ptr_size_aligned + C_col_idx_size_aligned + C_val_size;
 
     void *C_buffer;
-    CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
+    CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
     CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
     dbg("[cut] d2h\n");
 

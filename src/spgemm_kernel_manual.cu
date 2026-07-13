@@ -248,7 +248,7 @@ void spgemm_transpose_product_manual(
                          dC_val, C_val_size, cudaMemcpyDeviceToDevice));
 
     void *C_buffer = nullptr;
-    CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
+    CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
 
     CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size,
                          cudaMemcpyDeviceToHost));
@@ -399,7 +399,7 @@ void spgemm_self_product_manual(
     dbg("[gust] pack\n");
 
     void *C_buffer = nullptr;
-    CHECK_CUDA(cudaMallocHost(&C_buffer, C_total_size));
+    CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
     CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
     dbg("[gust] d2h\n");
 

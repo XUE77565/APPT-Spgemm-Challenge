@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdarg>
 #include <cuda_runtime.h>
+#include "mempool.h"
 
 #define TEST_READ 0
 #define DBG 1
@@ -24,7 +25,7 @@ inline void dbg(const char *fmt, ...) {
     double ms = std::chrono::duration<double, std::milli>(now - t0).count();
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "[dbg %9.1f ms] ", ms);
+    fprintf(stderr, "[dbg %9.3f ms] ", ms);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fflush(stderr);

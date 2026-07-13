@@ -32,6 +32,10 @@ static std::string get_basename(const char *path) {
 
 int main(int argc, char **argv) {
 
+    {   // 运行时开关:USE_MEMPOOL=1 走 pinned 池,未设/0 走原 cudaMallocHost(便于 A/B)
+        const char* e = std::getenv("USE_MEMPOOL");
+        g_use_mempool = (e && std::atoi(e) > 0);
+    }
     dbg("main entry, initializing CUDA context...\n");
     cudaFree(0);
     cudaSetDevice(0);
@@ -89,6 +93,12 @@ int main(int argc, char **argv) {
         return 0;//先测试读入函数是否正确
     }
 
+    // 初始化 pinned host 内存池(USE_MEMPOOL=1 时生效;失败则退回原路径)
+    if (!mempool_init()) {
+        fprintf(stderr, "[main] mempool_init failed, falling back to legacy cudaMallocHost\n");
+        g_use_mempool = false;
+    }
+
 
     // ============ A·Aᵀ 上三角 profiling 模式 (argv[2]=="att") ============
     if (argc >= 3 && std::string(argv[2]) == "att") {
@@ -96,19 +106,19 @@ int main(int argc, char **argv) {
         {
             void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;
             spgemm_transpose_product(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-            if (wc) cudaFreeHost(wc);
+            if (wc) pinned_free(wc);
             wc = nullptr;
             spgemm_att_outer(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-            if (wc) cudaFreeHost(wc);
+            if (wc) pinned_free(wc);
             wc = nullptr;
             spgemm_att_gust(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-            if (wc) cudaFreeHost(wc);
+            if (wc) pinned_free(wc);
             wc = nullptr;
             spgemm_att_colw(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-            if (wc) cudaFreeHost(wc);
+            if (wc) pinned_free(wc);
             wc = nullptr;
             spgemm_att_inner(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-            if (wc) cudaFreeHost(wc);
+            if (wc) pinned_free(wc);
         }
         auto att_run = [&](const char *label, const char *kind, auto fn) {
             LOG_BOTH("\n=== Computing %s ===\n", label);
@@ -119,7 +129,7 @@ int main(int argc, char **argv) {
             std::chrono::duration<double, std::milli> el = e - s;
             LOG_BOTH("Result C (%s): %d x %d, nnz = %d\n", kind, Cr, Cc, Cn);
             LOG_BOTH("Time: %.3f ms\n", el.count());
-            if (C_buffer) cudaFreeHost(C_buffer);
+            if (C_buffer) pinned_free(C_buffer);
         };
         att_run("C = A x A^T (cuSPARSE)", "A·Aᵀ 全量", spgemm_transpose_product);
         att_run("C = A x A^T upper (outer)", "A·Aᵀ 上三角", spgemm_att_outer);
@@ -129,6 +139,7 @@ int main(int argc, char **argv) {
         LOG_BOTH("\n=== All att tests completed ===\n");
         fclose(log_file);
         free(A_buffer);
+        mempool_destroy();
         return 0;
     }
 
@@ -139,19 +150,19 @@ int main(int argc, char **argv) {
     {
         void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;
         spgemm_self_product(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) cudaFreeHost(wc);
+        if (wc) pinned_free(wc);
         wc = nullptr;
         spgemm_self_product_manual(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) cudaFreeHost(wc);
+        if (wc) pinned_free(wc);
         wc = nullptr;
         spgemm_self_product_outer(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) cudaFreeHost(wc);
+        if (wc) pinned_free(wc);
         wc = nullptr;
         spgemm_self_product_colwise(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) cudaFreeHost(wc);
+        if (wc) pinned_free(wc);
         wc = nullptr;
         spgemm_self_product_inner(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) cudaFreeHost(wc);
+        if (wc) pinned_free(wc);
         dbg("warmup done\n");
     }
 
@@ -199,7 +210,7 @@ int main(int argc, char **argv) {
             #endif
 
 
-            cudaFreeHost(C_buffer);
+            pinned_free(C_buffer);
         }
     }
     #endif
@@ -237,7 +248,7 @@ int main(int argc, char **argv) {
                            C_val, C_rows, C_cols, C_nnz);
         LOG_BOTH("Saved to %s\n", output_path.c_str());
 
-        cudaFreeHost(C_buffer);
+        pinned_free(C_buffer);
     }
 
     // 测试 3: C = A x A^T (手写对称优化)
@@ -273,7 +284,7 @@ int main(int argc, char **argv) {
                            C_val, C_rows, C_cols, C_nnz);
         LOG_BOTH("Saved to %s\n", output_path.c_str());
 
-        cudaFreeHost(C_buffer);
+        pinned_free(C_buffer);
     }
 */
     // 测试 4: C = A x A (手写实现)
@@ -316,7 +327,7 @@ int main(int argc, char **argv) {
         #endif
 
 
-        cudaFreeHost(C_buffer);
+        pinned_free(C_buffer);
     }
 
     // 测试 5: C = A x A (外积 outer product, 外层=k)
@@ -339,7 +350,7 @@ int main(int argc, char **argv) {
                  C_rows, C_cols, C_nnz, C_sparsity);
         LOG_BOTH("Time: %.3f ms\n", elapsed.count());
 
-        cudaFreeHost(C_buffer);
+        pinned_free(C_buffer);
     }
 
     // 测试 6: C = A x A (列向 column-wise, 外层=j, 作为"内积轴"对照)
@@ -362,7 +373,7 @@ int main(int argc, char **argv) {
                  C_rows, C_cols, C_nnz, C_sparsity);
         LOG_BOTH("Time: %.3f ms\n", elapsed.count());
 
-        cudaFreeHost(C_buffer);
+        pinned_free(C_buffer);
     }
 
     // 测试 7: C = A x A (逐元素内积 inner product, merge-based)
@@ -385,7 +396,7 @@ int main(int argc, char **argv) {
                  C_rows, C_cols, C_nnz, C_sparsity);
         LOG_BOTH("Time: %.3f ms\n", elapsed.count());
 
-        cudaFreeHost(C_buffer);
+        pinned_free(C_buffer);
     }
 
     free(A_buffer);
@@ -394,5 +405,6 @@ int main(int argc, char **argv) {
 
     //在LOG之后fclose,避免use-after-free
     fclose(log_file);
+    mempool_destroy();
     return 0;
 }

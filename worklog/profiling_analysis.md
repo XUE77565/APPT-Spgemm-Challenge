@@ -168,9 +168,13 @@ outer/colw/inner 现在各建一次 CSC(~0.1ms/法)。Gustavson 不建 CSC 所�
 
 ```bash
 make                                  # 必须确认 CU_REF=1(见下)
-bash run_aa.sh                        # → results/aa/first100_aa/log/<name>.log
-# att 模式: bash run_att.sh           # → results/first100_att/log/
+bash scripts/run_aa.sh                # → results/aa/first100_aa/log/<name>.log
+# att 模式: bash scripts/run_att.sh   # → results/first100_att/log/
+# USE_MEMPOOL=1 bash scripts/run_aa.sh # 走 pinned 池(见 §4.1);未设 = 原路径
 ```
+
+> A/B 对比(legacy vs pinned 池,同一二进制、只差 USE_MEMPOOL):
+> `bash scripts/ab_profile.sh` 一次跑完两路,产出 `profile_aa_legacy.csv` / `profile_aa_pool.csv` 并打印 d2h/h2d 对比表。
 
 ### 5.2 出 profiling
 

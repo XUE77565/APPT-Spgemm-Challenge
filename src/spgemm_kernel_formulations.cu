@@ -173,7 +173,7 @@ static void *pack_and_download(int *d_row_ptr, int *d_col_idx, float *d_val,
     CHECK_CUDA(cudaMemcpy(base + rp_a + ci_a, d_val, vv, cudaMemcpyDeviceToDevice));
     dbg("[%s] pack\n", g_tag);
     void *hb = nullptr;
-    CHECK_CUDA(cudaMallocHost(&hb, total));
+    CHECK_CUDA(pinned_d2h_alloc(&hb, total));
     CHECK_CUDA(cudaMemcpy(hb, db, total, cudaMemcpyDeviceToHost));
     dbg("[%s] d2h\n", g_tag);
     cudaFree(db);

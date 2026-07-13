@@ -4,7 +4,7 @@ INCLUDES = -Iinclude -I/usr/local/cuda/include
 LIBS = -lcusparse -lcublas
 
 TARGET = spgemm_test
-SRCS = src/main.cu src/matrix_utils.cu src/spgemm_kernel_cusparse.cu src/spgemm_kernel_manual.cu src/spgemm_kernel_formulations.cu
+SRCS = src/main.cu src/matrix_utils.cu src/spgemm_kernel_cusparse.cu src/spgemm_kernel_manual.cu src/spgemm_kernel_formulations.cu src/mempool.cu
 OBJS = $(SRCS:.cu=.o)
 HEADERS = $(wildcard include/*.h)   # 任何头文件改动都触发重编
 
@@ -27,6 +27,6 @@ test: $(TARGET)
 	./$(TARGET) data/sphere2/sphere2.mtx
 
 run_all: $(TARGET)
-	bash run_all.sh
+	bash scripts/run_all.sh
 
 .PHONY: all clean test run_all
