@@ -4,6 +4,7 @@
 #   TEST_READ 模式下：读成功 return 0；读失败 return EXIT_FAILURE；崩溃(abort/segv) 非零
 # 关键：不能用 "| tee" 后查 $?（那会是 tee 的退出码，恒 0），必须直接重定向
 
+cd "$(dirname "$(readlink -f "$0")")/.."   # 脚本在 scripts/ 下,cd 回仓库根
 DATA_DIR="./data"
 OUT_DIR="./read_test"
 mkdir -p "$OUT_DIR"

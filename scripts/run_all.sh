@@ -1,19 +1,19 @@
 #!/bin/bash
-# 跑 data/rep/ 下的【代表矩阵】(扁平 .mtx)做 SpGEMM benchmark,统计成功/失败/超时
-# 与 run_all.sh 的区别:data/rep/ 是扁平结构(<name>.mtx),这里直接遍历 .mtx 文件
-# 判定依据:spgemm_test 的退出码
-#   0        -> 成功(读入 + 计算全部完成)
-#   非零      -> 失败(读入失败 / CUDA 错误 / 崩溃 segv/abort 等)
-#   124/137   -> 超时(超过 TIMEOUT 秒被 kill,单独计数,跳过该矩阵继续下一个)
-# 关键:不能用 "| tee" 后查 $? (那会是 tee 的退出码,恒 0),必须用 pipefail 拿真实退出码
+# 跑全部矩阵的完整 SpGEMM benchmark，统计成功/失败/超时数量
+# 判定依据：spgemm_test 的退出码
+#   0        -> 成功（读入 + 计算全部完成）
+#   非零      -> 失败（读入失败 / CUDA 错误 / 崩溃 segv/abort 等）
+#   124/137   -> 超时（超过 TIMEOUT 秒被 kill，单独计数，跳过该矩阵继续下一个）
+# 关键：不能用 "| tee" 后查 $?（那会是 tee 的退出码，恒 0），必须用 pipefail 拿真实退出码
 
 set -o pipefail   # 让管道返回 spgemm_test 的真实退出码而不是 tee 的
+cd "$(dirname "$(readlink -f "$0")")/.."   # 脚本在 scripts/ 下,cd 回仓库根
 
 
 # 单个矩阵最大允许耗时（秒）。可用环境变量覆盖，如：TIMEOUT=60 ./run_all.sh
 TIMEOUT=${TIMEOUT:-600}
-DATA_DIR="./data/first100"
-RESULTS_DIR="./results/aa/first100_aa"
+DATA_DIR="./data/random"
+RESULTS_DIR="./results/random"
 LOG_DIR="$RESULTS_DIR/log"
 MATRIX_DIR="$RESULTS_DIR/matrices"
 SUMMARY="$RESULTS_DIR/summary.csv"
@@ -33,11 +33,14 @@ total=0
 failed=""
 timedout=""
 
-  # data/rep/ 是扁平结构:data/rep/<name>.mtx(不是 <name>/<name>.mtx)
-  # 直接遍历 .mtx 文件,而不是子目录
-  for mtx in "$DATA_DIR"/*.mtx; do
-      [ -e "$mtx" ] || continue        # 目录为空时 glob 不展开,跳过
-      name=$(basename "$mtx" .mtx)
+  for matrix_dir in "$DATA_DIR"/*/; do
+      name=$(basename "$matrix_dir")
+      mtx="${matrix_dir}${name}.mtx"
+
+      if [ ! -f "$mtx" ]; then
+          echo "Skipping $name (no .mtx file)"
+          continue
+      fi
 
       total=$((total + 1))
       echo "Processing $name ... (max ${TIMEOUT}s)"
