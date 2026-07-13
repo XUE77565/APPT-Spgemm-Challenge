@@ -7,8 +7,8 @@ Profiling run_rep.sh 的结果:解析每个日志里的 dbg 阶段时间戳,
 阶段(manual  T4): count kernel / fill kernel / 写盘
 """
 
-import re
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -41,11 +41,30 @@ plt.rcParams.update({
 })
 
 REPO = Path(__file__).resolve().parent.parent
-LOG_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("REP_LOG_DIR", str(REPO / "results" / "first100" / "log")))
-REPS_CSV = Path(__file__).resolve().parent / "representatives.csv"
-OUT_CSV = Path(__file__).resolve().parent / "profile_rep.csv"
-CHART_DIR = Path(__file__).resolve().parent / "charts"
+HERE = Path(__file__).resolve().parent
+# run_aa.sh 把日志写到 results/aa/first100_aa/log;可用 argv[1] 或 AA_LOG_DIR 覆盖
+LOG_DIR = Path(sys.argv[1] if len(sys.argv) > 1
+              else os.environ.get("AA_LOG_DIR",
+                                  str(REPO / "results" / "aa" / "first100_aa" / "log")))
+OUT_CSV = HERE / "profile_aa_summary.csv"   # 每矩阵汇总(time/nnz/class)
+PHASES_CSV = HERE / "profile_aa.csv"        # 每矩阵×方法 分阶段明细
+CHART_DIR = HERE / "charts"
 CHART_DIR.mkdir(exist_ok=True)
+
+
+# 稀疏度分类(与 classify_by_sparsity.py 阈值一致);直接从日志解析的 n/A_nnz 算,
+# 覆盖全部 100 个矩阵 —— 不再依赖只含 32 个代表的 representatives.csv。
+# 注:read_matrix_market 不展开对称,故日志里的 A_nnz 与 SuiteSparse 元数据一致。
+def classify_density(density_pct):
+    if pd.isna(density_pct):
+        return "?"
+    if density_pct >= 10.0:
+        return "Dense"
+    if density_pct >= 1.0:
+        return "Mildly sparse"
+    if density_pct >= 0.1:
+        return "Highly sparse"
+    return "Extremely sparse"
 
 
 def parse_log(path):
@@ -173,38 +192,21 @@ def phase_breakdown(df):
     for _, r in df.iterrows():
         ph = r.get("phases", {}) or {}
         for tag in TAGS:
+            d = method_durations(ph, tag)
+            if not d:
+                continue
             row = {"name": r["name"], "class": r["class"], "tag": tag,
                    "n": r["n"], "A_nnz": r["A_nnz"]}
-            
-            if tag == "cu":
-                # 【核心修复】直接使用主流程中已经精确解析的 cuSPARSE 各阶段真实耗时（无视时间戳错位）
-                for p in ALL_PHASES:
-                    row[p] = np.nan
-                row["workest"] = r.get("cu_we", np.nan)
-                row["compute"] = r.get("cu_compute", np.nan)
-                row["copy"] = r.get("cu_copy", np.nan)
-                row["d2h"] = r.get("cu_d2h", np.nan)
-                
-                # 如果没有任何 cuSPARSE 耗时数据，则跳过
-                if all(pd.isna(row[p]) for p in ["workest", "compute", "copy", "d2h"]):
-                    continue
-            else:
-                # 其它 manual 方法继续沿用原本的打桩时间戳减法逻辑
-                d = method_durations(ph, tag)
-                if not d:
-                    continue
-                for p in ALL_PHASES:
-                    row[p] = d.get(p, np.nan)
-            
+            for p in ALL_PHASES:
+                row[p] = d.get(p, np.nan)
             rows.append(row)
-            
     if not rows:
         print("\n(无 [tag] phase 数据:确认 DBG=1 且日志带分阶段桩)")
         return
     pdf = pd.DataFrame(rows)
-    pdf.to_csv(Path(__file__).resolve().parent / "profile_aa.csv", index=False)
+    pdf.to_csv(PHASES_CSV, index=False)
 
-    # ---- 以下的聚合与画图逻辑完全保持不变 ----
+    # ---- 按方法聚合:分组成 传输/符号/计算/合并/数值归并/打包(均值 ms)----
     print("\n" + "=" * 88)
     print("分阶段构成(各矩阵均值,ms)— 按阶段分组,五法可比")
     print("-" * 88)
@@ -249,17 +251,26 @@ def phase_breakdown(df):
 
 
 def main():
-    reps = {r["name"]: r for r in pd.read_csv(REPS_CSV).to_dict("records")}
     rows = []
     for log in sorted(LOG_DIR.glob("*.log")):
-        name = log.stem
         p = parse_log(log)
-        p["name"] = name
-        r = reps.get(name, {})
-        p["class"] = r.get("class", "?")
-        p["density_pct"] = r.get("density_pct", np.nan)
+        p["name"] = log.stem
         rows.append(p)
     df = pd.DataFrame(rows)
+    # 稀疏度分类:直接从日志的 n/A_nnz 算,不再 join representatives.csv
+    df["density_pct"] = df["A_nnz"] / (df["n"].astype(float) ** 2) * 100.0
+    df["class"] = df["density_pct"].apply(classify_density)
+
+    # cuSPARSE 各阶段:aa 日志只打 begin 不打 done,parse_log 里 cu_we/cu_compute/cu_copy/
+    # cu_d2h(begin/done 配对)解析为 NaN。这里改从 [cu] phase 时间戳取(method_durations),
+    # 与 profile_aa.csv 分阶段明细一致,使 cu_kernel 与 cuSPARSE 拆解图可用。
+    def _cu_phase(phases, ph):
+        return method_durations(phases or {}, "cu").get(ph, np.nan)
+    ph = df["phases"]
+    df["cu_we"] = df["cu_we"].fillna(ph.apply(lambda p: _cu_phase(p, "workest")))
+    df["cu_compute"] = df["cu_compute"].fillna(ph.apply(lambda p: _cu_phase(p, "compute")))
+    df["cu_copy"] = df["cu_copy"].fillna(ph.apply(lambda p: _cu_phase(p, "copy")))
+    df["cu_d2h"] = df["cu_d2h"].fillna(ph.apply(lambda p: _cu_phase(p, "d2h")))
 
     # 正确性:三种方法 vs cuSPARSE 的 nnz 偏差(取最大相对偏差作 gap%)
     df["gust_gap"] = (df["cu_cnnz"] - df["man_cnnz"]).abs()

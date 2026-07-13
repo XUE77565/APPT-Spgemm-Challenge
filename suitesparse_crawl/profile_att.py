@@ -32,10 +32,23 @@ plt.rcParams.update({
 
 REPO = Path(__file__).resolve().parent.parent
 LOG_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ATT_LOG_DIR", str(REPO / "results" / "first100_att" / "log")))
-REPS_CSV = Path(__file__).resolve().parent / "representatives.csv"
 OUT_CSV = Path(__file__).resolve().parent / "profile_att.csv"
 CHART_DIR = Path(__file__).resolve().parent / "charts"
 CHART_DIR.mkdir(exist_ok=True)
+
+
+# 稀疏度分类(与 classify_by_sparsity.py 阈值一致);直接从日志的 n/A_nnz 算,
+# 覆盖全部 100 个矩阵 —— 不再依赖只含 32 个代表的 representatives.csv
+def classify_density(density_pct):
+    if pd.isna(density_pct):
+        return "?"
+    if density_pct >= 10.0:
+        return "Dense"
+    if density_pct >= 1.0:
+        return "Mildly sparse"
+    if density_pct >= 0.1:
+        return "Highly sparse"
+    return "Extremely sparse"
 # att 方法顺序(与 main.cu att 一致):0=cuSPARSE全量, 1=outer, 2=gust, 3=colw, 4=inner
 TAGS = ["cu", "outer", "gust", "colw", "inner"]
 NAME = {"cu": "cuSPARSE(全量)", "outer": "外积(上三角)", "gust": "Gustavson(上三角)",
@@ -100,16 +113,15 @@ def method_durations(phases, m):
 
 
 def main():
-    reps = {r["name"]: r for r in pd.read_csv(REPS_CSV).to_dict("records")}
     rows = []
     for log in sorted(LOG_DIR.glob("*.log")):
         p = parse_log(log)
         p["name"] = log.stem
-        r = reps.get(log.stem, {})
-        p["class"] = r.get("class", "?")
-        p["density_pct"] = r.get("density_pct", np.nan)
         rows.append(p)
     df = pd.DataFrame(rows)
+    # 稀疏度分类:直接从日志的 n/A_nnz 算,不再 join representatives.csv
+    df["density_pct"] = df["A_nnz"] / (df["n"].astype(float) ** 2) * 100.0
+    df["class"] = df["density_pct"].apply(classify_density)
     # 上三角法一致性 + 推 diag
     ucols = ["upper_outer", "upper_gust", "upper_colw", "upper_inner"]
     df["upper_agree"] = df[ucols].apply(lambda r: int(len(set(r.dropna())) <= 1), axis=1)
