@@ -165,13 +165,14 @@ PHASE_GROUP = {
     "h2d": "h2d", "d2h": "d2h",
     "csc": "符号", "count": "符号", "scan": "符号",
     "expand": "计算", "workest": "计算", "compute": "计算", "copy": "计算",
-    "sort": "合并", "reduce": "合并", "final": "合并",
+    "sort": "排序", "reduce": "去重", "final": "收尾",
     "numeric": "数值归并", "pack": "打包",
 }
-GROUP_ORDER = ["h2d", "d2h", "符号", "计算", "合并", "数值归并", "打包"]
+GROUP_ORDER = ["h2d", "d2h", "符号", "计算", "排序", "去重", "收尾", "数值归并", "打包"]
 GROUP_COLOR = {"h2d": "#b8b8b0", "d2h": "#6f6f68",   # 上传浅灰 / 下载深灰(同属"传输")
                "符号": "#1baf7a", "计算": "#2a78d6",
-               "合并": "#eda100", "数值归并": "#e34948", "打包": "#4a3aa7"}
+               "排序": "#eda100", "去重": "#c98a1e", "收尾": "#a86620",   # 合并三段:黄→深黄→棕黄
+               "数值归并": "#e34948", "打包": "#4a3aa7"}
 
 
 def phase_order_for(tag):
@@ -209,9 +210,9 @@ def phase_breakdown(df):
     pdf.to_csv(PHASES_CSV, index=False)
 
     # ---- 按方法聚合:分组成 h2d/d2h/符号/计算/合并/数值归并/打包(均值 ms)----
-    print("\n" + "=" * 92)
+    print("\n" + "=" * 112)
     print("分阶段构成(各矩阵均值,ms)— 按阶段分组,五法可比")
-    print("-" * 92)
+    print("-" * 112)
     print(f"{'方法':<12}" + "".join(f"{g:>10}" for g in GROUP_ORDER) + f"{'合计':>10}")
     agg = {}
     for tag in TAGS:
