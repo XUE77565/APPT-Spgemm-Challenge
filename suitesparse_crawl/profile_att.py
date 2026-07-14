@@ -62,12 +62,12 @@ PORDER = {"cu": ["h2d", "transpose", "workest", "compute", "copy", "pack", "d2h"
           "gust": ["h2d", "csc", "count", "scan", "expand", "compact", "sort", "reduce", "final", "pack", "d2h"],
           "colw": ["h2d", "csc", "count", "scan", "expand", "compact", "sort", "reduce", "final", "pack", "d2h"],
           "inner": ["h2d", "csc", "count", "scan", "expand", "compact", "sort", "reduce", "final", "numeric", "pack", "d2h"]}
-PGROUP = {"h2d": "传输", "d2h": "传输", "transpose": "符号", "csc": "符号", "count": "符号", "scan": "符号",
+PGROUP = {"h2d": "h2d", "d2h": "d2h", "transpose": "符号", "csc": "符号", "count": "符号", "scan": "符号",
           "expand": "计算", "workest": "计算", "compute": "计算", "copy": "计算",
           "sort": "合并", "reduce": "合并", "final": "合并", "compact": "合并",
           "numeric": "数值归并", "pack": "打包"}
-GORDER = ["传输", "符号", "计算", "合并", "数值归并", "打包"]
-GCOLOR = {"传输": "#898781", "符号": "#1baf7a", "计算": "#2a78d6", "合并": "#eda100",
+GORDER = ["h2d", "d2h", "符号", "计算", "合并", "数值归并", "打包"]
+GCOLOR = {"h2d": "#b8b8b0", "d2h": "#6f6f68", "符号": "#1baf7a", "计算": "#2a78d6", "合并": "#eda100",
           "数值归并": "#e34948", "打包": "#4a3aa7"}
 
 
@@ -158,9 +158,9 @@ def main():
               f"{g('outer_time')}{g('gust_time')}{g('colw_time')}{g('inner_time')}")
 
     # 阶段构成
-    print("\n" + "=" * 78)
+    print("\n" + "=" * 86)
     print("分阶段构成(各矩阵均值,ms)")
-    print("-" * 78)
+    print("-" * 86)
     print(f"{'方法':<16}" + "".join(f"{g:>10}" for g in GORDER))
     agg = {}
     for m in TAGS:

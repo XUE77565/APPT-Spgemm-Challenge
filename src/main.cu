@@ -32,9 +32,9 @@ static std::string get_basename(const char *path) {
 
 int main(int argc, char **argv) {
 
-    {   // 运行时开关:USE_MEMPOOL=1 走 pinned 池,未设/0 走原 cudaMallocHost(便于 A/B)
+    {   // 默认由 spgemm.h 的 USE_MEMPOOL 宏决定;环境变量 USE_MEMPOOL=0/1 可覆盖(便于 A/B)
         const char* e = std::getenv("USE_MEMPOOL");
-        g_use_mempool = (e && std::atoi(e) > 0);
+        g_use_mempool = e ? (std::atoi(e) > 0) : USE_MEMPOOL;
     }
     dbg("main entry, initializing CUDA context...\n");
     cudaFree(0);
@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
         att_run("C = A x A^T upper (inner)", "A·Aᵀ 上三角", spgemm_att_inner);
         LOG_BOTH("\n=== All att tests completed ===\n");
         fclose(log_file);
-        free(A_buffer);
+        host_free(A_buffer);
         mempool_destroy();
         return 0;
     }
@@ -214,79 +214,7 @@ int main(int argc, char **argv) {
         }
     }
     #endif
-/*
-    // 测试 2: C = A x A^T (cuSPARSE)
-    {
-        LOG_BOTH("\n=== Computing C = A x A^T (cuSPARSE) ===\n");
 
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-        spgemm_transpose_product(A_buffer, A_rows, A_cols, A_nnz,
-                                &C_buffer, &C_rows, &C_cols, &C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-
-        char *C_base = (char*)C_buffer;
-        size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
-        size_t C_col_idx_size = C_nnz * sizeof(int);
-        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
-        
-        int *C_row_ptr = (int*)C_base;
-        int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
-        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
-
-        std::string output_path = result_dir + "/transpose_product_cusparse.mtx";
-        write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
-                           C_val, C_rows, C_cols, C_nnz);
-        LOG_BOTH("Saved to %s\n", output_path.c_str());
-
-        pinned_free(C_buffer);
-    }
-
-    // 测试 3: C = A x A^T (手写对称优化)
-    {
-        LOG_BOTH("\n=== Computing C = A x A^T (Manual Symmetric) ===\n");
-
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-        spgemm_transpose_product_manual(A_buffer, A_rows, A_cols, A_nnz,
-                                       &C_buffer, &C_rows, &C_cols, &C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-
-        char *C_base = (char*)C_buffer;
-        size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
-        size_t C_col_idx_size = C_nnz * sizeof(int);
-        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
-        
-        int *C_row_ptr = (int*)C_base;
-        int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
-        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
-
-        std::string output_path = result_dir + "/transpose_product_manual.mtx";
-        write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
-                           C_val, C_rows, C_cols, C_nnz);
-        LOG_BOTH("Saved to %s\n", output_path.c_str());
-
-        pinned_free(C_buffer);
-    }
-*/
     // 测试 4: C = A x A (手写实现)
     {
         LOG_BOTH("\n=== Computing C = A x A (Manual) ===\n");
@@ -399,7 +327,7 @@ int main(int argc, char **argv) {
         pinned_free(C_buffer);
     }
 
-    free(A_buffer);
+    host_free(A_buffer);
 
     LOG_BOTH("\n=== All tests completed ===\n");
 

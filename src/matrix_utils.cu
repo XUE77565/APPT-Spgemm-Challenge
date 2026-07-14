@@ -122,11 +122,20 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     size_t val_size = actual_nnz * sizeof(float);
     size_t total_size = row_ptr_size + col_idx_size + val_size;
 
-    // 分配单块连续普通 host memory
-    void *buffer = malloc(total_size);
-    if (!buffer) {
-        fprintf(stderr, "malloc failed, size = %zu bytes\n", total_size);
-        return false;
+    // 分配单块连续 host memory:USE_MEMPOOL=1 → pinned(cudaMallocHost,H2D 走 DMA 直传);
+    //                         USE_MEMPOOL=0 → pageable(malloc,走 driver staging)。便于 A/B。
+    void *buffer = nullptr;
+    if (g_use_mempool) {
+        if (cudaMallocHost(&buffer, total_size) != cudaSuccess) {
+            fprintf(stderr, "cudaMallocHost failed, size = %zu bytes\n", total_size);
+            return false;
+        }
+    } else {
+        buffer = malloc(total_size);
+        if (!buffer) {
+            fprintf(stderr, "malloc failed, size = %zu bytes\n", total_size);
+            return false;
+        }
     }
 
     // 设置三个指针偏移

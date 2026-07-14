@@ -74,5 +74,11 @@ void pinned_free(void* p) {
     if (!g_use_mempool) cudaFreeHost(p);  // 池模式:noop,arena 由 reset 回收
 }
 
+void host_free(void* p) {
+    if (!p) return;
+    if (g_use_mempool) cudaFreeHost(p);   // A_buffer 经 cudaMallocHost 锁页
+    else                free(p);           // A_buffer 经 malloc(pageable)
+}
+
 size_t mempool_cap() { return g_cap; }
 size_t mempool_used() { return g_off; }

@@ -179,6 +179,7 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
+    dbg("[cu] h2dmalloc (%zu B)\n", A_total_size);
     CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
     dbg("[cu] h2d (%zu B)\n", A_total_size);
 

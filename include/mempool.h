@@ -42,6 +42,10 @@ cudaError_t pinned_d2h_alloc(void** out, size_t bytes);
 //   原模式 :cudaFreeHost,行为不变。
 void  pinned_free(void* p);
 
+// 释放【按 g_use_mempool 方式分配的 host buffer】(A_buffer 用):
+//   池模式(A 经 cudaMallocHost 锁页)→ cudaFreeHost;legacy 模式(A 经 malloc)→ free。
+void  host_free(void* p);
+
 // 调试/观察用。
 size_t mempool_cap();
 size_t mempool_used();

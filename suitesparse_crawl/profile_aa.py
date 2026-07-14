@@ -160,15 +160,17 @@ ALL_PHASES = ["h2d", "csc", "count", "scan", "expand", "workest", "compute", "co
 METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "outer": "外积",
                "colw": "列向", "inner": "内积"}
 # 阶段分组(用于堆叠图与汇总表);cuSPARSE 的 workest/compute/copy 归入"计算"
+# 传输拆成 h2d(上传 A)与 d2h(下载 C)两列,便于分别看
 PHASE_GROUP = {
-    "h2d": "传输", "d2h": "传输",
+    "h2d": "h2d", "d2h": "d2h",
     "csc": "符号", "count": "符号", "scan": "符号",
     "expand": "计算", "workest": "计算", "compute": "计算", "copy": "计算",
     "sort": "合并", "reduce": "合并", "final": "合并",
     "numeric": "数值归并", "pack": "打包",
 }
-GROUP_ORDER = ["传输", "符号", "计算", "合并", "数值归并", "打包"]
-GROUP_COLOR = {"传输": "#898781", "符号": "#1baf7a", "计算": "#2a78d6",
+GROUP_ORDER = ["h2d", "d2h", "符号", "计算", "合并", "数值归并", "打包"]
+GROUP_COLOR = {"h2d": "#b8b8b0", "d2h": "#6f6f68",   # 上传浅灰 / 下载深灰(同属"传输")
+               "符号": "#1baf7a", "计算": "#2a78d6",
                "合并": "#eda100", "数值归并": "#e34948", "打包": "#4a3aa7"}
 
 
@@ -206,10 +208,10 @@ def phase_breakdown(df):
     pdf = pd.DataFrame(rows)
     pdf.to_csv(PHASES_CSV, index=False)
 
-    # ---- 按方法聚合:分组成 传输/符号/计算/合并/数值归并/打包(均值 ms)----
-    print("\n" + "=" * 88)
+    # ---- 按方法聚合:分组成 h2d/d2h/符号/计算/合并/数值归并/打包(均值 ms)----
+    print("\n" + "=" * 92)
     print("分阶段构成(各矩阵均值,ms)— 按阶段分组,五法可比")
-    print("-" * 88)
+    print("-" * 92)
     print(f"{'方法':<12}" + "".join(f"{g:>10}" for g in GROUP_ORDER) + f"{'合计':>10}")
     agg = {}
     for tag in TAGS:

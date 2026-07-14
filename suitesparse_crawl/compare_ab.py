@@ -118,24 +118,27 @@ def main():
     def out(s=""):
         lines.append(s)
 
-    out(datetime.now().strftime("# %Y-%m-%d %H:%M:%S  A/B compare (中位数)"))
+    def emit_table(a_dict, b_dict):
+        out(f"{'方法':<12}{'d2h':>22}{'h2d':>22}{'合计':>16}")
+        out(f"{'':<12}{'legacy → pool':>22}{'legacy → pool':>22}{'legacy → pool':>16}")
+        for t in TAGS:
+            a, b = a_dict[t], b_dict[t]
+            out(f"{NAME[t]:<12}{cell(a['d2h'], b['d2h']):>22}"
+                f"{cell(a['h2d'], b['h2d']):>22}{cell(a['total'], b['total']):>16}")
+
+    out(datetime.now().strftime("# %Y-%m-%d %H:%M:%S  A/B compare"))
     out(f"legacy: {leg_path} ({len(leg[leg.tag=='cu'])} matrices/method)")
     out(f"pool  : {pool_path}")
     out("=" * 74)
-    out(f"{'方法':<12}{'d2h 中位数':>22}{'h2d 中位数':>22}{'合计 中位数':>16}")
-    out(f"{'':<12}{'legacy → pool':>22}{'legacy → pool':>22}{'legacy → pool':>16}")
-    out("-" * 74)
-    for t in TAGS:
-        a, b = med_leg[t], med_pool[t]
-        out(f"{NAME[t]:<12}{cell(a['d2h'], b['d2h']):>22}"
-            f"{cell(a['h2d'], b['h2d']):>22}{cell(a['total'], b['total']):>16}")
+    out("【均值 mean】聚合视图 —— 含大矩阵真实的 h2d 副作用(负% = pool 更快)")
+    emit_table(mean_leg, mean_pool)
     out("=" * 74)
-    out("说明:数值为中位数(鲁棒于少数大矩阵的 cudaMalloc 单次抖动);负% = pool 更快。")
-    out("参考——h2d 均值 vs 中位数(看 outlier 怎么把均值拉偏):")
-    for t in TAGS:
-        ml, mpl = mean_leg[t]["h2d"], mean_pool[t]["h2d"]
-        out(f"  {NAME[t]:<10} 均值 {ml:.3f}→{mpl:.3f} ({(mpl-ml)/ml*100:+.0f}%) | "
-            f"中位数 {med_leg[t]['h2d']:.3f}→{med_pool[t]['h2d']:.3f}")
+    out("【中位数 median】典型矩阵视图 —— 多为小矩阵,h2d 副作用不显")
+    emit_table(med_leg, med_pool)
+    out("=" * 74)
+    out("说明:h2d 在【均值】里偏高是【真实副作用,不是噪声】:锁大块 pinned 拖慢了大")
+    out("     矩阵(bcsstk30/32)A 的 H2D memcpy;典型小矩阵不受影响,故【中位数】里 h2d≈不变。")
+    out("     d2h 在两个视图里都是大幅下降(pool 的目标,成立)。")
 
     report = "\n".join(lines)
     print(report)
@@ -144,7 +147,7 @@ def main():
     print(f"\n[已追加到日志] {log_path}")
 
     if _HAS_MPL:
-        plot(med_leg, med_pool, chart_path)
+        plot(mean_leg, mean_pool, chart_path)
         print(f"[对比图] {chart_path}")
     else:
         print(f"[跳过对比图] matplotlib 不可用({_MPL_ERR})")

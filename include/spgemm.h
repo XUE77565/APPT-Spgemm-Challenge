@@ -11,6 +11,8 @@
 #define DBG 1
 #define WRITE_MTX 0
 #define CU_REF 1
+// pinned 内存池默认开关;运行时可用环境变量 USE_MEMPOOL=0/1 覆盖(便于 A/B)
+#define USE_MEMPOOL 0
 
 // 调试日志：带“程序启动以来毫秒数”时间戳，写 stderr（无缓冲，立刻可见，
 // 即使被 timeout 杀掉也能看到最后一行）。每个翻译单元共享同一份 t0
