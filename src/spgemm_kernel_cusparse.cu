@@ -147,7 +147,6 @@ static void spgemm_cusparse_device(
     CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_size_aligned, dC_col_idx, C_col_idx_size, cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_size_aligned + C_col_idx_size_aligned, dC_val, C_val_size, cudaMemcpyDeviceToDevice));
-    dbg("[%s] pack\n", g_cutag);
 
     *dC_buffer_out = dC_buffer;
     *C_rows_out = A_rows;
@@ -158,12 +157,15 @@ static void spgemm_cusparse_device(
     CHECK_CUSPARSE(cusparseDestroySpMat(matA));
     CHECK_CUSPARSE(cusparseDestroySpMat(matB));
     CHECK_CUSPARSE(cusparseDestroySpMat(matC));
-    
+
     cudaFree(dBuffer1);
     cudaFree(dBuffer2);
     cudaFree(dC_row_ptr);
     cudaFree(dC_col_idx);
     cudaFree(dC_val);
+    // pack 戳放在清理(destroy+free)之后:d2h 窗口(pack→d2h)就只剩纯下载,
+    // 与手写法口径一致(cuSPARSE 的描述符/缓冲清理不再被算进 d2h)
+    dbg("[%s] pack\n", g_cutag);
 }
 
 void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
