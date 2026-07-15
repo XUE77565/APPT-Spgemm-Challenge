@@ -2,3 +2,4 @@
 /data/
 .venv/
 /suitesparse_crawl/__pycache__
+/ocean/

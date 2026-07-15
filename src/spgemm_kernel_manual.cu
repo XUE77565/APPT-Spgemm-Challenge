@@ -123,9 +123,9 @@ __global__ void count_intermediates_kernel(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
     long long s = 0;
-    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1]; //A的第i行有这么多非0的
     for (int p = rs; p < re; p++) {
-        int k = A_col_idx[p];
+        int k = A_col_idx[p]; //找这些非零的对应的k有没有非零的, 进而估算出nnz数量 
         s += (long long)(A_row_ptr[k + 1] - A_row_ptr[k]);   // nnz(A 的第 k 行)
     }
     ub[i] = (int)s;
@@ -148,7 +148,7 @@ __global__ void expand_intermediates_kernel(
     for (int p = rs + threadIdx.x; p < re; p += blockDim.x) {
         int k = A_col_idx[p];
         float a_ik = A_val[p];
-        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];// 找到第k行, 去乘
         for (int q = ks; q < ke; q++) {
             int slot = atomicAdd(&pos, 1);                 // 领一个写位置(本 block 私有)
             key[slot] = ((unsigned long long)i << 32) | (unsigned int)A_col_idx[q];
@@ -279,6 +279,7 @@ void spgemm_self_product_manual(
     size_t A_val_size = A_nnz * sizeof(float);
     size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
 
+    // 把整个A拷贝,gustavson
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
     CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
@@ -293,10 +294,11 @@ void spgemm_self_product_manual(
 
     // ---- Stage 1: 每行中间乘积数(便宜符号阶段,无 hash/原子)----
     dbg("ESC: count intermediates begin\n");
-    int *d_ub;
+    int *d_ub; //d_ub是每一行的upper_bound
     CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
     {
         int grid = (A_rows + block - 1) / block;
+        // 利用每一行的nnz来粗略计算C的nnz的上界
         count_intermediates_kernel<<<grid, block>>>(
             dA_row_ptr, dA_col_idx, A_rows, d_ub);
     }
