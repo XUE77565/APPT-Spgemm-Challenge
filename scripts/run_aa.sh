@@ -31,18 +31,19 @@ echo "matrix,status,rows,cols,nnz" > "$SUMMARY"
 ok=0
 fail=0
 timeout_cnt=0
-total=0
 failed=""
 timedout=""
 
-  # data/rep/ 是扁平结构:data/rep/<name>.mtx(不是 <name>/<name>.mtx)
-  # 直接遍历 .mtx 文件,而不是子目录
-  for mtx in "$DATA_DIR"/*.mtx; do
-      [ -e "$mtx" ] || continue        # 目录为空时 glob 不展开,跳过
-      name=$(basename "$mtx" .mtx)
+  # 先数总数,用于显示 [i/total]
+  total=$(ls "$DATA_DIR"/*.mtx 2>/dev/null | wc -l)
+  i=0
 
-      total=$((total + 1))
-      echo "Processing $name ... (max ${TIMEOUT}s)"
+  for mtx in "$DATA_DIR"/*.mtx; do
+      [ -e "$mtx" ] || continue
+      name=$(basename "$mtx" .mtx)
+      i=$((i + 1))
+
+      echo "[${i}/${total}] Processing $name ... (max ${TIMEOUT}s)"
 
       log="$LOG_DIR/${name}.log"
       timeout -k 10 "$TIMEOUT" ./spgemm_test "$mtx" 2>&1 | tee "$log"

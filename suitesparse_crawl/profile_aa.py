@@ -138,15 +138,9 @@ def parse_log(path):
         "man_count": d("cnt_b", "cnt_d"), "man_fill": d("fil_b", "fil_d"),
         "man_total": d("t4_start", "t4_d"),
         "man_time": times[1] if len(times) >= 2 else np.nan,
-        "outer_time": times[2] if len(times) >= 3 else np.nan,
-        "colw_time": times[3] if len(times) >= 4 else np.nan,
-        "inner_time": times[4] if len(times) >= 5 else np.nan,
         "man_write": d("t4w_b", "t4w_d"),
         "cu_cnnz": result_cnnz[0] if len(result_cnnz) >= 1 else ev.get("cu_cnnz", np.nan),
         "man_cnnz": result_cnnz[1] if len(result_cnnz) >= 2 else ev.get("man_cnnz", np.nan),
-        "outer_cnnz": result_cnnz[2] if len(result_cnnz) >= 3 else np.nan,
-        "colw_cnnz": result_cnnz[3] if len(result_cnnz) >= 4 else np.nan,
-        "inner_cnnz": result_cnnz[4] if len(result_cnnz) >= 5 else np.nan,
         "buf2": buf2,
         "phases": phases,
     }
@@ -157,8 +151,7 @@ PHASE_ORDER = ["h2d", "csc", "count", "scan", "expand",
 CU_PHASES = ["h2d", "workest", "compute", "copy", "pack", "d2h"]
 ALL_PHASES = ["h2d", "csc", "count", "scan", "expand", "workest", "compute", "copy",
               "sort", "reduce", "final", "numeric", "pack", "d2h"]
-METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "outer": "外积",
-               "colw": "列向", "inner": "内积"}
+METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson"}
 # 阶段分组(用于堆叠图与汇总表);cuSPARSE 的 workest/compute/copy 归入"计算"
 # 传输拆成 h2d(上传 A)与 d2h(下载 C)两列,便于分别看
 PHASE_GROUP = {
@@ -190,7 +183,7 @@ def method_durations(phases, tag):
 
 
 def phase_breakdown(df):
-    TAGS = ["cu", "gust", "outer", "colw", "inner"]
+    TAGS = ["cu", "gust"]
     rows = []
     for _, r in df.iterrows():
         ph = r.get("phases", {}) or {}
@@ -275,46 +268,40 @@ def main():
     df["cu_copy"] = df["cu_copy"].fillna(ph.apply(lambda p: _cu_phase(p, "copy")))
     df["cu_d2h"] = df["cu_d2h"].fillna(ph.apply(lambda p: _cu_phase(p, "d2h")))
 
-    # 正确性:三种方法 vs cuSPARSE 的 nnz 偏差(取最大相对偏差作 gap%)
+    # 正确性:gust vs cuSPARSE 的 nnz 偏差
     df["gust_gap"] = (df["cu_cnnz"] - df["man_cnnz"]).abs()
-    df["outer_gap"] = (df["cu_cnnz"] - df["outer_cnnz"]).abs()
-    df["colw_gap"] = (df["cu_cnnz"] - df["colw_cnnz"]).abs()
-    df["inner_gap"] = (df["cu_cnnz"] - df["inner_cnnz"]).abs()
-    df["cnnz_gap_pct"] = df[["gust_gap", "outer_gap", "colw_gap", "inner_gap"]].max(axis=1) / df["cu_cnnz"] * 100
+    df["cnnz_gap_pct"] = df["gust_gap"] / df["cu_cnnz"] * 100
     df["cu_kernel"] = df[["cu_we", "cu_compute", "cu_copy"]].sum(axis=1, min_count=1)
     df["man_kernel"] = df[["man_count", "man_fill"]].sum(axis=1, min_count=1)
 
     cols = ["class", "name", "n", "A_nnz", "density_pct",
-            "cu_cnnz", "man_cnnz", "outer_cnnz", "colw_cnnz", "inner_cnnz",
-            "cnnz_gap_pct", "buf2",
+            "cu_cnnz", "man_cnnz", "cnnz_gap_pct", "buf2",
             "cu_we", "cu_compute", "cu_copy", "cu_d2h", "cu_kernel", "cu_time",
             "cu_write", "man_count", "man_fill", "man_kernel", "man_time", "man_write",
-            "outer_time", "colw_time", "inner_time", "phases"]
+            "phases"]
     df = df[[c for c in cols if c in df.columns]]
-    # 按稀疏度排列:密度从高到低(稠密→稀疏,即 D→MS→HS→ES)
     df = df.sort_values(["density_pct", "name"], ascending=[False, True])
     df.to_csv(OUT_CSV, index=False)
     print(f"写出 {OUT_CSV}\n")
 
-    # ---- 每矩阵明细:四种方法耗时对照 ----
-    print("=" * 114)
+    # ---- 每矩阵明细:cu vs gust 耗时对照 ----
+    print("=" * 80)
     print(f"{'class':<4} {'name':<26}{'n':>9}{'A_nnz':>10}"
-          f"{'cu_time':>9}{'gustavson':>10}{'outer':>9}{'colwise':>9}{'inner':>9}{'gap%':>8}")
-    print("-" * 114)
+          f"{'cu_time':>9}{'gust_time':>10}{'gap%':>8}")
+    print("-" * 80)
     for _, r in df.iterrows():
         def f(v, w=9, p=False):
             if pd.isna(v): return "  --".rjust(w)
             return f"{v:{'.2f' if p else ',.0f'}}".rjust(w)
         print(f"{str(r['class'])[:4]:<4} {r['name']:<26}{f(r['n'],9)}"
               f"{f(r['A_nnz'],10)}{f(r['cu_time'],9,'t')}{f(r['man_time'],10,'t')}"
-              f"{f(r['outer_time'],9,'t')}{f(r['colw_time'],9,'t')}{f(r['inner_time'],9,'t')}"
               f"{f(r['cnnz_gap_pct'],8,'t')}")
 
     # ---- 按类别聚合 ----
-    print("\n" + "=" * 88)
+    print("\n" + "=" * 60)
     print("按类别聚合(均值,毫秒)")
-    print("-" * 88)
-    print(f"{'class':<18}{'#':>3}{'cuSPARSE':>10}{'gustavson':>11}{'outer':>9}{'colwise':>9}{'inner':>9}{'gap%':>8}")
+    print("-" * 60)
+    print(f"{'class':<18}{'#':>3}{'cuSPARSE':>10}{'gustavson':>11}{'gap%':>8}")
     def g(s, w, dec=1):
         v = s.mean()
         return "--".rjust(w) if np.isnan(v) else f"{v:.{dec}f}".rjust(w)
@@ -324,7 +311,6 @@ def main():
             continue
         print(f"{c:<18}{len(s):>3}"
               f"{g(s['cu_time'],10)}{g(s['man_time'],11)}"
-              f"{g(s['outer_time'],9)}{g(s['colw_time'],9)}{g(s['inner_time'],9)}"
               f"{g(s['cnnz_gap_pct'],8,2)}")
 
     charts(df)
@@ -337,20 +323,16 @@ def charts(df):
     d = d.sort_values(["density_pct", "name"], ascending=[False, True])
     labels = [f"{r['name']}\n[{r['class'][:2]}]" for _, r in d.iterrows()]
 
-    # 图1: 五种方法总GPU耗时对照(cuSPARSE / Gustavson / 外积 / 列向 / 内积)
-    C_OUT, C_COL, C_INN = "#eda100", "#4a3aa7", "#e34948"   # 外积黄、列向紫、内积红
+    # 图1: 两种方法总GPU耗时对照(cuSPARSE / Gustavson)
     fig, ax = plt.subplots(figsize=(11, 0.4 * len(d) + 1.5))
     y = np.arange(len(d))
-    for shift, col, lab, c in [(-0.32, "cu_time", "cuSPARSE", C_CU),
-                               (-0.16, "man_time", "Gustavson", C_MAN),
-                               (0.00, "outer_time", "外积 outer", C_OUT),
-                               (0.16, "colw_time", "列向 colwise", C_COL),
-                               (0.32, "inner_time", "内积 inner", C_INN)]:
-        ax.barh(y + shift, d[col], height=0.15, color=c, label=lab, zorder=3)
+    for shift, col, lab, c in [(-0.12, "cu_time", "cuSPARSE", C_CU),
+                               (0.12, "man_time", "Gustavson", C_MAN)]:
+        ax.barh(y + shift, d[col], height=0.25, color=c, label=lab, zorder=3)
     ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=7.5)
     ax.invert_yaxis(); ax.set_xlabel("GPU 耗时 (ms, 对数)")
-    ax.set_xscale("log"); ax.set_title("五种 SpGEMM 公式自乘总耗时对照(不含写盘)")
-    ax.legend(frameon=False, fontsize=8, ncol=5, loc="lower right")
+    ax.set_xscale("log"); ax.set_title("cuSPARSE vs Gustavson 自乘总耗时对照(不含写盘)")
+    ax.legend(frameon=False, fontsize=8, ncol=2, loc="lower right")
     ax.grid(axis="y", visible=False)
     fig.tight_layout(); fig.savefig(CHART_DIR / "profile_totals.png", bbox_inches="tight"); plt.close(fig)
 

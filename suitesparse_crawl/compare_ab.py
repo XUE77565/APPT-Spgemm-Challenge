@@ -24,8 +24,8 @@ except Exception as e:                      # matplotlib 不可用时退化为�
     _HAS_MPL = False
     _MPL_ERR = e
 
-NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "outer": "外积", "colw": "列向", "inner": "内积"}
-TAGS = ["cu", "gust", "outer", "colw", "inner"]
+NAME = {"cu": "cuSPARSE", "gust": "Gustavson"}
+TAGS = ["cu", "gust"]
 ALLP = ["h2d", "csc", "count", "scan", "expand", "workest", "compute", "copy",
         "sort", "reduce", "final", "numeric", "pack", "d2h"]
 

@@ -144,27 +144,18 @@ int main(int argc, char **argv) {
     }
 
 
-    // ---- 预热:正式计时前各方法空跑一次,摊掉 thrust 工作区 / cuSPARSE handle /
-    //   CUDA allocator 的一次性冷启动开销,使 T1–T7 测的是稳态性能(不打印、不计时)----
-    printf("===============WARMING UP===============");
-    {
+    // ---- 预热:正式计时前各方法空跑 3 轮,摊掉 thrust 工作区 / cuSPARSE handle /
+    //   CUDA allocator 的一次性冷启动开销 + cache/TLB 预热,使 T1–T4 测的是稳态性能 ----
+    printf("===============WARMING UP (3 rounds)===============");
+    for (int warmup = 0; warmup < 3; warmup++) {
         void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;
         spgemm_self_product(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
         if (wc) pinned_free(wc);
         wc = nullptr;
         spgemm_self_product_manual(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
         if (wc) pinned_free(wc);
-        wc = nullptr;
-        spgemm_self_product_outer(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) pinned_free(wc);
-        wc = nullptr;
-        spgemm_self_product_colwise(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) pinned_free(wc);
-        wc = nullptr;
-        spgemm_self_product_inner(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) pinned_free(wc);
-        dbg("warmup done\n");
     }
+    dbg("warmup done\n");
 
     // 测试 1: C = A x A cuSparse
     #if CU_REF
@@ -258,74 +249,6 @@ int main(int argc, char **argv) {
         pinned_free(C_buffer);
     }
 
-    // 测试 5: C = A x A (外积 outer product, 外层=k)
-    {
-        LOG_BOTH("\n=== Computing C = A x A (Outer) ===\n");
-
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-        dbg("T5 outer self_product: start\n");
-        spgemm_self_product_outer(A_buffer, A_rows, A_cols, A_nnz,
-                                  &C_buffer, &C_rows, &C_cols, &C_nnz);
-        dbg("T5 outer self_product: done (C_nnz=%d)\n", C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-
-        pinned_free(C_buffer);
-    }
-
-    // 测试 6: C = A x A (列向 column-wise, 外层=j, 作为"内积轴"对照)
-    {
-        LOG_BOTH("\n=== Computing C = A x A (Colwise) ===\n");
-
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-        dbg("T6 colwise self_product: start\n");
-        spgemm_self_product_colwise(A_buffer, A_rows, A_cols, A_nnz,
-                                    &C_buffer, &C_rows, &C_cols, &C_nnz);
-        dbg("T6 colwise self_product: done (C_nnz=%d)\n", C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-
-        pinned_free(C_buffer);
-    }
-
-    // 测试 7: C = A x A (逐元素内积 inner product, merge-based)
-    {
-        LOG_BOTH("\n=== Computing C = A x A (Inner) ===\n");
-
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-
-        auto start = std::chrono::high_resolution_clock::now();
-        dbg("T7 inner self_product: start\n");
-        spgemm_self_product_inner(A_buffer, A_rows, A_cols, A_nnz,
-                                  &C_buffer, &C_rows, &C_cols, &C_nnz);
-        dbg("T7 inner self_product: done (C_nnz=%d)\n", C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-
-        pinned_free(C_buffer);
-    }
 
     host_free(A_buffer);
 

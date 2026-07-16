@@ -1,0 +1,108 @@
+{
+    "A": {
+        "cols": 96,
+        "nnz": 768,
+        "rows": 96
+    },
+    "B": {
+        "cols": 96,
+        "nnz": 768,
+        "rows": 96
+    },
+    "C": {
+        "cols": 96,
+        "nnz": 1920,
+        "rows": 96
+    },
+    "binning_1": [
+        96,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+    ],
+    "binning_2": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        96,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+    ],
+    "decision": {
+        "dense_bitmap_query": true,
+        "estimated_symbolic": false,
+        "hash_largest": false,
+        "workflow": 0
+    },
+    "gflops": 0.026615944325784617,
+    "sampling": {
+        "compaction_1": 3.2239614689945815,
+        "compaction_2": 3.3378326281897928,
+        "compaction_2_var": 0.5863189428579608,
+        "safe_estimated_compaction": 0.7002872672793042
+    },
+    "stats": {
+        "input_expansion": 8.25,
+        "intermediate_product": 6336,
+        "intermediate_product_avg": 66.0,
+        "intermediate_product_max": 81,
+        "output_compression": 3.3
+    },
+    "timing": {
+        "analysis": {
+            "mem_cpy": 0.02630399987101555,
+            "product_calc": 0.01437760004773736,
+            "reduce": 0.01665599998086691
+        },
+        "epilogue": {
+            "copy": 0.0,
+            "scan": 0.0,
+            "sort": 0.028339199908077716
+        },
+        "estimation": {
+            "binning": 0.0,
+            "hll_construct": 0.005846400046721101,
+            "hll_merge": 0.0,
+            "malloc": 0.0026687999721616506,
+            "sampling": 0.039020799845457074
+        },
+        "numeric": {
+            "binning": 0.021843199990689753,
+            "dense": 0.015766400191932917,
+            "fat": 0.0,
+            "hash": 0.02929919995367527,
+            "malloc": 0.031462399661540984,
+            "overflow": 0.0,
+            "usparse_main": 0.0,
+            "usparse_outlier": 0.0
+        },
+        "prologue": 0.028083200193941595,
+        "sampling": {
+            "var_calc_host": 0.0027167999651283026
+        },
+        "symbolic": {
+            "binning": 0.024822400137782096,
+            "dense": 0.028726400062441825,
+            "hash": 0.03917759992182255
+        }
+    },
+    "total_time": 0.4761055946350098
+}

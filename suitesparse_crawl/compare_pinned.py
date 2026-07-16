@@ -44,7 +44,7 @@ COLOR = {
     "数值归并": "#e34948", "打包": "#4a3aa7",
 }
 _FALLBACK = ["#7f7f7f", "#9467bd", "#8c564b", "#e377c2"]
-ORDER = ["cuSPARSE", "Gustavson", "外积", "列向", "内积"]
+ORDER = ["cuSPARSE", "Gustavson"]
 MSET = set(ORDER)
 
 
