@@ -1,7 +1,7 @@
 # 脚本用法手册
 
 > 日期:2026-07-16
-> 当前代码只保留 cuSPARSE + Gustavson 两种方法(outer/colwise/inner 已移除)。
+> 当前代码有三种方法:cuSPARSE(T1)+ Gustavson ESC(T4)+ **Gustavson Merge**(T4b,串行 k-way merge,对照 ESC 的 sort)。outer/colwise/inner 已移除。
 
 ---
 
@@ -70,6 +70,20 @@ bash scripts/run_all.sh                      # 全集(data/random)
   - `charts/profile_aa.png`(阶段构成堆叠图)
   - `charts/profile_totals.png`(cu vs gust 总耗时对照)
 - 表格含:h2d / d2h / 符号(count+scan) / 计算(expand) / 排序(sort) / 去重(reduce) / 收尾(final) / 打包(pack)
+  - 注:`profile_aa.py` 现已解析第三法 **Merge**(T4b)的 `Time` 与 `[merge]` 阶段;merge 的 merge 阶段映到「排序」列,与 gust.sort 直接对照
+
+### `suitesparse_crawl/analyze_merge.py`(Merge vs ESC 专项分析)
+```bash
+.venv/bin/python suitesparse_crawl/analyze_merge.py [summary.csv] [out_dir]
+# 默认读 suitesparse_crawl/profile_aa_summary.csv
+# 图表默认写到 compare/merge_vs_esc_<时间戳>/(每次运行新建文件夹,自包含:图 + 源 CSV)
+#   可用 argv[2] 或 MERGE_COMPARE_DIR=compare/xxx 指定文件夹名
+```
+- 打印:并行/串行 merge vs ESC 的胜负计数 + 几何均值、并行 vs 串行加速、各类别分布
+- 出图到 `compare/<folder>/`(与 ocean_compute_only 等同目录约定):
+  - `merge2_vs_esc_scatter.png` — merge(par) vs ESC 总耗时(log-log),虚线下方=并行 merge 赢
+  - `merge2_speedup_over_serial.png` — 并行相对串行的加速 vs C 输出 nnz(>1=并行更快)
+  - `merge2_winloss_by_class.png` — 并行 merge vs ESC 各类别 赢/平/输 堆叠条
 
 ### `suitesparse_crawl/profile_att.py`
 ```bash

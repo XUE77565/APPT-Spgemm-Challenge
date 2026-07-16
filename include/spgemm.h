@@ -70,6 +70,16 @@ void spgemm_transpose_product_manual(void *A_buffer, int A_rows, int A_cols, int
 void spgemm_self_product_manual(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                         void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
+// C = A × A,Gustavson 行向,【串行 k-way merge】版:每行一个 block、thread 0 归并
+// A[i,:] 各 k 贡献的有序列链,去重求和 → 替代 ESC 的 sort+reduce。与 manual(ESC)对照。
+void spgemm_self_product_merge(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                        void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+
+// C = A × A,Gustavson 行向,【并行 k-way merge(v2)】版:warp-per-row 协作归并,
+// 直接读 A(无 expand 阶段),warp-shuffle min/sum 归约。与 serial merge(merge)对照。
+void spgemm_self_product_merge2(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                        void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+
 // 三种公式对照(均为 ESC 合并;Gustavson=上面那个 manual)
 // 外积(outer, 外层=k):读 A 的列k ⊗ 行k
 void spgemm_self_product_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,

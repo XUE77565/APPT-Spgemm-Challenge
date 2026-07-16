@@ -154,6 +154,12 @@ int main(int argc, char **argv) {
         wc = nullptr;
         spgemm_self_product_manual(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
         if (wc) pinned_free(wc);
+        wc = nullptr;
+        spgemm_self_product_merge(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+        if (wc) pinned_free(wc);
+        wc = nullptr;
+        spgemm_self_product_merge2(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+        if (wc) pinned_free(wc);
     }
     dbg("warmup done\n");
 
@@ -245,6 +251,90 @@ int main(int argc, char **argv) {
             dbg("T4 write done\n");
         #endif
 
+
+        pinned_free(C_buffer);
+    }
+
+    // 测试 4b: C = A x A (串行 k-way merge,与 ESC 对照)
+    {
+        LOG_BOTH("\n=== Computing C = A x A (Merge) ===\n");
+
+        void *C_buffer = nullptr;
+        int C_rows = 0, C_cols = 0, C_nnz = 0;
+
+        auto start = std::chrono::high_resolution_clock::now();
+        dbg("T4b merge self_product: start\n");
+        spgemm_self_product_merge(A_buffer, A_rows, A_cols, A_nnz,
+                                  &C_buffer, &C_rows, &C_cols, &C_nnz);
+        dbg("T4b merge self_product: done (C_nnz=%d)\n", C_nnz);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
+        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
+                 C_rows, C_cols, C_nnz, C_sparsity);
+        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
+
+        char *C_base = (char*)C_buffer;
+        size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
+        size_t C_col_idx_size = C_nnz * sizeof(int);
+        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
+        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+
+        int *C_row_ptr = (int*)C_base;
+        int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
+        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
+
+        #if WRITE_MTX
+            std::string output_path = result_dir + "/self_product_merge.mtx";
+            dbg("T4b writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
+            write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
+                                C_val, C_rows, C_cols, C_nnz);
+            LOG_BOTH("Saved to %s\n", output_path.c_str());
+            dbg("T4b write done\n");
+        #endif
+
+        pinned_free(C_buffer);
+    }
+
+    // 测试 4c: C = A x A (并行 k-way merge v2,与 ESC / serial merge 对照)
+    {
+        LOG_BOTH("\n=== Computing C = A x A (Merge2) ===\n");
+
+        void *C_buffer = nullptr;
+        int C_rows = 0, C_cols = 0, C_nnz = 0;
+
+        auto start = std::chrono::high_resolution_clock::now();
+        dbg("T4c merge2 self_product: start\n");
+        spgemm_self_product_merge2(A_buffer, A_rows, A_cols, A_nnz,
+                                   &C_buffer, &C_rows, &C_cols, &C_nnz);
+        dbg("T4c merge2 self_product: done (C_nnz=%d)\n", C_nnz);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
+        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
+                 C_rows, C_cols, C_nnz, C_sparsity);
+        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
+
+        char *C_base = (char*)C_buffer;
+        size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
+        size_t C_col_idx_size = C_nnz * sizeof(int);
+        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
+        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+
+        int *C_row_ptr = (int*)C_base;
+        int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
+        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
+
+        #if WRITE_MTX
+            std::string output_path = result_dir + "/self_product_merge2.mtx";
+            dbg("T4c writing %s (C_nnz=%d)...\n", output_path.c_str(), C_nnz);
+            write_matrix_market(output_path.c_str(), C_row_ptr, C_col_idx,
+                                C_val, C_rows, C_cols, C_nnz);
+            LOG_BOTH("Saved to %s\n", output_path.c_str());
+            dbg("T4c write done\n");
+        #endif
 
         pinned_free(C_buffer);
     }

@@ -112,7 +112,7 @@ def parse_log(path):
             elif "T4 write done" in msg: tag = "t4w_d"
             if tag:
                 ev[tag] = ms
-            mph = re.match(r"\[(cu|gust|outer|colw|inner)\]\s+(\w+)", msg)
+            mph = re.match(r"\[(cu|gust|outer|colw|inner|merge|mrg2)\]\s+(\w+)", msg)
             if mph:
                 phases[(mph.group(1), mph.group(2))] = ms
         else:
@@ -139,19 +139,25 @@ def parse_log(path):
         "man_total": d("t4_start", "t4_d"),
         "man_time": times[1] if len(times) >= 2 else np.nan,
         "man_write": d("t4w_b", "t4w_d"),
+        # T4b:串行 k-way merge(times[2]=merge 总耗时,result_cnnz[2]=merge 的 nnz)
+        "merge_time": times[2] if len(times) >= 3 else np.nan,
+        # T4c:并行 k-way merge v2(times[3],result_cnnz[3])
+        "merge2_time": times[3] if len(times) >= 4 else np.nan,
         "cu_cnnz": result_cnnz[0] if len(result_cnnz) >= 1 else ev.get("cu_cnnz", np.nan),
         "man_cnnz": result_cnnz[1] if len(result_cnnz) >= 2 else ev.get("man_cnnz", np.nan),
+        "merge_cnnz": result_cnnz[2] if len(result_cnnz) >= 3 else np.nan,
+        "merge2_cnnz": result_cnnz[3] if len(result_cnnz) >= 4 else np.nan,
         "buf2": buf2,
         "phases": phases,
     }
 
 
-PHASE_ORDER = ["h2d", "csc", "count", "scan", "expand",
+PHASE_ORDER = ["h2d", "csc", "count", "scan", "expand", "merge", "compact",
                "sort", "reduce", "final", "numeric", "pack", "d2h"]
 CU_PHASES = ["h2d", "workest", "compute", "copy", "pack", "d2h"]
-ALL_PHASES = ["h2d", "csc", "count", "scan", "expand", "workest", "compute", "copy",
-              "sort", "reduce", "final", "numeric", "pack", "d2h"]
-METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson"}
+ALL_PHASES = ["h2d", "csc", "count", "scan", "expand", "merge", "compact",
+              "workest", "compute", "copy", "sort", "reduce", "final", "numeric", "pack", "d2h"]
+METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "merge": "Merge(ser)", "mrg2": "Merge(par)"}
 # 阶段分组(用于堆叠图与汇总表);cuSPARSE 的 workest/compute/copy 归入"计算"
 # 传输拆成 h2d(上传 A)与 d2h(下载 C)两列,便于分别看
 PHASE_GROUP = {
@@ -159,6 +165,8 @@ PHASE_GROUP = {
     "csc": "符号", "count": "符号", "scan": "符号",
     "expand": "计算", "workest": "计算", "compute": "计算", "copy": "计算",
     "sort": "排序", "reduce": "去重", "final": "收尾",
+    # merge 法:用 "merge" 阶段替代 sort+reduce(归并去重);映射到「排序」列以便与 gust.sort 直接对照
+    "merge": "排序", "compact": "收尾",
     "numeric": "数值归并", "pack": "打包",
 }
 GROUP_ORDER = ["h2d", "d2h", "符号", "计算", "排序", "去重", "收尾", "数值归并", "打包"]
@@ -173,17 +181,21 @@ def phase_order_for(tag):
 
 
 def method_durations(phases, tag):
-    """从 [tag] phase 时间戳算该方法的各阶段耗时(ms)。"""
+    """从 [tag] phase 时间戳算该方法的各阶段耗时(ms)。
+    按真实时间戳排序(而非 PHASE_ORDER 标签顺序),这样各法执行顺序不同
+    (如 merge 的 final(scan)在 compact 之前,ESC 的 final 在 reduce 之后)也能正确归位。"""
     order = ["start"] + phase_order_for(tag)
     present = [p for p in order if (tag, p) in phases]
     if len(present) < 2:
         return {}
+    # 按时间戳升序排,保证相邻相减得正、归属正确
+    present = sorted(present, key=lambda p: phases[(tag, p)])
     ts = [phases[(tag, p)] for p in present]
     return {present[i]: ts[i] - ts[i - 1] for i in range(1, len(present))}
 
 
 def phase_breakdown(df):
-    TAGS = ["cu", "gust"]
+    TAGS = ["cu", "gust", "merge", "mrg2"]
     rows = []
     for _, r in df.iterrows():
         ph = r.get("phases", {}) or {}
@@ -268,50 +280,64 @@ def main():
     df["cu_copy"] = df["cu_copy"].fillna(ph.apply(lambda p: _cu_phase(p, "copy")))
     df["cu_d2h"] = df["cu_d2h"].fillna(ph.apply(lambda p: _cu_phase(p, "d2h")))
 
-    # 正确性:gust vs cuSPARSE 的 nnz 偏差
+    # 正确性:gust / merge / merge2 vs cuSPARSE 的 nnz 偏差
     df["gust_gap"] = (df["cu_cnnz"] - df["man_cnnz"]).abs()
+    df["merge_gap"] = (df["cu_cnnz"] - df["merge_cnnz"]).abs()
+    df["merge2_gap"] = (df["cu_cnnz"] - df["merge2_cnnz"]).abs()
     df["cnnz_gap_pct"] = df["gust_gap"] / df["cu_cnnz"] * 100
     df["cu_kernel"] = df[["cu_we", "cu_compute", "cu_copy"]].sum(axis=1, min_count=1)
     df["man_kernel"] = df[["man_count", "man_fill"]].sum(axis=1, min_count=1)
 
     cols = ["class", "name", "n", "A_nnz", "density_pct",
-            "cu_cnnz", "man_cnnz", "cnnz_gap_pct", "buf2",
+            "cu_cnnz", "man_cnnz", "merge_cnnz", "merge2_cnnz", "cnnz_gap_pct", "buf2",
             "cu_we", "cu_compute", "cu_copy", "cu_d2h", "cu_kernel", "cu_time",
-            "cu_write", "man_count", "man_fill", "man_kernel", "man_time", "man_write",
+            "cu_write", "man_count", "man_fill", "man_kernel", "man_time",
+            "merge_time", "merge2_time", "man_write",
             "phases"]
     df = df[[c for c in cols if c in df.columns]]
     df = df.sort_values(["density_pct", "name"], ascending=[False, True])
     df.to_csv(OUT_CSV, index=False)
     print(f"写出 {OUT_CSV}\n")
 
-    # ---- 每矩阵明细:cu vs gust 耗时对照 ----
-    print("=" * 80)
-    print(f"{'class':<4} {'name':<26}{'n':>9}{'A_nnz':>10}"
-          f"{'cu_time':>9}{'gust_time':>10}{'gap%':>8}")
-    print("-" * 80)
+    # ---- 每矩阵明细:cu / gust(ESC) / merge(serial) / merge2(parallel) ----
+    print("=" * 112)
+    print(f"{'class':<4} {'name':<24}{'n':>8}"
+          f"{'cu':>8}{'gust':>8}{'mrgS':>8}{'mrgP':>8}{'mrgP/gust':>10}{'mrgP/cu':>9}")
+    print("-" * 112)
     for _, r in df.iterrows():
-        def f(v, w=9, p=False):
+        def f(v, w=8, p=False):
             if pd.isna(v): return "  --".rjust(w)
             return f"{v:{'.2f' if p else ',.0f'}}".rjust(w)
-        print(f"{str(r['class'])[:4]:<4} {r['name']:<26}{f(r['n'],9)}"
-              f"{f(r['A_nnz'],10)}{f(r['cu_time'],9,'t')}{f(r['man_time'],10,'t')}"
-              f"{f(r['cnnz_gap_pct'],8,'t')}")
+        def rr(a, b):
+            return (a / b) if (pd.notna(a) and pd.notna(b) and b > 0) else np.nan
+        r_esc = rr(r['merge2_time'], r['man_time'])
+        r_cu  = rr(r['merge2_time'], r['cu_time'])
+        print(f"{str(r['class'])[:4]:<4} {r['name']:<24}{f(r['n'],8)}"
+              f"{f(r['cu_time'],8,'t')}{f(r['man_time'],8,'t')}"
+              f"{f(r['merge_time'],8,'t')}{f(r['merge2_time'],8,'t')}"
+              f"{f(r_esc,10,'t')}{f(r_cu,9,'t')}")
 
     # ---- 按类别聚合 ----
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 92)
     print("按类别聚合(均值,毫秒)")
-    print("-" * 60)
-    print(f"{'class':<18}{'#':>3}{'cuSPARSE':>10}{'gustavson':>11}{'gap%':>8}")
+    print("-" * 92)
+    print(f"{'class':<18}{'#':>3}{'cuSPARSE':>10}{'gust(ESC)':>10}{'merge(ser)':>11}{'merge(par)':>11}{'par/gust':>9}{'par/cu':>8}")
     def g(s, w, dec=1):
         v = s.mean()
         return "--".rjust(w) if np.isnan(v) else f"{v:.{dec}f}".rjust(w)
+    # 比值用几何均值(算术均值会被 bp_* 等离群点带偏,得出相反结论)
+    def gm(series):
+        v = series.dropna()
+        return np.exp(np.log(v).mean()) if len(v) else np.nan
     for c in CLASS_ORDER:
         s = df[df["class"] == c]
         if len(s) == 0:
             continue
+        r_esc = gm(s['merge2_time'] / s['man_time'])
+        r_cu  = gm(s['merge2_time'] / s['cu_time'])
         print(f"{c:<18}{len(s):>3}"
-              f"{g(s['cu_time'],10)}{g(s['man_time'],11)}"
-              f"{g(s['cnnz_gap_pct'],8,2)}")
+              f"{g(s['cu_time'],10)}{g(s['man_time'],10)}{g(s['merge_time'],11)}{g(s['merge2_time'],11)}"
+              f"{g(pd.Series([r_esc]),9,2)}{g(pd.Series([r_cu]),8,2)}")
 
     charts(df)
     phase_breakdown(df)

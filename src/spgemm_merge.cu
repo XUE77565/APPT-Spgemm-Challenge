@@ -1,0 +1,502 @@
+#include "spgemm.h"
+#include <cuda_runtime.h>
+#include <thrust/scan.h>
+#include <thrust/device_ptr.h>
+#include <cstdio>
+#include <cstdlib>
+
+// ==========================================================================
+//  Serial k-way Merge 版 Gustavson 自乘 C = A·A
+// --------------------------------------------------------------------------
+//  与 spgemm_kernel_manual.cu 的 ESC(expand→sort→reduce→finalize)对照。
+//  关键观察:A 是 CSR → 每行的列有序;行 i 的中间项列 = 若干【有序列链】
+//  {A[k,:] : k∈A[i,:]} 的并集。对这些有序链做 k-way merge,即可直接得到
+//  行内列有序,merge 时同列自然求和去重 → sort + reduce 一起省掉。
+//
+//  本文件是【最简串行版】:每行一个 block,只 thread 0 做 expand / merge。
+//  目的:验证 merge 路线可行性、找出与 CUB sort 的性能交叉点,后续再提并行度。
+//  count / scan / pack / D2H 复用与 manual 相同的结构;ESC baseline 不动。
+// ==========================================================================
+
+#define CHECK_CUDA(call) do { \
+    cudaError_t err = call; \
+    if (err != cudaSuccess) { \
+        fprintf(stderr, "CUDA error at %s:%d: %s\n", \
+                __FILE__, __LINE__, cudaGetErrorString(err)); \
+        exit(EXIT_FAILURE); \
+    } \
+} while(0)
+
+// 复用 manual.cu 的 count kernel(只数每行中间项数,无 hash/原子)
+extern __global__ void count_intermediates_kernel(
+    const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub);
+
+// ---- Stage 2(串行):把所有中间项写进全局 COO,key=(row<<32|col),val=a_ik*a_kj。
+// 与 manual 的 expand 区别:这里【串行写】→ 每个 k 的贡献是一段【连续、col 有序】的段,
+// 这样 merge_serial 才能把它当成一条有序列链来归并。
+__global__ void expand_serial_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const float *A_val,
+    int A_rows, const int *row_off,
+    unsigned long long *key, float *val)
+{
+    int i = blockIdx.x;            // 每行一个 block
+    if (i >= A_rows) return;       // blockDim = 1,只有 thread 0
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int slot = row_off[i];
+    for (int p = rs; p < re; p++) {
+        int k = A_col_idx[p];
+        float a_ik = A_val[p];
+        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];   // A 的第 k 行(列有序)
+        for (int q = ks; q < ke; q++) {
+            key[slot] = ((unsigned long long)i << 32) | (unsigned int)A_col_idx[q];
+            val[slot] = a_ik * A_val[q];
+            slot++;
+        }
+    }
+}
+
+// ---- Stage 3(串行 k-way merge + dedup + sum):thread 0 对本行的 num_k 条有序
+// 列链做归并,输出每行去重+有序的 (col, val),并记 per-row nnz。
+// shared mem = seg_cur[num_k] 紧接 seg_end[num_k]。
+__global__ void merge_serial_kernel(
+    const int *A_row_ptr, const int *A_col_idx,
+    int A_rows, const int *row_off,
+    const unsigned long long *key, const float *val,
+    int *out_col, float *out_val, int *row_nnz)
+{
+    int i = blockIdx.x;            // 每行一个 block
+    if (i >= A_rows) return;       // blockDim = 1,thread 0
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int num_k = re - rs;           // 要归并的列链数
+    int base = row_off[i];
+
+    extern __shared__ int smem[];
+    int *seg_cur = smem;           // [num_k] 每条链当前读位置
+    int *seg_end = smem + num_k;   // [num_k] 每条链结束位置
+
+    // 初始化 num_k 条链的边界:第 p 段 = A[k_p,:],k_p=A_col_idx[rs+p],长=nnz(A[k_p,:])
+    int cum = base;
+    for (int p = 0; p < num_k; p++) {
+        int k = A_col_idx[rs + p];
+        seg_cur[p] = cum;
+        cum += A_row_ptr[k + 1] - A_row_ptr[k];
+        seg_end[p] = cum;
+    }
+    // 此处 cum == row_off[i] + d_ub[i] == row_off[i+1]
+
+    int out_idx = 0;
+    while (true) {
+        // 1) 扫所有链头部取最小 col
+        int min_col = 0x7fffffff;
+        for (int p = 0; p < num_k; p++) {
+            int pos = seg_cur[p];
+            if (pos < seg_end[p]) {
+                int col = (int)(key[pos] & 0xffffffffu);
+                if (col < min_col) min_col = col;
+            }
+        }
+        if (min_col == 0x7fffffff) break;          // 所有链耗尽
+
+        // 2) 求和所有头部 == min_col 的链,并前进
+        float sum = 0.0f;
+        for (int p = 0; p < num_k; p++) {
+            int pos = seg_cur[p];
+            if (pos < seg_end[p] && (int)(key[pos] & 0xffffffffu) == min_col) {
+                sum += val[pos];
+                seg_cur[p] = pos + 1;
+            }
+        }
+
+        // 3) 输出(写到本行的 upper-bound slot,行内有间隙,之后 compact 压紧)
+        out_col[base + out_idx] = min_col;
+        out_val[base + out_idx] = sum;
+        out_idx++;
+    }
+    row_nnz[i] = out_idx;
+}
+
+// ---- Stage 3b(compact):merge 的输出写在 row_off[i] 起的 upper-bound slot(行间有
+// 间隙),按 C_row_ptr 压成连续 CSR。每行一块,块内线程跨步拷贝。
+__global__ void compact_kernel(
+    const int *row_off, const int *row_nnz, const int *C_row_ptr,
+    const int *in_col, const float *in_val,
+    int *out_col, float *out_val, int A_rows)
+{
+    int i = blockIdx.x;
+    if (i >= A_rows) return;
+    int src = row_off[i];
+    int dst = C_row_ptr[i];
+    int n = row_nnz[i];
+    for (int t = threadIdx.x; t < n; t += blockDim.x) {
+        out_col[dst + t] = in_col[src + t];
+        out_val[dst + t] = in_val[src + t];
+    }
+}
+
+// ========== Host ==========
+
+void spgemm_self_product_merge(
+    void *A_buffer, int A_rows, int A_cols, int A_nnz,
+    void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
+{
+    dbg("[merge] start\n");
+
+    size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
+    size_t A_col_idx_size = A_nnz * sizeof(int);
+    size_t A_val_size = A_nnz * sizeof(float);
+    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+
+    void *dA_buffer;
+    CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
+    CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+    dbg("[merge] h2d\n");
+
+    char *dA_base = (char*)dA_buffer;
+    int *dA_row_ptr = (int*)dA_base;
+    int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
+    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+
+    const int block = 256;
+
+    // host 扫 pinned A_row_ptr 得 max_row_nnz → merge kernel 的 shared mem(seg_cur+seg_end)
+    const int *h_row_ptr = (const int*)A_buffer;
+    int max_row_nnz = 0;
+    for (int i = 0; i < A_rows; i++) {
+        int nn = h_row_ptr[i + 1] - h_row_ptr[i];
+        if (nn > max_row_nnz) max_row_nnz = nn;
+    }
+    size_t merge_smem = (size_t)max_row_nnz * 2 * sizeof(int);
+    // 动态 shared > 48KB 时需显式 opt-in(H100 上限 ~228KB);本数据集 max_row_nnz 很小,留防御
+    if (merge_smem > 48 * 1024) {
+        CHECK_CUDA(cudaFuncSetAttribute(merge_serial_kernel,
+            cudaFuncAttributeMaxDynamicSharedMemorySize, (int)merge_smem));
+    }
+
+    // ---- Stage 1: 每行中间项数(复用 count kernel)----
+    dbg("merge: count begin\n");
+    int *d_ub;
+    CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
+    {
+        int grid = (A_rows + block - 1) / block;
+        count_intermediates_kernel<<<grid, block>>>(
+            dA_row_ptr, dA_col_idx, A_rows, d_ub);
+    }
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[merge] count\n");
+
+    // ---- Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数 ----
+    int *d_off;
+    CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
+    thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
+                           thrust::device_ptr<int>(d_ub + A_rows),
+                           thrust::device_ptr<int>(d_off + 1));
+    int total_ub;
+    CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("[merge] scan\n");
+
+    // ---- Stage 2: 串行展开(每 k 连续有序段)写全局 COO(key, val)----
+    unsigned long long *d_key;
+    float *d_val;
+    CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_ub * sizeof(unsigned long long)));
+    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_ub * sizeof(float)));
+    dbg("merge: expand_serial begin (%d intermediates)\n", total_ub);
+    expand_serial_kernel<<<A_rows, 1>>>(
+        dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off, d_key, d_val);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[merge] expand\n");
+
+    // ---- Stage 3: 串行 k-way merge + dedup + sum → (out_col, out_val), row_nnz ----
+    int *d_out_col;
+    float *d_out_val;
+    int *d_row_nnz;
+    CHECK_CUDA(cudaMalloc(&d_out_col, (size_t)total_ub * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
+    dbg("merge: merge_serial begin\n");
+    merge_serial_kernel<<<A_rows, 1, merge_smem>>>(
+        dA_row_ptr, dA_col_idx, A_rows, d_off, d_key, d_val,
+        d_out_col, d_out_val, d_row_nnz);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[merge] merge\n");
+    cudaFree(d_key);
+    cudaFree(d_val);
+
+    // ---- Stage 3b: scan row_nnz → C_row_ptr; 读 C_nnz ----
+    int *dC_row_ptr;
+    CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
+    thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
+                           thrust::device_ptr<int>(d_row_nnz + A_rows),
+                           thrust::device_ptr<int>(dC_row_ptr + 1));
+    int C_nnz_result;
+    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
+                         sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("[merge] final\n");
+
+    // ---- Stage 3c: compact 到连续 CSR ----
+    int *dC_col_idx;
+    float *dC_val;
+    CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(float)));
+    compact_kernel<<<A_rows, block>>>(
+        d_off, d_row_nnz, dC_row_ptr, d_out_col, d_out_val, dC_col_idx, dC_val, A_rows);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    cudaFree(d_out_col);
+    cudaFree(d_out_val);
+    cudaFree(d_row_nnz);
+    dbg("[merge] compact\n");
+
+    // ---- 打包成单块 + D2H(与 manual 相同)----
+    size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
+    size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
+    size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
+    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
+    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
+
+    void *dC_buffer;
+    CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
+    char *dC_base = (char*)dC_buffer;
+    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
+                          C_col_idx_size, cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
+                          dC_val, C_val_size, cudaMemcpyDeviceToDevice));
+    dbg("[merge] pack\n");
+
+    void *C_buffer = nullptr;
+    CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
+    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+    dbg("[merge] d2h\n");
+
+    *C_buffer_out = C_buffer;
+    *C_rows = A_rows;
+    *C_cols = A_cols;
+    *C_nnz = C_nnz_result;
+
+    cudaFree(dA_buffer);
+    cudaFree(d_ub);
+    cudaFree(d_off);
+    cudaFree(dC_row_ptr);
+    cudaFree(dC_col_idx);
+    cudaFree(dC_val);
+    cudaFree(dC_buffer);
+}
+
+// ==========================================================================
+//  v2:并行 k-way merge(warp-per-row 协作,【直接读 A,无 expand 阶段】)
+// --------------------------------------------------------------------------
+//  与 serial v1 的差异:
+//   ① 无 expand —— merge 直接读 A 的 CSR 行(段 p = A[k_p,:]),
+//      砍掉「写 COO 一遍 + 读回一遍」的来回 traffic(Tier 0 融合)。
+//   ② 行内并行 —— 每行一个 block(1 warp=32 线程),每步 32 路并发取各链头、
+//      warp-shuffle min/sum 归约 → 隐藏散列全局读延迟,治重行 straggler(Tier 2)。
+//  正确性:与 serial 展开的是同一批中间项(行 i 的 k=A_col_idx[p]、weight=A_val[p]、
+//      列=A[k_p:]、贡献=weight*A_val[q]);逐次输出全局最小列并合并同列 → 等价 sort+reduce。
+// ==========================================================================
+__global__ void merge_warp_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const float *A_val,
+    int A_rows, const int *row_off,
+    int *out_col, float *out_val, int *row_nnz)
+{
+    int i = blockIdx.x;                 // 每行一个 block
+    if (i >= A_rows) return;
+    int lane = threadIdx.x;             // blockDim = 32(1 warp)
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int num_k = re - rs;                // 要归并的列链数
+    int base = row_off[i];
+
+    extern __shared__ int smem[];
+    int   *seg_ptr = smem;                  // [num_k] 每条链当前读位置(指向 A)
+    int   *seg_end = smem + num_k;          // [num_k] 每条链结束位置
+    float *weight  = (float*)(smem + 2*num_k); // [num_k] a_{i,k_p}
+
+    // (装载)每个 lane 认领 ⌈num_k/32⌉ 条链的描述符:k_p=A_col_idx[rs+p]
+    for (int p = lane; p < num_k; p += 32) {
+        int k = A_col_idx[rs + p];
+        seg_ptr[p] = A_row_ptr[k];
+        seg_end[p] = A_row_ptr[k + 1];
+        weight[p]  = A_val[rs + p];
+    }
+    __syncwarp();
+
+    int out_idx = 0;
+    while (true) {
+        // (1) 每个 lane 在自己持有的链里找局部最小头列(直接读 A,32 路并发隐藏延迟)
+        int mymin = 0x7fffffff;
+        for (int p = lane; p < num_k; p += 32) {
+            int pos = seg_ptr[p];
+            if (pos < seg_end[p]) {
+                int col = A_col_idx[pos];
+                if (col < mymin) mymin = col;
+            }
+        }
+        // (2) warp shuffle min-归约 → wmin(全 warp 一致)
+        int wmin = mymin;
+        for (int off = 16; off > 0; off >>= 1) {
+            int v = __shfl_xor_sync(0xffffffff, wmin, off);
+            if (v < wmin) wmin = v;
+        }
+        if (wmin == 0x7fffffff) break;       // 所有链耗尽
+
+        // (3) 每个 lane:头部==wmin 的链,累加 weight*A_val 并前进
+        float mysum = 0.0f;
+        for (int p = lane; p < num_k; p += 32) {
+            int pos = seg_ptr[p];
+            if (pos < seg_end[p] && A_col_idx[pos] == wmin) {
+                mysum += weight[p] * A_val[pos];
+                seg_ptr[p] = pos + 1;
+            }
+        }
+        // (4) warp shuffle sum-归约 → 全 warp 都拿到总和
+        for (int off = 16; off > 0; off >>= 1)
+            mysum += __shfl_xor_sync(0xffffffff, mysum, off);
+
+        // (5) lane0 输出(out_idx 全 warp 同步递增)
+        if (lane == 0) {
+            out_col[base + out_idx] = wmin;
+            out_val[base + out_idx] = mysum;
+        }
+        out_idx++;
+    }
+    if (lane == 0) row_nnz[i] = out_idx;
+}
+
+// ========== v2 Host ==========
+
+void spgemm_self_product_merge2(
+    void *A_buffer, int A_rows, int A_cols, int A_nnz,
+    void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
+{
+    dbg("[mrg2] start\n");
+
+    size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
+    size_t A_col_idx_size = A_nnz * sizeof(int);
+    size_t A_val_size = A_nnz * sizeof(float);
+    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+
+    void *dA_buffer;
+    CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
+    CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+    dbg("[mrg2] h2d\n");
+
+    char *dA_base = (char*)dA_buffer;
+    int *dA_row_ptr = (int*)dA_base;
+    int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
+    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+
+    const int block = 256;
+
+    // host 扫 pinned A_row_ptr 得 max_row_nnz → merge_warp shared(seg_ptr+seg_end+weight)
+    const int *h_row_ptr = (const int*)A_buffer;
+    int max_row_nnz = 0;
+    for (int i = 0; i < A_rows; i++) {
+        int nn = h_row_ptr[i + 1] - h_row_ptr[i];
+        if (nn > max_row_nnz) max_row_nnz = nn;
+    }
+    size_t merge_smem = (size_t)max_row_nnz * 3 * sizeof(int);
+    if (merge_smem > 48 * 1024) {
+        CHECK_CUDA(cudaFuncSetAttribute(merge_warp_kernel,
+            cudaFuncAttributeMaxDynamicSharedMemorySize, (int)merge_smem));
+    }
+
+    // ---- Stage 1: 每行中间项数(复用 count kernel)----
+    dbg("merge2: count begin\n");
+    int *d_ub;
+    CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
+    {
+        int grid = (A_rows + block - 1) / block;
+        count_intermediates_kernel<<<grid, block>>>(
+            dA_row_ptr, dA_col_idx, A_rows, d_ub);
+    }
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[mrg2] count\n");
+
+    // ---- Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数(=输出上界)----
+    int *d_off;
+    CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
+    thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
+                           thrust::device_ptr<int>(d_ub + A_rows),
+                           thrust::device_ptr<int>(d_off + 1));
+    int total_ub;
+    CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("[mrg2] scan\n");
+
+    // ---- Stage 2: 并行 k-way merge(直接读 A)→ out_col/out_val + row_nnz ----
+    int *d_out_col;
+    float *d_out_val;
+    int *d_row_nnz;
+    CHECK_CUDA(cudaMalloc(&d_out_col, (size_t)total_ub * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
+    dbg("merge2: merge_warp begin (%d intermediates)\n", total_ub);
+    merge_warp_kernel<<<A_rows, 32, merge_smem>>>(
+        dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off,
+        d_out_col, d_out_val, d_row_nnz);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    dbg("[mrg2] merge\n");
+
+    // ---- Stage 2b: scan row_nnz → C_row_ptr; 读 C_nnz ----
+    int *dC_row_ptr;
+    CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
+    thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
+                           thrust::device_ptr<int>(d_row_nnz + A_rows),
+                           thrust::device_ptr<int>(dC_row_ptr + 1));
+    int C_nnz_result;
+    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
+                         sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("[mrg2] final\n");
+
+    // ---- Stage 2c: compact 到连续 CSR(复用 compact_kernel)----
+    int *dC_col_idx;
+    float *dC_val;
+    CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(float)));
+    compact_kernel<<<A_rows, block>>>(
+        d_off, d_row_nnz, dC_row_ptr, d_out_col, d_out_val, dC_col_idx, dC_val, A_rows);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    cudaFree(d_out_col);
+    cudaFree(d_out_val);
+    cudaFree(d_row_nnz);
+    dbg("[mrg2] compact\n");
+
+    // ---- 打包成单块 + D2H ----
+    size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
+    size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
+    size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
+    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
+    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
+
+    void *dC_buffer;
+    CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
+    char *dC_base = (char*)dC_buffer;
+    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
+                          C_col_idx_size, cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
+                          dC_val, C_val_size, cudaMemcpyDeviceToDevice));
+    dbg("[mrg2] pack\n");
+
+    void *C_buffer = nullptr;
+    CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
+    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+    dbg("[mrg2] d2h\n");
+
+    *C_buffer_out = C_buffer;
+    *C_rows = A_rows;
+    *C_cols = A_cols;
+    *C_nnz = C_nnz_result;
+
+    cudaFree(dA_buffer);
+    cudaFree(d_ub);
+    cudaFree(d_off);
+    cudaFree(dC_row_ptr);
+    cudaFree(dC_col_idx);
+    cudaFree(dC_val);
+    cudaFree(dC_buffer);
+}
