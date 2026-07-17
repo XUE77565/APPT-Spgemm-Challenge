@@ -42,11 +42,34 @@ WIN, TIE = 1.0, 1.05   # ratio<WIN=更快;WIN..TIE 算持平
 
 def load():
     df = pd.read_csv(SUMMARY)
-    d = df.dropna(subset=["merge2_time", "man_time"]).copy()
-    for c in ("man_time", "merge_time", "merge2_time", "cu_time"):
-        d[c] = d[c].astype(float)
+    d = df.dropna(subset=["merge2_compute_t", "man_compute_t"]).copy()
+    # compute-only(各阶段求和去 h2d/d2h):与 cuBLAS(kernel)公平对比;
+    # 映射成代码内统一列名 man_time/merge_time/merge2_time/cu_time(现均为 compute-only)
+    d["man_time"]   = d["man_compute_t"].astype(float)
+    d["merge_time"] = d["merge_compute_t"].astype(float)
+    d["merge2_time"]= d["merge2_compute_t"].astype(float)
+    d["cu_time"]    = d["cu_compute_t"].astype(float) if "cu_compute_t" in d.columns else np.nan
+    # cuBLAS 稠密 GEMM baseline(新主 baseline)。profile_aa_summary.csv 已含 cublas_ms
+    # (profile_aa.py 写入);若旧 summary 没有,再从 baseline_cublas.csv 补 merge。
+    if "cublas_ms" not in d.columns:
+        cub_path = HERE / "baseline_cublas.csv"
+        if cub_path.exists():
+            d = d.merge(pd.read_csv(cub_path)[["name", "cublas_ms"]], on="name", how="left")
+        else:
+            d["cublas_ms"] = np.nan
+    d["cublas_ms"] = d["cublas_ms"].astype(float)
+    # Ocean SpGEMM baseline(compute-only = GPU 阶段求和)
+    if "ocean_ms" not in d.columns:
+        oce_path = HERE / "baseline_ocean.csv"
+        if oce_path.exists():
+            d = d.merge(pd.read_csv(oce_path)[["name", "ocean_ms"]], on="name", how="left")
+        else:
+            d["ocean_ms"] = np.nan
+    d["ocean_ms"] = d["ocean_ms"].astype(float)
+    d["ratio_par_cublas"] = d["merge2_time"] / d["cublas_ms"]  # 并行 vs cuBLAS(主 baseline)
+    d["ratio_par_ocean"]  = d["merge2_time"] / d["ocean_ms"]   # 并行 vs Ocean
     d["ratio_par"] = d["merge2_time"] / d["man_time"]   # 并行 vs ESC
-    d["ratio_par_cu"] = d["merge2_time"] / d["cu_time"] # 并行 vs cuSPARSE
+    d["ratio_par_cu"] = d["merge2_time"] / d["cu_time"] # 并行 vs cuSPARSE(旧 baseline)
     d["ratio_ser"] = d["merge_time"] / d["man_time"]    # 串行 vs ESC
     d["speedup"] = d["merge_time"] / d["merge2_time"]   # 并行 vs 串行(>1=并行更快)
     d["heavy"] = d["name"].str.startswith("bp_")
@@ -62,31 +85,38 @@ def print_summary(d):
 
     wp, tp, lp, geop = tally(d["ratio_par"])
     wpc, tpc, lpc, geopc = tally(d["ratio_par_cu"])
+    wcb, tcb, lcb, geocb = tally(d["ratio_par_cublas"].dropna())
+    wo, to_, lo, geoo = tally(d["ratio_par_ocean"].dropna())
     ws, ts, ls, geos = tally(d["ratio_ser"])
     print("=" * 70)
-    print(f"merge 对比,共 {n} 矩阵   [{os.path.basename(SUMMARY)}]")
+    print(f"merge 对比(compute-only,不含 h2d/d2h;cuBLAS=sgemm kernel;Ocean=GPU 阶段求和),共 {n} 矩阵   [{os.path.basename(SUMMARY)}]")
     print("-" * 70)
-    print(f"  {'':<16}{'赢':>5}{'持平':>6}{'输':>5}{'几何均值':>10}")
-    print(f"  {'par vs cuSPARSE':<16}{wpc:>5}{tpc:>6}{lpc:>5}{geopc:>9.3f}×")
-    print(f"  {'par vs gust(ESC)':<16}{wp:>5}{tp:>6}{lp:>5}{geop:>9.3f}×")
-    print(f"  {'ser vs gust(ESC)':<16}{ws:>5}{ts:>6}{ls:>5}{geos:>9.3f}×")
+    print(f"  {'':<18}{'赢':>5}{'持平':>6}{'输':>5}{'几何均值':>10}")
+    print(f"  {'par vs Ocean':<18}{wo:>5}{to_:>6}{lo:>5}{geoo:>9.3f}×   ← hash SpGEMM 对照")
+    print(f"  {'par vs cuBLAS':<18}{wcb:>5}{tcb:>6}{lcb:>5}{geocb:>9.3f}×   ← 主 baseline(稠密 GEMM)")
+    print(f"  {'par vs cuSPARSE':<18}{wpc:>5}{tpc:>6}{lpc:>5}{geopc:>9.3f}×   (旧 baseline)")
+    print(f"  {'par vs gust(ESC)':<18}{wp:>5}{tp:>6}{lp:>5}{geop:>9.3f}×")
+    print(f"  {'ser vs gust(ESC)':<18}{ws:>5}{ts:>6}{ls:>5}{geos:>9.3f}×")
     sp = np.exp(np.log(d["speedup"]).mean())
     faster = (d["speedup"] > 1.0).sum()
     print(f"\n  并行 vs 串行:几何均值加速 {sp:.2f}×;并行更快的矩阵 {faster}/{n}")
     print()
-    print(f"{'class':<18}{'#':>4}{'cu':>7}{'gust':>8}{'merge(ser)':>11}{'merge(par)':>11}"
-          f"{'par/gust':>9}{'par/cu':>8}{'par/ser':>9}")
-    print("-" * 70)
+    print(f"{'class':<18}{'#':>4}{'cuBLAS':>9}{'Ocean':>8}{'gust':>8}{'merge(par)':>11}"
+          f"{'par/cuBL':>9}{'par/Oce':>8}{'par/gust':>9}")
+    print("-" * 90)
     for c in CLASS_ORDER:
         s = d[d["class"] == c]
         if len(s) == 0:
             continue
         pg = np.exp(np.log(s["ratio_par"]).mean())
-        pc = np.exp(np.log(s["ratio_par_cu"]).mean())
-        ps = np.exp(np.log(s["speedup"]).mean())
-        print(f"{c:<18}{len(s):>4}{s['cu_time'].mean():>7.2f}{s['man_time'].mean():>8.2f}"
-              f"{s['merge_time'].mean():>11.2f}{s['merge2_time'].mean():>11.2f}"
-              f"{pg:>8.2f}×{pc:>7.2f}×{ps:>8.2f}×")
+        rcb = s["ratio_par_cublas"].replace(0, np.nan).dropna()
+        pcb = np.exp(np.log(rcb).mean()) if len(rcb) else np.nan
+        ro = s["ratio_par_ocean"].replace(0, np.nan).dropna()
+        poc = np.exp(np.log(ro).mean()) if len(ro) else np.nan
+        print(f"{c:<18}{len(s):>4}{s['cublas_ms'].mean():>9.2f}{s['ocean_ms'].mean():>8.2f}{s['man_time'].mean():>8.2f}"
+              f"{s['merge2_time'].mean():>11.2f}"
+              f"{(f'{pcb:.2f}×' if not np.isnan(pcb) else '--'):>9}"
+              f"{(f'{poc:.2f}×' if not np.isnan(poc) else '--'):>8}{pg:>8.2f}×")
 
 
 def _class_scatter(ax, d, x, y, **kw):
@@ -101,6 +131,70 @@ def _class_scatter(ax, d, x, y, **kw):
         ax.scatter(h[x], h[y], marker="X", s=70, c=C_BAD, alpha=0.9,
                    edgecolors="white", linewidths=0.6,
                    label="bp_* 重行族", zorder=4)
+
+
+# ---- 图0(主):merge2(par) vs cuBLAS 稠密 GEMM(log-log)----
+# 新主 baseline:小矩阵 cuBLAS 极快(赢),大矩阵 cuBLAS O(n³) 惨输 → 戏剧性交叉点
+def chart_scatter_cublas(d):
+    if d["cublas_ms"].isna().all():
+        print("  (跳过 cuBLAS 散点:无 baseline_cublas.csv)")
+        return
+    dd = d.dropna(subset=["cublas_ms", "merge2_time"])
+    fig, ax = plt.subplots(figsize=(7.2, 6.2))
+    _class_scatter(ax, dd, "cublas_ms", "merge2_time")
+    lo = min(dd["cublas_ms"].min(), dd["merge2_time"].min()) * 0.5
+    hi = max(dd["cublas_ms"].max(), dd["merge2_time"].max()) * 2.0
+    ax.plot([lo, hi], [lo, hi], ls="--", lw=1.2, color=BASELINE, zorder=2)
+    ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+    ax.set_xscale("log"); ax.set_yscale("log")
+    ax.text(hi * 0.5, lo * 1.3, "merge(par) 更快", color=C_GOOD, fontsize=9, ha="right")
+    ax.text(lo * 1.5, hi * 0.55, "cuBLAS 更快", color=C_BAD, fontsize=9)
+    for name in ["bcsstk30", "bp_200", "1138_bus"]:
+        sel = dd[dd["name"] == name]
+        if len(sel):
+            r = sel.iloc[0]
+            ax.annotate(f"{name} ({r['ratio_par_cublas']:.2g}×)",
+                        (r["cublas_ms"], r["merge2_time"]),
+                        fontsize=8, color=INK_SEC, xytext=(8, 6), textcoords="offset points")
+    ax.set_xlabel("cuBLAS sgemm kernel (ms)"); ax.set_ylabel("merge(par) compute (ms)")
+    ax.set_title("并行 merge vs cuBLAS(compute-only):虚线下方=merge 赢")
+    ax.legend(frameon=False, fontsize=8, loc="upper left")
+    ax.grid(True, which="both", color=GRIDLINE, linewidth=0.6)
+    fig.tight_layout()
+    out = OUT_DIR / "merge2_vs_cublas_scatter.png"
+    fig.savefig(out, bbox_inches="tight"); plt.close(fig)
+    print(f"  图: {out.relative_to(REPO)}")
+
+
+# ---- 柱状图:各类别 cuBLAS / gust(ESC) / merge(par) 均值(log y),直观看 crossover ----
+def chart_bar(d):
+    methods = [("cuBLAS", "cublas_ms", C_CU), ("Ocean", "ocean_ms", "#4a3aa7"),
+               ("gust(ESC)", "man_time", C_MAN), ("merge(par)", "merge2_time", C_GOOD)]
+    classes = [c for c in CLASS_ORDER if len(d[d["class"] == c])]
+    means = {}
+    for lab, col, _ in methods:
+        s = d.dropna(subset=[col])
+        means[lab] = [s[s["class"] == c][col].mean() if len(s[s["class"] == c]) else np.nan for c in classes]
+    x = np.arange(len(classes))
+    w = 0.20
+    fig, ax = plt.subplots(figsize=(8.4, 4.6))
+    for i, (lab, _, color) in enumerate(methods):
+        vals = np.array([v if not np.isnan(v) else 1e-3 for v in means[lab]])
+        bars = ax.bar(x + (i - 1.5) * w, vals, width=w, color=color, label=lab, zorder=3)
+        for b, v in zip(bars, means[lab]):
+            if not np.isnan(v):
+                ax.text(b.get_x() + b.get_width() / 2, v * 1.08, f"{v:.2f}",
+                        ha="center", va="bottom", fontsize=7.5, color=INK_SEC, rotation=0)
+    ax.set_yscale("log")
+    ax.set_xticks(x); ax.set_xticklabels([f"{c}\n({len(d[d['class']==c])})" for c in classes])
+    ax.set_ylabel("耗时 (ms, 对数, compute-only)")
+    ax.set_title("各方法 compute-only 对照(按稀疏类别):cuBLAS 小矩阵赢、merge(par) 大稀疏矩阵赢")
+    ax.legend(frameon=False, fontsize=9, ncol=3, loc="upper left")
+    ax.grid(axis="y", which="both", color=GRIDLINE, linewidth=0.6)
+    fig.tight_layout()
+    out = OUT_DIR / "methods_bar_by_class.png"
+    fig.savefig(out, bbox_inches="tight"); plt.close(fig)
+    print(f"  图: {out.relative_to(REPO)}")
 
 
 # ---- 图1:merge2(par) vs gust(ESC)(log-log),虚线下方=并行 merge 赢 ----
@@ -198,9 +292,13 @@ def main():
     # 自包含:把源数据 CSV 也拷进输出文件夹
     try:
         shutil.copy(SUMMARY, OUT_DIR / SUMMARY.name)
+        shutil.copy(HERE / "baseline_cublas.csv", OUT_DIR / "baseline_cublas.csv")
+        shutil.copy(HERE / "baseline_ocean.csv", OUT_DIR / "baseline_ocean.csv")
     except Exception:
         pass
     print(f"\n生成图表(输出到 {OUT_DIR.relative_to(REPO)}/):")
+    chart_scatter_cublas(d)
+    chart_bar(d)
     chart_scatter(d)
     chart_speedup(d)
     chart_winloss(d)

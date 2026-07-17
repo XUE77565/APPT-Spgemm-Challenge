@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
     }
     #endif
 
-    // 测试 4: C = A x A (手写实现)
+    // 测试 4: C = A x A (Gust)
     {
         LOG_BOTH("\n=== Computing C = A x A (Manual) ===\n");
 

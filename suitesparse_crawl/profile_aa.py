@@ -258,6 +258,46 @@ def phase_breakdown(df):
     print(f"\n分阶段明细: profile_aa.csv ; 图: charts/profile_aa.png")
 
 
+def chart_methods_bar(df):
+    """6 方法(cuBLAS/Ocean/cuSPARSE/ESC/merge-ser/merge-par)compute-only 均值,按稀疏类别分组柱(log y)。
+    compute-only:稀疏法=各阶段求和去 h2d/d2h;cuBLAS=sgemm kernel;Ocean=GPU 阶段求和。"""
+    methods = [("cuBLAS", "cublas_ms", "#2a78d6"),
+               ("Ocean", "ocean_ms", "#4a3aa7"),
+               ("cuSPARSE", "cu_compute_t", "#898781"),
+               ("gust(ESC)", "man_compute_t", "#eb6834"),
+               ("merge(ser)", "merge_compute_t", "#c98a1e"),
+               ("merge(par)", "merge2_compute_t", "#1baf7a")]
+    classes = [c for c in CLASS_ORDER if len(df[df["class"] == c])]
+    if not classes:
+        return
+    means = {}
+    for lab, col, _ in methods:
+        means[lab] = []
+        for c in classes:
+            sub = df[df["class"] == c]
+            vals = sub[col].dropna() if col in sub.columns else pd.Series(dtype=float)
+            means[lab].append(float(vals.mean()) if len(vals) else np.nan)
+    x = np.arange(len(classes))
+    nm = len(methods)
+    w = 0.13
+    fig, ax = plt.subplots(figsize=(11, 5.0))
+    for i, (lab, _, color) in enumerate(methods):
+        vals = np.array([v if not np.isnan(v) else 1e-3 for v in means[lab]])
+        ax.bar(x + (i - (nm - 1) / 2) * w, vals, width=w, color=color, label=lab, zorder=3)
+    ax.set_yscale("log")
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{c}\n({len(df[df['class'] == c])})" for c in classes])
+    ax.set_ylabel("耗时 (ms, 对数, compute-only)")
+    ax.set_title("6 方法 compute-only 对照(按稀疏类别):cuBLAS / Ocean / cuSPARSE / ESC / merge(ser) / merge(par)")
+    ax.legend(frameon=False, fontsize=8.5, ncol=6, loc="upper center",
+              bbox_to_anchor=(0.5, 1.00))  # 图例放图顶,避免挡柱
+    ax.grid(axis="y", which="both", color="#e1e0d9", linewidth=0.6)
+    fig.tight_layout()
+    fig.savefig(CHART_DIR / "profile_methods_bar.png", bbox_inches="tight")
+    plt.close(fig)
+    print(f"  图: charts/profile_methods_bar.png  (6 方法 compute-only 柱状图;具体数值见上面的类别聚合表)")
+
+
 def main():
     rows = []
     for log in sorted(LOG_DIR.glob("*.log")):
@@ -288,40 +328,65 @@ def main():
     df["cu_kernel"] = df[["cu_we", "cu_compute", "cu_copy"]].sum(axis=1, min_count=1)
     df["man_kernel"] = df[["man_count", "man_fill"]].sum(axis=1, min_count=1)
 
+    # compute-only 时间(各 dbg 阶段求和,去掉 h2d/d2h 传输):与 cuBLAS(kernel-only)公平对比
+    def _compute_only(phases, tag):
+        dd = method_durations(phases or {}, tag)
+        return float(sum(v for p, v in dd.items() if p not in ("h2d", "d2h")))
+    df["cu_compute_t"]    = df["phases"].apply(lambda p: _compute_only(p, "cu"))
+    df["man_compute_t"]   = df["phases"].apply(lambda p: _compute_only(p, "gust"))
+    df["merge_compute_t"] = df["phases"].apply(lambda p: _compute_only(p, "merge"))
+    df["merge2_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg2"))
+
     cols = ["class", "name", "n", "A_nnz", "density_pct",
             "cu_cnnz", "man_cnnz", "merge_cnnz", "merge2_cnnz", "cnnz_gap_pct", "buf2",
             "cu_we", "cu_compute", "cu_copy", "cu_d2h", "cu_kernel", "cu_time",
             "cu_write", "man_count", "man_fill", "man_kernel", "man_time",
             "merge_time", "merge2_time", "man_write",
+            "cu_compute_t", "man_compute_t", "merge_compute_t", "merge2_compute_t",
             "phases"]
     df = df[[c for c in cols if c in df.columns]]
+    # cuBLAS 稠密 GEMM baseline(Python ctypes 直调,新主 baseline;cuSPARSE 降为旧 baseline)
+    cub_path = HERE / "baseline_cublas.csv"
+    if cub_path.exists():
+        df = df.merge(pd.read_csv(cub_path)[["name", "cublas_ms"]], on="name", how="left")
+    else:
+        df["cublas_ms"] = np.nan
+    # Ocean SpGEMM baseline(compute-only = GPU 阶段求和)
+    oce_path = HERE / "baseline_ocean.csv"
+    if oce_path.exists():
+        df = df.merge(pd.read_csv(oce_path)[["name", "ocean_ms"]], on="name", how="left")
+    else:
+        df["ocean_ms"] = np.nan
     df = df.sort_values(["density_pct", "name"], ascending=[False, True])
     df.to_csv(OUT_CSV, index=False)
     print(f"写出 {OUT_CSV}\n")
 
-    # ---- 每矩阵明细:cu / gust(ESC) / merge(serial) / merge2(parallel) ----
-    print("=" * 112)
-    print(f"{'class':<4} {'name':<24}{'n':>8}"
-          f"{'cu':>8}{'gust':>8}{'mrgS':>8}{'mrgP':>8}{'mrgP/gust':>10}{'mrgP/cu':>9}")
-    print("-" * 112)
+    # ---- 每矩阵明细(compute-only):cuBLAS / Ocean / gust(ESC) / merge(par) + 比值 ----
+    print("=" * 104)
+    print("[compute-only:稀疏法=各阶段求和去 h2d/d2h;cuBLAS=sgemm kernel;Ocean=GPU 阶段求和]  ms")
+    print(f"{'class':<4} {'name':<22}{'n':>7}"
+          f"{'cuBLAS':>9}{'Ocean':>8}{'gust':>7}{'mrgP':>7}{'mP/cuBL':>8}{'mP/Oce':>8}{'mP/gust':>8}")
+    print("-" * 104)
     for _, r in df.iterrows():
         def f(v, w=8, p=False):
             if pd.isna(v): return "  --".rjust(w)
             return f"{v:{'.2f' if p else ',.0f'}}".rjust(w)
         def rr(a, b):
             return (a / b) if (pd.notna(a) and pd.notna(b) and b > 0) else np.nan
-        r_esc = rr(r['merge2_time'], r['man_time'])
-        r_cu  = rr(r['merge2_time'], r['cu_time'])
-        print(f"{str(r['class'])[:4]:<4} {r['name']:<24}{f(r['n'],8)}"
-              f"{f(r['cu_time'],8,'t')}{f(r['man_time'],8,'t')}"
-              f"{f(r['merge_time'],8,'t')}{f(r['merge2_time'],8,'t')}"
-              f"{f(r_esc,10,'t')}{f(r_cu,9,'t')}")
+        mp = r['merge2_compute_t']
+        r_cubl = rr(mp, r['cublas_ms'])
+        r_oce  = rr(mp, r['ocean_ms'])
+        r_esc  = rr(mp, r['man_compute_t'])
+        print(f"{str(r['class'])[:4]:<4} {r['name']:<22}{f(r['n'],7)}"
+              f"{f(r['cublas_ms'],9,'t')}{f(r['ocean_ms'],8,'t')}{f(r['man_compute_t'],7,'t')}{f(mp,7,'t')}"
+              f"{f(r_cubl,8,'t')}{f(r_oce,8,'t')}{f(r_esc,8,'t')}")
 
-    # ---- 按类别聚合 ----
-    print("\n" + "=" * 92)
-    print("按类别聚合(均值,毫秒)")
-    print("-" * 92)
-    print(f"{'class':<18}{'#':>3}{'cuSPARSE':>10}{'gust(ESC)':>10}{'merge(ser)':>11}{'merge(par)':>11}{'par/gust':>9}{'par/cu':>8}")
+    # ---- 按类别聚合(compute-only)----
+    print("\n" + "=" * 104)
+    print("按类别聚合(compute-only 均值,毫秒)")
+    print("-" * 104)
+    print(f"{'class':<18}{'#':>3}{'cuBLAS':>10}{'Ocean':>8}{'cuSPARSE':>10}{'gust(ESC)':>10}{'mrg(ser)':>9}{'merge(par)':>11}"
+          f"{'par/cuBL':>9}{'par/Oce':>8}{'par/gust':>9}")
     def g(s, w, dec=1):
         v = s.mean()
         return "--".rjust(w) if np.isnan(v) else f"{v:.{dec}f}".rjust(w)
@@ -333,14 +398,19 @@ def main():
         s = df[df["class"] == c]
         if len(s) == 0:
             continue
-        r_esc = gm(s['merge2_time'] / s['man_time'])
-        r_cu  = gm(s['merge2_time'] / s['cu_time'])
+        mp = s['merge2_compute_t']
+        r_cubl = gm(mp / s['cublas_ms'])
+        r_oce  = gm(mp / s['ocean_ms'])
+        r_esc  = gm(mp / s['man_compute_t'])
         print(f"{c:<18}{len(s):>3}"
-              f"{g(s['cu_time'],10)}{g(s['man_time'],10)}{g(s['merge_time'],11)}{g(s['merge2_time'],11)}"
-              f"{g(pd.Series([r_esc]),9,2)}{g(pd.Series([r_cu]),8,2)}")
+              f"{g(s['cublas_ms'],10)}{g(s['ocean_ms'],8)}{g(s['cu_compute_t'],10)}{g(s['man_compute_t'],10)}"
+              f"{g(s['merge_compute_t'],9)}{g(s['merge2_compute_t'],11)}"
+              f"{g(pd.Series([r_cubl]),9,2)}{g(pd.Series([r_oce]),8,2)}{g(pd.Series([r_esc]),9,2)}")
 
     charts(df)
     phase_breakdown(df)
+    print()  # 5 方法 compute-only 柱状图
+    chart_methods_bar(df)
     print(f"\n图表在 {CHART_DIR}")
 
 

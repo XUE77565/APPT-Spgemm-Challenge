@@ -1,7 +1,8 @@
 # 脚本用法手册
 
 > 日期:2026-07-16
-> 当前代码有三种方法:cuSPARSE(T1)+ Gustavson ESC(T4)+ **Gustavson Merge**(T4b,串行 k-way merge,对照 ESC 的 sort)。outer/colwise/inner 已移除。
+> 当前代码有三种方法:cuSPARSE(T1)+ Gustavson ESC(T4)+ **Gustavson Merge**(T4b/4c,串行+并行 k-way merge,对照 ESC 的 sort)。outer/colwise/inner 已移除。
+> **对比 baseline 已从 cuSPARSE 换成 cuBLAS**(稠密 GEMM,Python ctypes 直调,见 `baseline_cublas.py`):cuSPARSE 降为「旧 baseline」仍留 C 管线。理由:cuBLAS 更能判别「何时该稀疏」(小矩阵稠密赢、大稀疏矩阵稀疏碾压)。
 
 ---
 
@@ -72,17 +73,28 @@ bash scripts/run_all.sh                      # 全集(data/random)
 - 表格含:h2d / d2h / 符号(count+scan) / 计算(expand) / 排序(sort) / 去重(reduce) / 收尾(final) / 打包(pack)
   - 注:`profile_aa.py` 现已解析第三法 **Merge**(T4b)的 `Time` 与 `[merge]` 阶段;merge 的 merge 阶段映到「排序」列,与 gust.sort 直接对照
 
-### `suitesparse_crawl/analyze_merge.py`(Merge vs ESC 专项分析)
+### `suitesparse_crawl/baseline_cublas.py`(cuBLAS 稠密 GEMM baseline ★主 baseline)
+```bash
+.venv/bin/python suitesparse_crawl/baseline_cublas.py [data_dir] [out.csv]
+# 默认读 data/first100,写 suitesparse_crawl/baseline_cublas.csv
+```
+- **Python ctypes 直调系统 `/usr/lib/.../libcublas.so`(零下载、零额外依赖)**;稠密化 A → `cublasSgemm_v2`(FP32,关 TF32)。
+- A 语义与 C 端 `read_matrix_market` 一致(scipy 自动:symmetric 展开/pattern=1.0);计时仅 sgemm kernel(warmup 取 min)。
+- 大矩阵稠密 GEMM 极慢(bcsstk30 1172ms、bcsstk32 4388ms,O(n³));全 100 矩阵 0 OOM。
+- 产物 `baseline_cublas.csv`(name/n/A_nnz/cublas_ms/status),供 `analyze_merge.py` 作主 baseline。
+
+### `suitesparse_crawl/analyze_merge.py`(Merge 专项分析,主 baseline = cuBLAS)
 ```bash
 .venv/bin/python suitesparse_crawl/analyze_merge.py [summary.csv] [out_dir]
-# 默认读 suitesparse_crawl/profile_aa_summary.csv
+# 默认读 suitesparse_crawl/profile_aa_summary.csv + baseline_cublas.csv
 # 图表默认写到 compare/merge_vs_esc_<时间戳>/(每次运行新建文件夹,自包含:图 + 源 CSV)
 #   可用 argv[2] 或 MERGE_COMPARE_DIR=compare/xxx 指定文件夹名
 ```
-- 打印:并行/串行 merge vs ESC 的胜负计数 + 几何均值、并行 vs 串行加速、各类别分布
-- 出图到 `compare/<folder>/`(与 ocean_compute_only 等同目录约定):
-  - `merge2_vs_esc_scatter.png` — merge(par) vs ESC 总耗时(log-log),虚线下方=并行 merge 赢
-  - `merge2_speedup_over_serial.png` — 并行相对串行的加速 vs C 输出 nnz(>1=并行更快)
+- 打印:**par vs cuBLAS(主 baseline)** / par vs cuSPARSE(旧)/ par vs gust(ESC) 胜负 + 几何均值、并行 vs 串行加速、各类别分布
+- 出图到 `compare/<folder>/`:
+  - `merge2_vs_cublas_scatter.png` — merge(par) vs cuBLAS(log-log),**戏剧性交叉点**:小矩阵 cuBLAS 赢、大稀疏矩阵 merge 碾压
+  - `merge2_vs_esc_scatter.png` — merge(par) vs ESC(虚线下方=并行 merge 赢)
+  - `merge2_speedup_over_serial.png` — 并行相对串行的加速 vs C 输出 nnz
   - `merge2_winloss_by_class.png` — 并行 merge vs ESC 各类别 赢/平/输 堆叠条
 
 ### `suitesparse_crawl/profile_att.py`
