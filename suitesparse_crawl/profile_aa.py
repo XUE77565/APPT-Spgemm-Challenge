@@ -112,7 +112,7 @@ def parse_log(path):
             elif "T4 write done" in msg: tag = "t4w_d"
             if tag:
                 ev[tag] = ms
-            mph = re.match(r"\[(cu|gust|outer|colw|inner|merge|mrg2)\]\s+(\w+)", msg)
+            mph = re.match(r"\[(cu|gust|outer|colw|inner|merge|mrg2|mrg3|mrg6|mrg7)\]\s+(\w+)", msg)
             if mph:
                 phases[(mph.group(1), mph.group(2))] = ms
         else:
@@ -143,10 +143,17 @@ def parse_log(path):
         "merge_time": times[2] if len(times) >= 3 else np.nan,
         # T4c:并行 k-way merge v2(times[3],result_cnnz[3])
         "merge2_time": times[3] if len(times) >= 4 else np.nan,
+        # T4d/e/f: merge3(均匀分块)/merge6(自适应bucket)/merge7(自适应multiwarp)
+        "merge3_time": times[4] if len(times) >= 5 else np.nan,
+        "merge6_time": times[5] if len(times) >= 6 else np.nan,
+        "merge7_time": times[6] if len(times) >= 7 else np.nan,
         "cu_cnnz": result_cnnz[0] if len(result_cnnz) >= 1 else ev.get("cu_cnnz", np.nan),
         "man_cnnz": result_cnnz[1] if len(result_cnnz) >= 2 else ev.get("man_cnnz", np.nan),
         "merge_cnnz": result_cnnz[2] if len(result_cnnz) >= 3 else np.nan,
         "merge2_cnnz": result_cnnz[3] if len(result_cnnz) >= 4 else np.nan,
+        "merge3_cnnz": result_cnnz[4] if len(result_cnnz) >= 5 else np.nan,
+        "merge6_cnnz": result_cnnz[5] if len(result_cnnz) >= 6 else np.nan,
+        "merge7_cnnz": result_cnnz[6] if len(result_cnnz) >= 7 else np.nan,
         "buf2": buf2,
         "phases": phases,
     }
@@ -336,13 +343,18 @@ def main():
     df["man_compute_t"]   = df["phases"].apply(lambda p: _compute_only(p, "gust"))
     df["merge_compute_t"] = df["phases"].apply(lambda p: _compute_only(p, "merge"))
     df["merge2_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg2"))
+    df["merge3_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg3"))
+    df["merge6_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg6"))
+    df["merge7_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg7"))
 
     cols = ["class", "name", "n", "A_nnz", "density_pct",
-            "cu_cnnz", "man_cnnz", "merge_cnnz", "merge2_cnnz", "cnnz_gap_pct", "buf2",
+            "cu_cnnz", "man_cnnz", "merge_cnnz", "merge2_cnnz",
+            "merge3_cnnz", "merge6_cnnz", "merge7_cnnz", "cnnz_gap_pct", "buf2",
             "cu_we", "cu_compute", "cu_copy", "cu_d2h", "cu_kernel", "cu_time",
             "cu_write", "man_count", "man_fill", "man_kernel", "man_time",
-            "merge_time", "merge2_time", "man_write",
+            "merge_time", "merge2_time", "merge3_time", "merge6_time", "merge7_time", "man_write",
             "cu_compute_t", "man_compute_t", "merge_compute_t", "merge2_compute_t",
+            "merge3_compute_t", "merge6_compute_t", "merge7_compute_t",
             "phases"]
     df = df[[c for c in cols if c in df.columns]]
     # cuBLAS 稠密 GEMM baseline(Python ctypes 直调,新主 baseline;cuSPARSE 降为旧 baseline)
