@@ -163,12 +163,6 @@ int main(int argc, char **argv) {
         wc = nullptr;
         spgemm_self_product_merge3(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
         if (wc) pinned_free(wc);
-        wc = nullptr;
-        spgemm_self_product_merge6(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) pinned_free(wc);
-        wc = nullptr;
-        spgemm_self_product_merge7(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
-        if (wc) pinned_free(wc);
     }
     dbg("warmup done\n");
 
@@ -370,45 +364,6 @@ int main(int argc, char **argv) {
 
         pinned_free(C_buffer);
     }
-
-    // 测试 4e: C = A x A (自适应分块 merge v4,路线A;与 merge2/3 对照)
-    {
-        LOG_BOTH("\n=== Computing C = A x A (Merge6) ===\n");
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-        auto start = std::chrono::high_resolution_clock::now();
-        dbg("T4e merge6 self_product: start\n");
-        spgemm_self_product_merge6(A_buffer, A_rows, A_cols, A_nnz,
-                                   &C_buffer, &C_rows, &C_cols, &C_nnz);
-        dbg("T4e merge6 self_product: done (C_nnz=%d)\n", C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-        pinned_free(C_buffer);
-    }
-
-    // 测试 4f: C = A x A (精确自适应 merge v5;与 merge2/3/4 对照)
-    {
-        LOG_BOTH("\n=== Computing C = A x A (Merge7) ===\n");
-        void *C_buffer = nullptr;
-        int C_rows = 0, C_cols = 0, C_nnz = 0;
-        auto start = std::chrono::high_resolution_clock::now();
-        dbg("T4f merge7 self_product: start\n");
-        spgemm_self_product_merge7(A_buffer, A_rows, A_cols, A_nnz,
-                                   &C_buffer, &C_rows, &C_cols, &C_nnz);
-        dbg("T4f merge7 self_product: done (C_nnz=%d)\n", C_nnz);
-        auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        double C_sparsity = 100.0 * (1.0 - (double)C_nnz / ((double)C_rows * C_cols));
-        LOG_BOTH("Result C: %d x %d, nnz = %d, sparsity = %.2f%%\n",
-                 C_rows, C_cols, C_nnz, C_sparsity);
-        LOG_BOTH("Time: %.3f ms\n", elapsed.count());
-        pinned_free(C_buffer);
-    }
-
 
     host_free(A_buffer);
 

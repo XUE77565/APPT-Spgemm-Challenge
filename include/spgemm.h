@@ -85,16 +85,6 @@ void spgemm_self_product_merge2(void *A_buffer, int A_rows, int A_cols, int A_nn
 void spgemm_self_product_merge3(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                         void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
-// C = A × A,Gustavson 行向,【自适应 bucket merge(v6)】版:轻行/大矩阵=merge2,
-// 重行(num_k>相对阈值=CREL×均值)→ 列分桶。治 straggler、不拖累大矩阵。与 merge2/3 对照。
-void spgemm_self_product_merge6(void *A_buffer, int A_rows, int A_cols, int A_nnz,
-                        void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
-
-// C = A × A,Gustavson 行向,【自适应 multiwarp merge(v7)】版:轻行/大矩阵=merge2,
-// 重行(num_k>相对阈值)→ 多 warp(256线程)协作 merge(提并行度,不切链)。与 merge6 对照。
-void spgemm_self_product_merge7(void *A_buffer, int A_rows, int A_cols, int A_nnz,
-                        void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
-
 // 三种公式对照(均为 ESC 合并;Gustavson=上面那个 manual)
 // 外积(outer, 外层=k):读 A 的列k ⊗ 行k
 void spgemm_self_product_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,

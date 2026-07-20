@@ -112,7 +112,7 @@ def parse_log(path):
             elif "T4 write done" in msg: tag = "t4w_d"
             if tag:
                 ev[tag] = ms
-            mph = re.match(r"\[(cu|gust|outer|colw|inner|merge|mrg2|mrg3|mrg6|mrg7)\]\s+(\w+)", msg)
+            mph = re.match(r"\[(cu|gust|outer|colw|inner|merge|mrg2|mrg3)\]\s+(\w+)", msg)
             if mph:
                 phases[(mph.group(1), mph.group(2))] = ms
         else:
@@ -143,17 +143,13 @@ def parse_log(path):
         "merge_time": times[2] if len(times) >= 3 else np.nan,
         # T4c:并行 k-way merge v2(times[3],result_cnnz[3])
         "merge2_time": times[3] if len(times) >= 4 else np.nan,
-        # T4d/e/f: merge3(均匀分块)/merge6(自适应bucket)/merge7(自适应multiwarp)
+        # T4d: merge3(均匀分桶)
         "merge3_time": times[4] if len(times) >= 5 else np.nan,
-        "merge6_time": times[5] if len(times) >= 6 else np.nan,
-        "merge7_time": times[6] if len(times) >= 7 else np.nan,
         "cu_cnnz": result_cnnz[0] if len(result_cnnz) >= 1 else ev.get("cu_cnnz", np.nan),
         "man_cnnz": result_cnnz[1] if len(result_cnnz) >= 2 else ev.get("man_cnnz", np.nan),
         "merge_cnnz": result_cnnz[2] if len(result_cnnz) >= 3 else np.nan,
         "merge2_cnnz": result_cnnz[3] if len(result_cnnz) >= 4 else np.nan,
         "merge3_cnnz": result_cnnz[4] if len(result_cnnz) >= 5 else np.nan,
-        "merge6_cnnz": result_cnnz[5] if len(result_cnnz) >= 6 else np.nan,
-        "merge7_cnnz": result_cnnz[6] if len(result_cnnz) >= 7 else np.nan,
         "buf2": buf2,
         "phases": phases,
     }
@@ -164,7 +160,7 @@ PHASE_ORDER = ["h2d", "csc", "count", "scan", "expand", "merge", "compact",
 CU_PHASES = ["h2d", "workest", "compute", "copy", "pack", "d2h"]
 ALL_PHASES = ["h2d", "csc", "count", "scan", "expand", "merge", "compact",
               "workest", "compute", "copy", "sort", "reduce", "final", "numeric", "pack", "d2h"]
-METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "merge": "Merge(ser)", "mrg2": "Merge(par)"}
+METHOD_NAME = {"cu": "cuSPARSE", "gust": "Gustavson", "merge": "Merge(ser)", "mrg2": "Merge(par)", "mrg3": "Merge3"}
 # 阶段分组(用于堆叠图与汇总表);cuSPARSE 的 workest/compute/copy 归入"计算"
 # 传输拆成 h2d(上传 A)与 d2h(下载 C)两列,便于分别看
 PHASE_GROUP = {
@@ -202,7 +198,7 @@ def method_durations(phases, tag):
 
 
 def phase_breakdown(df):
-    TAGS = ["cu", "gust", "merge", "mrg2"]
+    TAGS = ["cu", "gust", "merge", "mrg2", "mrg3"]
     rows = []
     for _, r in df.iterrows():
         ph = r.get("phases", {}) or {}
@@ -223,7 +219,7 @@ def phase_breakdown(df):
 
     # ---- 按方法聚合:分组成 h2d/d2h/符号/计算/合并/数值归并/打包(均值 ms)----
     print("\n" + "=" * 112)
-    print("分阶段构成(各矩阵均值,ms)— 按阶段分组,五法可比")
+    print("分阶段构成(各矩阵均值,ms)— 按阶段分组,六法可比")
     print("-" * 112)
     print(f"{'方法':<12}" + "".join(f"{g:>10}" for g in GROUP_ORDER) + f"{'合计':>10}")
     agg = {}
@@ -266,14 +262,14 @@ def phase_breakdown(df):
 
 
 def chart_methods_bar(df):
-    """6 方法(cuBLAS/Ocean/cuSPARSE/ESC/merge-ser/merge-par)compute-only 均值,按稀疏类别分组柱(log y)。
-    compute-only:稀疏法=各阶段求和去 h2d/d2h;cuBLAS=sgemm kernel;Ocean=GPU 阶段求和。"""
+    """7 方法(cuBLAS/Ocean/cuSPARSE/ESC/merge-ser/merge-par/merge3)compute-only 均值,按稀疏类别分组柱(log y)。"""
     methods = [("cuBLAS", "cublas_ms", "#2a78d6"),
                ("Ocean", "ocean_ms", "#4a3aa7"),
                ("cuSPARSE", "cu_compute_t", "#898781"),
                ("gust(ESC)", "man_compute_t", "#eb6834"),
                ("merge(ser)", "merge_compute_t", "#c98a1e"),
-               ("merge(par)", "merge2_compute_t", "#1baf7a")]
+               ("merge(par)", "merge2_compute_t", "#1baf7a"),
+               ("merge3", "merge3_compute_t", "#e0533d")]
     classes = [c for c in CLASS_ORDER if len(df[df["class"] == c])]
     if not classes:
         return
@@ -295,14 +291,39 @@ def chart_methods_bar(df):
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n({len(df[df['class'] == c])})" for c in classes])
     ax.set_ylabel("耗时 (ms, 对数, compute-only)")
-    ax.set_title("6 方法 compute-only 对照(按稀疏类别):cuBLAS / Ocean / cuSPARSE / ESC / merge(ser) / merge(par)")
+    ax.set_title("7 方法 compute-only 对照(按稀疏类别):cuBLAS / Ocean / cuSPARSE / ESC / merge(ser) / merge(par) / merge3")
     ax.legend(frameon=False, fontsize=8.5, ncol=6, loc="upper center",
               bbox_to_anchor=(0.5, 1.00))  # 图例放图顶,避免挡柱
     ax.grid(axis="y", which="both", color="#e1e0d9", linewidth=0.6)
     fig.tight_layout()
     fig.savefig(CHART_DIR / "profile_methods_bar.png", bbox_inches="tight")
     plt.close(fig)
-    print(f"  图: charts/profile_methods_bar.png  (6 方法 compute-only 柱状图;具体数值见上面的类别聚合表)")
+    print(f"  图: charts/profile_methods_bar.png  (7 方法 compute-only 柱状图;具体数值见上面的类别聚合表)")
+
+
+def print_lose_ocean(df):
+    """merge(merge2/merge3)哪些 case 输给 Ocean,按比值降序。"""
+    print("\n" + "=" * 100)
+    print("merge vs Ocean:输给 Ocean 的 case(ratio > 1.0,越小越好)")
+    print("=" * 100)
+    for label, col, ocean_col in [("merge2(par)", "merge2_compute_t", "ocean_ms"),
+                                  ("merge3(bucket)", "merge3_compute_t", "ocean_ms")]:
+        d = df.dropna(subset=[col, ocean_col]).copy()
+        d["ratio"] = d[col] / d[ocean_col]
+        losers = d[d["ratio"] > 1.0].sort_values("ratio", ascending=False)
+        winners = d[d["ratio"] < 1.0]
+        geo = np.exp(np.log(d["ratio"]).mean())
+        print(f"\n--- {label}:赢 {len(winners)} / 输 {len(losers)},几何均值 {geo:.3f}× ---")
+        if len(losers) == 0:
+            print("  (全部赢 Ocean)")
+        else:
+            print(f"{'name':<14}{'n':>7}{'C_nnz':>10}{'Ocean':>9}{label:>14}{'ratio':>8}")
+            print("-" * 70)
+            for _, r in losers.head(20).iterrows():
+                print(f"{r['name']:<14}{int(r['n']):>7}{int(r['cu_cnnz']):>10}"
+                      f"{r[ocean_col]:>9.3f}{r[col]:>14.3f}{r['ratio']:>7.2f}×")
+            if len(losers) > 20:
+                print(f"  ... 另有 {len(losers)-20} 个")
 
 
 def main():
@@ -344,17 +365,15 @@ def main():
     df["merge_compute_t"] = df["phases"].apply(lambda p: _compute_only(p, "merge"))
     df["merge2_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg2"))
     df["merge3_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg3"))
-    df["merge6_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg6"))
-    df["merge7_compute_t"]= df["phases"].apply(lambda p: _compute_only(p, "mrg7"))
 
     cols = ["class", "name", "n", "A_nnz", "density_pct",
             "cu_cnnz", "man_cnnz", "merge_cnnz", "merge2_cnnz",
-            "merge3_cnnz", "merge6_cnnz", "merge7_cnnz", "cnnz_gap_pct", "buf2",
+            "merge3_cnnz", "cnnz_gap_pct", "buf2",
             "cu_we", "cu_compute", "cu_copy", "cu_d2h", "cu_kernel", "cu_time",
             "cu_write", "man_count", "man_fill", "man_kernel", "man_time",
-            "merge_time", "merge2_time", "merge3_time", "merge6_time", "merge7_time", "man_write",
+            "merge_time", "merge2_time", "merge3_time", "man_write",
             "cu_compute_t", "man_compute_t", "merge_compute_t", "merge2_compute_t",
-            "merge3_compute_t", "merge6_compute_t", "merge7_compute_t",
+            "merge3_compute_t",
             "phases"]
     df = df[[c for c in cols if c in df.columns]]
     # cuBLAS 稠密 GEMM baseline(Python ctypes 直调,新主 baseline;cuSPARSE 降为旧 baseline)
@@ -373,11 +392,11 @@ def main():
     df.to_csv(OUT_CSV, index=False)
     print(f"写出 {OUT_CSV}\n")
 
-    # ---- 每矩阵明细(compute-only):cuBLAS / Ocean / gust(ESC) / merge(par) + 比值 ----
+    # ---- 每矩阵明细(compute-only):cuBLAS / Ocean / gust(ESC) / mrgP(merge2) / m3(merge3) + vs Ocean ----
     print("=" * 104)
     print("[compute-only:稀疏法=各阶段求和去 h2d/d2h;cuBLAS=sgemm kernel;Ocean=GPU 阶段求和]  ms")
     print(f"{'class':<4} {'name':<22}{'n':>7}"
-          f"{'cuBLAS':>9}{'Ocean':>8}{'gust':>7}{'mrgP':>7}{'mP/cuBL':>8}{'mP/Oce':>8}{'mP/gust':>8}")
+          f"{'cuBLAS':>9}{'Ocean':>8}{'gust':>7}{'mrgP':>7}{'m3':>7}{'mP/Oce':>8}{'m3/Oce':>8}")
     print("-" * 104)
     for _, r in df.iterrows():
         def f(v, w=8, p=False):
@@ -386,19 +405,19 @@ def main():
         def rr(a, b):
             return (a / b) if (pd.notna(a) and pd.notna(b) and b > 0) else np.nan
         mp = r['merge2_compute_t']
-        r_cubl = rr(mp, r['cublas_ms'])
-        r_oce  = rr(mp, r['ocean_ms'])
-        r_esc  = rr(mp, r['man_compute_t'])
+        m3 = r['merge3_compute_t']
+        r_oce_p = rr(mp, r['ocean_ms'])
+        r_oce_3 = rr(m3, r['ocean_ms'])
         print(f"{str(r['class'])[:4]:<4} {r['name']:<22}{f(r['n'],7)}"
-              f"{f(r['cublas_ms'],9,'t')}{f(r['ocean_ms'],8,'t')}{f(r['man_compute_t'],7,'t')}{f(mp,7,'t')}"
-              f"{f(r_cubl,8,'t')}{f(r_oce,8,'t')}{f(r_esc,8,'t')}")
+              f"{f(r['cublas_ms'],9,'t')}{f(r['ocean_ms'],8,'t')}{f(r['man_compute_t'],7,'t')}{f(mp,7,'t')}{f(m3,7,'t')}"
+              f"{f(r_oce_p,8,'t')}{f(r_oce_3,8,'t')}")
 
     # ---- 按类别聚合(compute-only)----
     print("\n" + "=" * 104)
     print("按类别聚合(compute-only 均值,毫秒)")
     print("-" * 104)
-    print(f"{'class':<18}{'#':>3}{'cuBLAS':>10}{'Ocean':>8}{'cuSPARSE':>10}{'gust(ESC)':>10}{'mrg(ser)':>9}{'merge(par)':>11}"
-          f"{'par/cuBL':>9}{'par/Oce':>8}{'par/gust':>9}")
+    print(f"{'class':<18}{'#':>3}{'cuBLAS':>10}{'Ocean':>8}{'cuSPARSE':>10}{'gust(ESC)':>10}{'mrg(ser)':>9}{'mrgP':>8}{'mrg3':>8}"
+          f"{'par/Oce':>8}{'m3/Oce':>8}")
     def g(s, w, dec=1):
         v = s.mean()
         return "--".rjust(w) if np.isnan(v) else f"{v:.{dec}f}".rjust(w)
@@ -411,18 +430,22 @@ def main():
         if len(s) == 0:
             continue
         mp = s['merge2_compute_t']
-        r_cubl = gm(mp / s['cublas_ms'])
-        r_oce  = gm(mp / s['ocean_ms'])
-        r_esc  = gm(mp / s['man_compute_t'])
+        m3 = s['merge3_compute_t']
+        r_oce_p = gm(mp / s['ocean_ms'])
+        r_oce_3 = gm(m3 / s['ocean_ms'])
         print(f"{c:<18}{len(s):>3}"
               f"{g(s['cublas_ms'],10)}{g(s['ocean_ms'],8)}{g(s['cu_compute_t'],10)}{g(s['man_compute_t'],10)}"
-              f"{g(s['merge_compute_t'],9)}{g(s['merge2_compute_t'],11)}"
-              f"{g(pd.Series([r_cubl]),9,2)}{g(pd.Series([r_oce]),8,2)}{g(pd.Series([r_esc]),9,2)}")
+              f"{g(s['merge_compute_t'],9)}{g(s['merge2_compute_t'],8)}{g(s['merge3_compute_t'],8)}"
+              f"{g(pd.Series([r_oce_p]),8,2)}{g(pd.Series([r_oce_3]),8,2)}")
 
     charts(df)
     phase_breakdown(df)
-    print()  # 5 方法 compute-only 柱状图
+    print()  # 7 方法 compute-only 柱状图
     chart_methods_bar(df)
+
+    # ---- merge vs Ocean 专项:哪些 case 输给 Ocean ----
+    print_lose_ocean(df)
+
     print(f"\n图表在 {CHART_DIR}")
 
 
