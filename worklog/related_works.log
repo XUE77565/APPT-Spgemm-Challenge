@@ -1,0 +1,362 @@
+# Related Works:Merge-based SpGEMM 文献梳理
+
+> 日期:2026-07-20(第一版) / 2026-07-20(修订:补 PACT'25 + 扩大搜索)
+> 目的:定位本项目 merge-based SpGEMM 工作在文献中的位置(新颖性 / prior art / 必引论文)
+> 结论:**GPU merge-based SpGEMM 有三条线:RMerge(2015)→ NPC'18 reg-merge(2018)→ PACT'25 Multiway Merge Partitioning(2025)。中间有 2019-2024 的 5 年空窗(主流全转 hash),2025 年 PACT 重新探索 merge。我们的 merge2 与 NPC'18 同算法;merge3(col-bucket + binary search)与 PACT'25 的 multiway merge partitioning 需仔细对比。**
+
+---
+
+## 一、时间线:Merge-based SpGEMM 演进
+
+| 年份 | 工作 | 平台 | 方法 | 与我们的关系 |
+|---|---|---|---|---|
+| 1978 | Gustavson [24] | CPU | SPA scatter(提到了利用有序但没用 merge) | 思想起源 |
+| **2015** | **RMerge(Gremse et al.)[30]** | **GPU** | **iterative row merging**(第一个 GPU merge SpGEMM) | **鼻祖;必须引用** |
+| 2017 | NSparse(Nagasaka et al.)[11] | GPU | merge-preprocessing + hash | 开源,可跑 baseline |
+| **2018** | **Register-Aware(Liu et al., NPC'18)** | **GPU (P100)** | **reg-merge = warp shuffle k-way merge** | **与我们的 merge2 同算法;必须引用** |
+| 2018 | RMerge extended(Gremse et al.)[21] | GPU | memory-efficient row merging | RMerge 的期刊版 |
+| 2019 | SpArch(Zhang et al., ISCA'19) | **硬件 ASIC** | 层次化 merge tree | 硬件天花板参考 |
+| 2021 | Segmented Merge(SSSLab) | GPU | 分段归并原语替代 sort | 免 sort 的另一条路 |
+| 2021 | spECK | GPU | hash SPA | hash 路线(不走 merge) |
+| 2023 | Spada(ASPLOS'23) | GPU | adaptive hash | SOTA hash |
+| 2024 | Ocean | GPU | hash + binning | 我们的 SOTA 对照(不走 merge) |
+| **2025** | **Multiway Merge Partitioning (Lorimer et al.)** | **PACT'25 (GPU)** | **multiway merge partitioning for SpGEMM** | **⚠️ 最新的 merge GPU 论文(我们之前遗漏)** |
+| **2026** | **本项目(merge2 / merge3)** | **GPU (H100)** | **warp k-way merge / col-bucket merge** | **需与 PACT'25 对比** |
+
+> ⚠️ **修订**:之前称"2019-2025 七年真空期"是**错误的** —— 2025 年 PACT 上有一篇直接用 merge 做 SpGEMM 的 GPU 论文(Multiway Merge Partitioning)。实际空窗是 **2019-2024(5 年)**。详见 §八。
+
+---
+
+## 二、关键论文详解
+
+### 2.1 RMerge(Gremse et al., SISC 2015)—— GPU merge-based SpGEMM 鼻祖
+
+> *"GPU-Accelerated Sparse Matrix-Matrix Multiplication by Iterative Row Merging"*
+> SIAM Journal on Scientific Computing, 2015.
+> NPC'18 引用编号 [30]。
+
+- **第一个**在 GPU 上实现 merge-based SpGEMM 的工作。
+- **方法**:iterative row merging —— 逐行合并 B 的行(贡献到 C 的行),利用 CSR 有序性。
+- **两阶段**:
+  1. 将矩阵 A 分成小子矩阵(if max row length < warp size 32,在 shared memory 做)
+  2. 用一个 warp 将子矩阵与 B 相乘(merge)
+- **缺点**:第一阶段(分子矩阵)开销大 —— NPC'18 指出这占了整个 SpGEMM 成本的大头。
+- **后续**(SISC 2018 [21]):memory-efficient 版本,优化了内存使用。
+
+### 2.2 Register-Aware(Liu et al., NPC'18)—— ⚠️ 我们的 merge2 的前身
+
+> *"Register-Aware Optimizations for Parallel Sparse Matrix-Matrix Multiplication"*
+> NPC 2018(清华 PACMAN 实验室)。
+> PDF: https://pacman.cs.tsinghua.edu.cn/npc2018/papers/register-aware.pdf
+
+**核心贡献**:提出了三种 register-aware 累加器(reg-sort / reg-merge / reg-hash),分别优化 bhSPARSE / RMerge / NSparse。
+
+#### reg-merge 的算法(与我们 merge2 对比)
+
+NPC'18 论文 Section 3.2 描述的 reg-merge 流程:
+
+```
+① 每个 thread 认领 A 的若干非零 + 对应 B 的行,列索引装入 register vector
+② 每 thread 做 intra-thread min(col0, col1) → 私有最小列
+③ inter-thread min(intra_min) ← 用 GPU shuffle 指令 → warp 全局最小列
+④ inter-sum(value) ← 用 GPU shuffle 指令 → warp 求和
+⑤ 写出 (min_col, sum),循环到所有链耗尽
+```
+
+**与我们的 merge_warp_kernel(merge2)逐步对比:**
+
+| 步骤 | NPC'18 reg-merge | 我们的 merge2 |
+|---|---|---|
+| 线程分配 | 每个 thread 认领 A 的若干非零 + B 的对应行 | 每个 lane 认领 ⌈num_k/32⌉ 条有序列链 |
+| 找最小列 | intra-thread min → shuffle inter-min | mymin → __shfl_xor min-reduce |
+| 求和 | shuffle inter-sum | __shfl_xor sum-reduce |
+| 输出 | thread 0 写出 | lane 0 写出 |
+| **算法** | **warp-cooperative k-way merge + shuffle** | **完全一样** |
+
+**结论:NPC'18 的 reg-merge 与我们的 merge2 是同一个核心算法(warp shuffle k-way merge)。**
+
+#### NPC'18 reg-merge 的局限(我们的改进空间)
+
+| | NPC'18 reg-merge | 我们的 merge2 |
+|---|---|---|
+| GPU | P100(2016) | **H100(2023)** |
+| 行规模限制 | ≤512 中间项(register 约束) | **无限制**(shared mem 放段指针) |
+| 输入读取 | 先展开到 shared mem,再装 register | **直接读 A**(无展开,Tier 0 融合) |
+| 分桶 | ❌ 无 | **merge3: col-bucket + binary search** |
+| 对比对象 | vs RMerge(另一个 merge) | **vs Ocean(hash SOTA)+ cuSPARSE + cuBLAS** |
+| 测试矩阵 | 205 个 SuiteSparse | 100 个 first100 |
+
+#### NPC'18 的实验结论
+
+- reg-merge 在 **P100** 上平均比 RMerge 快 **2.6×**(kernel,最高 10.5×)。
+- 但 NPC'18 的最终推荐是 **reg-hash(1.7× over NSparse)** —— hash 更通用。
+- **没有跟现代 hash SOTA(Ocean/cuSPARSE 11.x)对比**(那时还没有这些)。
+
+### 2.3 SpArch(Zhang et al., ISCA'19)—— 硬件 merge 天花板
+
+> *"SpArch: Efficient Architecture for Sparse Matrix Multiplication"*
+> ISCA 2019。
+
+- 专用 ASIC 加速器,用**层次化二路归并树**(merge tree)合并中间项。
+- 跟我们的区别:SpArch 是 2-way 逐层归并(硬件),我们是 k-way 扁平归并(GPU 软件)。
+- 定位:merge 在硬件上的天花板参考。
+
+### 2.4 NSparse(Nagasaka et al., 2017)—— merge-preprocessing
+
+- GPU SpGEMM 库,**开源**(GitHub: https://github.com/EBD-CREST/nsparse)。
+- 使用 merge-preprocessing 节省内存(不是 numeric 阶段用 merge,是预处理阶段)。
+- 后续被 hash-based 方法(NSPARSE 的 hash 变体)取代。
+- 可作为 baseline 直接跑。
+
+---
+
+## 三、我们的工作的定位(诚实)
+
+### 3.1 不能说的(已被 prior art 覆盖)
+
+| 声明 | 状态 | Prior art |
+|---|---|---|
+| "GPU 上第一个 merge-based SpGEMM" | ❌ **不能说** | RMerge (2015) |
+| "warp shuffle k-way merge 是我们的原创" | ❌ **不能说** | NPC'18 reg-merge(同算法) |
+| "GPU merge-based SpGEMM 是文献空白" | ❌ **不能说** | RMerge / NPC'18 / NSparse |
+
+### 3.2 可以说的(有价值的贡献)
+
+| 声明 | 状态 | 理由 |
+|---|---|---|
+| "col-bucket merge(列域分桶 + lower_bound 二分定位)是新的" | ✅ **可能是原创** | NPC'18 / RMerge 都没做列域分桶;merge3 的 bucket_count + binary search + 精确分配结构未见先例 |
+| "在现代 GPU(H100)上重新审视 merge vs hash" | ✅ **有价值** | NPC'18 是 P100(2016);没有跟 Ocean/cuSPARSE 11.x 对比 |
+| "定量分析了 merge 在大规模上的串行链瓶颈" | ✅ **有价值** | 前人没有量化 merge vs hash 的 crossover 点(在什么矩阵规模下 merge 输给 hash) |
+| "merge3 的 bucket_count 占 35-40% 是精确分配的代价" | ✅ **新发现** | 揭示了 merge 结构的内在开销 |
+
+### 3.3 论文定位建议
+
+```
+Title 方向:
+  "Revisiting Merge-based SpGEMM on Modern GPUs:
+   Performance Boundaries vs Hash-based Approaches"
+
+Related Work 结构:
+  ① Gustavson (1978) —— SpGEMM 起源,SPA accumulator
+  ② RMerge (Gremse 2015) —— GPU merge 鼻祖
+  ③ Register-Aware (NPC'18) —— reg-merge(我们 merge2 的前身);提出 sort/merge/hash 三选一
+  ④ SpArch (ISCA'19) —— 硬件 merge 天花板
+  ⑤ spECK / Ocean / cuSPARSE 11.x —— hash SOTA(我们对比的 baseline)
+  ⑥ Spada (ASPLOS'23) —— adaptive hash(自适应路线)
+
+我们的贡献:
+  ① 在 H100 上实现 warp k-way merge(merge2)和 col-bucket merge(merge3)
+  ② 与 hash SOTA(Ocean)进行严格 head-to-head 对比(同 GPU / 同数据 / compute-only)
+  ③ 定量揭示 merge 的串行链瓶颈 vs hash 的无序并行优势
+  ④ 提出 col-bucket merge(列域分桶 + binary search)—— 前人未做的 merge 变体
+  ⑤ 量化 crossover 点:什么矩阵特征下 merge 赢、何时 hash 赢
+```
+
+---
+
+## 四、必须引用的论文清单
+
+| # | 论文 | 引用理由 | 链接 |
+|---|---|---|---|
+| 1 | Gustavson (1978) | SpGEMM 起源 | ACM TOMS |
+| 2 | **RMerge (Gremse et al., SISC 2015)** | **GPU merge 鼻祖** | DOI: 10.1137/140968813 |
+| 3 | **Register-Aware (Liu et al., NPC'18)** | **reg-merge = 我们 merge2 的前身** | https://pacman.cs.tsinghua.edu.cn/npc2018/papers/register-aware.pdf |
+| 4 | RMerge extended (Gremse et al., SISC 2018) | memory-efficient merge | DOI: 10.1137/17M1117651 |
+| 5 | SpArch (Zhang et al., ISCA'19) | 硬件 merge 天花板 | DOI: 10.1145/3329738 |
+| 6 | NSparse (Nagasaka et al., ICPP'17) | merge-preprocessing GPU SpGEMM | DOI: 10.1109/ICPP.2017.20 |
+| 7 | spECK (Anh et al., ICS'16 / TPDS'21) | hash SPA baseline | DOI: 10.1145/2925426 |
+| 8 | Ocean | hash SOTA(我们的对照) | (查具体引用) |
+| 9 | cuSPARSE 11.x | 库 baseline | NVIDIA docs |
+| 10 | Spada (ASPLOS'23) | adaptive hash | DOI: 10.1145/3582016 |
+
+---
+
+## 五、可跑的开源 baseline
+
+| 库 | 方法 | GitHub |
+|---|---|---|
+| RMerge | merge(Gremse 2015) | 查作者主页 / SISC 补充材料 |
+| NSparse | merge-preprocessing + hash(Nagasaka) | https://github.com/EBD-CREST/nsparse |
+| bhSPARSE | sort(Liu & Vinter 2014) | https://github.com/bhSPARSE |
+| Ocean | hash + binning | (我们已有 binary) |
+
+→ 建议跑 **RMerge** 和 **NSparse** 作为 merge-based baseline,与我们的 merge2/merge3 形成 merge 内部对比。
+
+---
+
+## 六、NPC'18 reg-merge 原文要点(详细记录)
+
+### 论文信息
+- 作者:Junhong Liu, Xin He, Weifeng Liu (NTNU), Guangming Tan (ICT CAS)
+- 发表:NPC 2018(Network and Parallel Computing)
+- GPU:Nvidia Pascal P100(3584 cores, 16GB HBM2),CUDA 8.0
+- 测试:205 个 SuiteSparse 矩阵(C=A²,中间项 ≤512 的行)
+
+### reg-merge 的 5 步(原文 Section 3.2,Figure 6)
+
+```
+Step 1: 从 global memory 载入数据到 shared memory
+Step 2: 每 thread 从 shared memory 装入自己的 register vector(列索引)
+        - thread 0 得 {3,1,0},thread 1 得 {0,3}(原文例子)
+Step 3: 每 thread 做 intra-thread min(col0, col1) → intra_min(私有最小列)
+        + 取对应 scaled value → intra_val
+Step 4: inter-thread min(intra_min) → 用 shuffle 指令 → 全 warp 最小列 min
+        + 存对应 value
+Step 5: inter-sum(value) → 用 shuffle 指令 → warp 求和 → 输出一个 C 元素
+        循环 Step 3-5 直到所有链耗尽
+```
+
+### reg-merge vs 原始 RMerge(原文 Figure 5)
+
+原始 RMerge 的 merge(NPC'18 称之为 "original merge implementation"):
+- 也有 min(col) + sum 的循环结构。
+- 但**在 shared memory 中做**(不是 register),且需要先分子矩阵(expensive preprocessing)。
+- reg-merge 的改进:**消除分子矩阵阶段,全部在 register + shuffle 做**。
+
+### 三种 accumulator 的 speedup(NPC'18 实验结论)
+
+| 方法 | vs 原始库 | kernel speedup |
+|---|---|---|
+| reg-sort | vs bhSPARSE | 2.0× avg(最高 5.4×) |
+| **reg-merge** | **vs RMerge** | **2.6× avg(最高 10.5×)** |
+| reg-hash | vs NSPARSE | 1.7× avg(最高 5.2×) |
+
+- reg-merge 的 kernel speedup 最高(10.5×),因为消除了 RMerge 的分子矩阵开销。
+- 但论文**没有说 merge 整体最快** —— 三种各有适用场景,论文推荐按矩阵特征自适应选择。
+
+### register vector 大小(原文 Section 3.4)
+
+- reg-sort / reg-hash:每 thread register vector size = 8
+- reg-merge:每 thread register vector size = **2, 4, 8, 16 或 32**(取决于 A 的行长度)
+- 只处理中间项 ≤512 的行(register 约束);更大的行在 global memory 做。
+
+### 原文的结论倾向
+
+- "reg-sort and reg-merge is almost constantly better than the original method"
+- "reg-hash is not always better than the original one"(因为某些矩阵 hash 已有好的负载均衡)
+- 论文没有明确推荐 merge > hash 或 hash > merge —— 它们是互补的(按矩阵特征选)。
+- 未来工作:"explore the relationship between the features of sparse matrices and the three different sparse accumulators" → 自适应。
+
+---
+
+## 七、对项目的影响总结(修订)
+
+1. **merge2(warp k-way shuffle merge)不是新算法** —— NPC'18 的 reg-merge 已做(同算法,P100)。
+2. **merge3(col-bucket + binary search)可能是新设计** —— 但**必须先读 PACT'25 全文**确认其方法不重叠。
+3. **在 H100 上对比 hash SOTA(Ocean)是新的** —— NPC'18 只有 P100;PACT'25 是否对比 Ocean 未知(待确认)。
+4. **定量分析 merge 的串行链瓶颈是新的** —— bucket_count 35-40%、串行链 vs hash 无序并行的量化。
+5. **PACT'25 是同期工作** —— 必须引用并讨论;不能声称"首个"或"唯一"。
+6. **如果发论文**:必须引用 RMerge + NPC'18 + SpArch + **PACT'25**;定位为「col-bucket merge + merge vs hash SOTA 严格对比 + 串行链定量 profiling」。
+
+---
+
+## 八、2019-2025 文献检索(修订版):5 年空窗 + PACT'25 重新探索
+
+> 检索日期:2026-07-20
+> 检索范围(扩大后):SC / PPoPP / ASPLOS / ISCA / **PACT** / HPCA / ICS / USENIX ATC / arXiv / ACM DL / IEEE Xplore / ResearchGate
+> 关键词:"SpGEMM merge GPU" / "sparse matrix multiplication merge accumulator" / "k-way merge sorted columns GPU" / "multiway merge partitioning"
+> 结论:**2019-2024 确实没有 merge-based GPU SpGEMM(5 年空窗)。但 2025 年 PACT 上有一篇 Multiway Merge Partitioning —— merge 在 GPU 上重新被探索。**
+
+### 8.1 ⚠️ PACT 2025:Multiway Merge Partitioning(之前遗漏,最重要的 prior art)
+
+> *"Multiway Merge Partitioning for Sparse-Sparse Matrix Multiplication on GPUs"*
+> Eric Lorimer, Ruobing Han, Sung Ha Kang, **Hyesoon Kim** (Georgia Institute of Technology)
+> PACT 2025(Session 3: GPU Algorithms for Irregular Workloads, 11 月 4 日)
+> [IEEE CS DL](https://www.computer.org/csdl/proceedings-article/pact/2025/829500a160/2cuFE7q33Es) | [PACT'25 Program](https://pact2025.github.io/program/)
+
+**摘要片段**:"We demonstrate an SpGEMM implementation on GPUs which perfectly partitions the partial products into equal-size blocks where each block maps to disjoint sets"
+
+**关键信息**:
+- **Hyesoon Kim 组**(Georgia Tech,GPU 架构领域知名实验室)。
+- **直接用 merge 做 SpGEMM 的 GPU 论文** —— 不是 hash,不是 sort,是 merge。
+- **"Multiway Merge Partitioning"** —— 对 partial products 做 multiway merge + 分区(partition into equal-size blocks)。
+- **与我们工作的关系**:**必须深度对比**。它的"partition into equal-size blocks"可能跟我们的 merge3(col-bucket)或 merge-path 思路相关。需要读全文确认。
+- **论文全文暂不可读**(IEEE CS DL 付费墙,arXiv 预印本未找到)。
+
+**⚠️ 必须行动**:获取全文,理解其 merge 方式(是 k-way merge of sorted lists?还是 merge-path partitioning for load balance?还是别的?),与我们的 merge2/merge3 对比。
+
+### 8.2 2019-2025 SpGEMM GPU 论文全览(扩大搜索后)
+
+| 年份 | 论文 | 会议/期刊 | 方法 | 用 merge 累加器? | 链接 |
+|---|---|---|---|---|---|
+| 2019 | AC-SpGEMM (Winter et al.) | [ACM](https://dl.acm.org/doi/10.1145/3293883.3295701) | hash + merge-path(负载均衡) | ❌ | 68 引用 |
+| 2021 | Gamma (Zhang et al.) | [ASPLOS'21](https://d1qx31qr3h6wln.cloudfront.net/publications/ASPLOS_2021_GAMMA.pdf) | Gustavson **硬件加速器** | ❌ | 221 引用 |
+| 2021 | spECK (Anh et al.) | TPDS | hash SPA | ❌ | |
+| 2023 | Spada (Li et al.) | [ASPLOS'23](https://people.iiis.tsinghua.edu.cn/~gaomy/pubs/spada.asplos23.pdf) | adaptive dataflow(**硬件加速器**) | ❌ | 78 引用 |
+| 2024 | Ocean | arXiv | hash + binning | ❌ | 我们的 SOTA 对照 |
+| 2025 | MH-SpGEMM | [ResearchGate](https://www.researchgate.net/publication/399217530_MH-SpGEMM) | masking + hash | ❌ | |
+| 2025 | Multi-GPU NSparse | [Wiley](https://www.research.unipd.it/retrieve/baab0f3d-ea71-4fa9-8076-49618c2629c1/Concurrency%2520and%2520Computation%2520-%25202025%2520-%2520Mavliutov%2520-%2520Multi%2520GPU%2520Sparse%2520Matrix%2520by%2520Sparse%2520Matrix%2520Multiplication.pdf) | NSparse + hash | ❌ | |
+| 2025 | MAGNUS | [ACM](https://dl.acm.org/doi/10.1145/3721145.3725773) | data locality(**CPU**,非 GPU) | ❌ | |
+| 2025 | Acc-SpMM | [arXiv](https://arxiv.org/html/2512.12036v1) | hash multi-phase | ❌ | |
+| 2025 | Optimizing SpGEMM | [ACM](https://dl.acm.org/doi/10.1145/3774654) | hash(load factor 优化) | ❌ | |
+| 2025 | Libra | [arXiv](https://arxiv.org/html/2506.22714v1) | CUDA + Tensor Core 异构 | ❌ | |
+| 2025 | GeneralSparse | [USENIX ATC'25](https://www.usenix.org/system/files/atc25-wang-yaoyu.pdf) | hierarchical reduction(SpMM) | ❌ | |
+| **2025** | **Multiway Merge Partitioning** | **[PACT'25](https://www.computer.org/csdl/proceedings-article/pact/2025/829500a160/2cuFE7q33Es)** | **multiway merge(SpGEMM)** | **✅ ← 唯一** | Georgia Tech |
+
+### 8.3 容易混淆的「假 merge」(修正版)
+
+| 论文 | 提到 merge? | 实际是什么 |
+|---|---|---|
+| AC-SpGEMM (2019) | "merge path" | **Merge Path 算法用于负载均衡**(把行分到线程),不是 k-way merge 累加器;累加器是 hash |
+| merge-spmm (Berkeley, Euro-Par 2018) | "merge-based" | **SpMM(sparse × dense)**,不是 SpGEMM;用 merge 做负载均衡 |
+| Gamma (ASPLOS'21) | Gustavson | **硬件加速器**(不是 GPU 软件);Gustavson 用 SPA(hash 类),不是 merge |
+| Spada (ASPLOS'23) | adaptive | **硬件加速器**的 dataflow 自适应,不涉及 merge/hash 累加器选择 |
+| MAGNUS (2025) | data locality | **CPU** 算法(不是 GPU);data locality 优化,不是 merge 累加器 |
+
+### 8.4 修正后的完整时间线
+
+```
+2015  RMerge (Gremse, SISC)              ← GPU merge 鼻祖
+2017  NSparse (Nagasaka, ICPP)           ← merge-preprocessing + hash
+2018  NPC'18 reg-merge (Liu)             ← shuffle k-way merge(= 我们的 merge2)
+2018  RMerge extended (Gremse, SISC)     ← RMerge 期刊版
+╔══════════════════════════════════════════════════════════════╗
+║  2019-2024:5 年空窗 —— GPU SpGEMM 领域全转 hash              ║
+║  (spECK/Gamma/Ocean/Spada/AC-SpGEMM 全是 hash 或硬件)       ║
+╚══════════════════════════════════════════════════════════════╝
+2025  PACT'25 Multiway Merge Partitioning ← merge 重新被探索(Georgia Tech)
+2026  本项目 merge2/merge3                ← 需与 PACT'25 对比
+```
+
+### 8.5 为什么 merge 在 GPU 上被搁置 5 年(2019-2024)?
+
+从文献演进看,原因清晰:
+1. **hash 天然并行** —— 每个中间项 O(1) 独立插入,完美匹配 GPU 的大规模并行。merge 有串行链(按输出有序)。
+2. **cuSPARSE 11.x 选了 hash** —— NVIDIA 官方库的路线选择带动了整个社区。
+3. **NPC'18 自己推荐 hash** —— 虽然 reg-merge 比 RMerge 快 2.6×,但论文结论倾向 hash。
+4. **大矩阵上 hash 明显赢** —— 实际应用(图分析、AMG)的矩阵越来越大,hash 的规模优势越来越明显。
+
+### 8.6 PACT'25 为什么重新探索 merge?
+
+推测原因(需读全文确认):
+1. **现代 GPU(H100/A100)的硬件能力提升** —— 更多 SM、更大 shared mem、更快的 shuffle → merge 的串行链瓶颈可能缓解。
+2. **hash 的固有缺陷** —— hash 碰撞、hash 表内存开销、不可预测的访存模式。merge 有确定性的访存和零碰撞。
+3. **负载均衡新思路** —— "Multiway Merge Partitioning" 的 "partition into equal-size blocks" 可能是一种新的负载均衡方法,解决了 merge 的另一个痛点(不均匀工作负载)。
+
+### 8.7 对我们工作的影响(修正后的诚实定位)
+
+1. **不能说「7 年真空期首个 merge 工作」** —— PACT'25 先于我们(2025 vs 2026)。
+2. **可以说的**:
+   - 我们**独立地**在 H100 上探索了 merge-based SpGEMM(与 PACT'25 大致同期)。
+   - 我们提出 **col-bucket merge(列域分桶 + lower_bound 二分)** —— 如果 PACT'25 的方法不同,这仍是我们的贡献。
+   - 我们提供了 **merge vs hash(Ocean)的严格 head-to-head 对比** —— 如果 PACT'25 没跟 Ocean 对比,这是我们的独特价值。
+3. **必须做的**:
+   - **获取 PACT'25 全文**,理解其 "Multiway Merge Partitioning" 的具体算法。
+   - 与我们的 merge2 / merge3 对比异同。
+   - 在论文中引用并讨论。
+
+### 8.8 修正后的论文定位
+
+> ~~"7 年真空期后首个在 modern GPU 上重新审视 merge-based SpGEMM"~~ ← 已过时
+>
+> ✅ **修正版**:
+> *"我们在 H100 GPU 上独立探索 merge-based SpGEMM,提出 col-bucket merge 新变体(列域分桶 + 二分定位),并与当前 hash-based SOTA(Ocean)进行严格 head-to-head 对比。同期工作(PACT'25 Multiway Merge Partitioning)也重新探索了 GPU merge SpGEMM,我们讨论两者方法的异同。我们的贡献在于:① col-bucket merge 新设计;② merge vs hash SOTA 的定量 crossover 分析;③ merge 串行链瓶颈的定量 profiling。"*
+
+### 8.9 待办(PACT'25 相关)
+
+- [ ] 获取 PACT'25 全文(联系作者 / IEEE CS DL / 会议参会)
+- [ ] 理解其 "Multiway Merge Partitioning" 算法细节
+- [ ] 对比与 merge2(warp k-way shuffle merge)的异同
+- [ ] 对比与 merge3(col-bucket + binary search)的异同
+- [ ] 检查其是否对比了 hash SOTA(Ocean/cuSPARSE 11.x)
+- [ ] 在论文 related work 中引用并讨论

@@ -392,12 +392,12 @@ def main():
     df.to_csv(OUT_CSV, index=False)
     print(f"写出 {OUT_CSV}\n")
 
-    # ---- 每矩阵明细(compute-only):cuBLAS / Ocean / gust(ESC) / mrgP(merge2) / m3(merge3) + vs Ocean ----
-    print("=" * 104)
-    print("[compute-only:稀疏法=各阶段求和去 h2d/d2h;cuBLAS=sgemm kernel;Ocean=GPU 阶段求和]  ms")
+    # ---- 每矩阵明细(compute-only):cuSPARSE / Ocean / gust(ESC) / mrgP(merge2) / m3(merge3) + 比值 ----
+    print("=" * 116)
+    print("[compute-only:稀疏法=各阶段求和去 h2d/d2h;Ocean=GPU 阶段求和]  ms")
     print(f"{'class':<4} {'name':<22}{'n':>7}"
-          f"{'cuBLAS':>9}{'Ocean':>8}{'gust':>7}{'mrgP':>7}{'m3':>7}{'mP/Oce':>8}{'m3/Oce':>8}")
-    print("-" * 104)
+          f"{'cuSP':>8}{'Ocean':>8}{'gust':>7}{'mrgP':>7}{'m3':>7}{'mP/Oce':>8}{'m3/cu':>7}{'m3/Oce':>8}")
+    print("-" * 116)
     for _, r in df.iterrows():
         def f(v, w=8, p=False):
             if pd.isna(v): return "  --".rjust(w)
@@ -406,18 +406,20 @@ def main():
             return (a / b) if (pd.notna(a) and pd.notna(b) and b > 0) else np.nan
         mp = r['merge2_compute_t']
         m3 = r['merge3_compute_t']
+        cu = r['cu_compute_t']
         r_oce_p = rr(mp, r['ocean_ms'])
+        r_cu_3   = rr(m3, cu)
         r_oce_3 = rr(m3, r['ocean_ms'])
         print(f"{str(r['class'])[:4]:<4} {r['name']:<22}{f(r['n'],7)}"
-              f"{f(r['cublas_ms'],9,'t')}{f(r['ocean_ms'],8,'t')}{f(r['man_compute_t'],7,'t')}{f(mp,7,'t')}{f(m3,7,'t')}"
-              f"{f(r_oce_p,8,'t')}{f(r_oce_3,8,'t')}")
+              f"{f(cu,8,'t')}{f(r['ocean_ms'],8,'t')}{f(r['man_compute_t'],7,'t')}{f(mp,7,'t')}{f(m3,7,'t')}"
+              f"{f(r_oce_p,8,'t')}{f(r_cu_3,7,'t')}{f(r_oce_3,8,'t')}")
 
     # ---- 按类别聚合(compute-only)----
-    print("\n" + "=" * 104)
+    print("\n" + "=" * 116)
     print("按类别聚合(compute-only 均值,毫秒)")
-    print("-" * 104)
+    print("-" * 116)
     print(f"{'class':<18}{'#':>3}{'cuBLAS':>10}{'Ocean':>8}{'cuSPARSE':>10}{'gust(ESC)':>10}{'mrg(ser)':>9}{'mrgP':>8}{'mrg3':>8}"
-          f"{'par/Oce':>8}{'m3/Oce':>8}")
+          f"{'par/Oce':>8}{'m3/cu':>7}{'m3/Oce':>8}")
     def g(s, w, dec=1):
         v = s.mean()
         return "--".rjust(w) if np.isnan(v) else f"{v:.{dec}f}".rjust(w)
@@ -431,12 +433,14 @@ def main():
             continue
         mp = s['merge2_compute_t']
         m3 = s['merge3_compute_t']
+        cu = s['cu_compute_t']
         r_oce_p = gm(mp / s['ocean_ms'])
+        r_cu_3   = gm(m3 / cu)
         r_oce_3 = gm(m3 / s['ocean_ms'])
         print(f"{c:<18}{len(s):>3}"
               f"{g(s['cublas_ms'],10)}{g(s['ocean_ms'],8)}{g(s['cu_compute_t'],10)}{g(s['man_compute_t'],10)}"
               f"{g(s['merge_compute_t'],9)}{g(s['merge2_compute_t'],8)}{g(s['merge3_compute_t'],8)}"
-              f"{g(pd.Series([r_oce_p]),8,2)}{g(pd.Series([r_oce_3]),8,2)}")
+              f"{g(pd.Series([r_oce_p]),8,2)}{g(pd.Series([r_cu_3]),7,2)}{g(pd.Series([r_oce_3]),8,2)}")
 
     charts(df)
     phase_breakdown(df)
