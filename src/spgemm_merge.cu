@@ -635,7 +635,7 @@ void spgemm_self_product_merge3(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
-    const int K = 4;   // 每行列域分桶数(可调;大→并行度高、开销大)
+    const int K = 5;   // 每行列域分桶数(可调;大→并行度高、开销大)
     dbg("[mrg3] start (K=%d)\n", K);
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
@@ -658,6 +658,7 @@ void spgemm_self_product_merge3(
         int nn = h_row_ptr[i + 1] - h_row_ptr[i];
         if (nn > max_row_nnz) max_row_nnz = nn;
     }
+    //根据最长的可能子链来分配空间
     size_t smem_count = (size_t)max_row_nnz * 2 * sizeof(int);
     size_t smem_merge = (size_t)max_row_nnz * 3 * sizeof(int);
     if (smem_merge > 48 * 1024) {
