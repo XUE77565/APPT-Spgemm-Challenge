@@ -102,36 +102,79 @@
 - 三种口径数字差大(par/Ocean:①几何 1.225× / ②算术 1.53× / ③总和比 1.80×;par/cuBLAS ①1.55× vs ③0.01× 极端)。
 - 含义:① = 「典型矩阵等权」(对 par 偏乐观,小矩阵稀释大矩阵劣势);③ = 「总吞吐/总时间」(大矩阵主导,对 par 更严苛)。两者都说 par 慢于 Ocean,幅度不同(22% vs 80%)。
 
+## 阶段 6:分桶 merge(merge3)+ 自适应探索 + hash/merge 融合讨论
+
+### merge3:列域分桶 col-bucketing(保留,主力 merge 变体)
+- **思路**:每行把列域 `[0, A_cols)` 切 K=4 个连续桶,每 `(row, bucket)` 一个 warp block。block 用 `dev_lower_bound`(二分)定位每条有序链在该桶的子区间 `[blo, bhi)`,然后 warp-merge 该子区间。桶间按序拼接 = 全局有序 CSR。
+- **三阶段**(精确分配,无 compact):`bucket_count`(每桶 count distinct 列,= 一趟完整 merge-count)→ `bucket_scan`(行内前缀和 → bucket_off + row_nnz)→ `bucket_merge`(每桶 warp-merge 写精确位置)。
+- **正确性**:全 100 矩阵 nnz 与 cu/ESC/merge2 完全一致。
+- **效果**:merge3 vs Ocean **赢 62 / 输 38,几何均值 1.005×(基本打平)**。比 merge2(赢 37/输 63, geo 1.37×)改善明显 —— 分桶切短了重行串行链(bp_* 从 5×→3×)。
+- **大矩阵退化**:bcsstk30 merge3 16.3ms vs merge2 11ms(更慢)—— 均匀分桶给所有行 4 块 = 纯开销。
+
+### merge3 瓶颈 profiling
+- **bucket_count(35-40%)** = #1 瓶颈:为了精确分配,白跑了一趟完整 merge 来数 nnz(merge2 用 count_intermediates 只加 nnz,不做 merge,所以没这开销)。
+- **bucket_merge(47-59%)** = 算法本体(串行链),跟 merge2 的 merge 一样、不可消除。
+- scan/compact/pack = 可忽略(compact = 0,精确分配)。
+- bcsstk30 上 merge3 比 merge2 慢 5.2ms,全部来自 bucket_count。
+
+### 自适应探索(merge4/5/6/7 → 已回退,保留教训)
+- **merge4**(自适应 bucket + merge2 结构):绝对阈值(THRESH=128)→ 大矩阵也被标记重行 → 开销。回退。
+- **merge5**(精确分配自适应):轻行 exact count + exact merge(两趟)→ exact count = 一趟 merge 的代价,轻行双倍工作量。回退。
+- **merge6**(自适应 bucket + 相对阈值 CREL×均值):大矩阵无重行 → 退化为 merge2(不退化)✓;但重行帮助有限(bp_200 1.04 vs merge2 1.20),不如 merge3(0.79)。原因:merge2 结构(count_intermediates + compact + 多 launch)的固定开销。
+- **merge7**(自适应 multiwarp + 相对阈值):重行用 256 线程协作 merge(加 warp 不切链)。效果 ≈ merge6(略差)。回退。
+- **教训**:① 自适应要避免 merge2 结构的 compact/多 launch 开销;② 多 warp 只加速每步、不切链(不如分桶);③ 轻行最优解是 merge2 的融合单遍(exact count 会双倍工作量);④ 所有自适应都不如 merge3(均匀分桶)在 straggler 上的效果。
+
+### hash/merge 融合讨论(算法层面)
+- **能否融合?** 能。最自然的融合 = 「列分区(merge3 的桶)+ 桶内 hash scatter(hash)」= 消除桶内串行链 + 保留有序性。但这个融合 ≈ Ocean 已在做的(hash + binning)。
+- **merge3 离融合一步之遥**:把桶内 warp-merge 换成 hash-scatter → 收敛到 Ocean。
+- **更深的融合 = 自适应**(稀疏桶用 merge,稠密桶用 hash/dense)= spECK/Spada/Ocean 的路线。
+- **结论**:merge 路线(纯 merge → 分桶 → 桶内换 hash → 自适应 hash)自然收敛到 SOTA。
+
+### SpGEMM 算法演进(文献定位)
+- 第一代:ESC(sort)→ 已淘汰(sort 是瓶颈,CUB radix 已到顶)。
+- 第二代:hash SPA(spECK)→ O(中间项)全并行,无串行链。
+- 第三代(当前 SOTA):adaptive hash + symbolic(HLL)+ dense(Ocean/cuSPARSE 11.x/Spada)。
+- **merge 是第三条路**(利用 CSR 有序,GPU 上冷门):小矩阵赢(低开销),大矩阵输 hash(串行链)。
+
+### profile_aa.py 更新
+- 加 `mrg3` tag 解析 / `merge3_time` / `merge3_compute_t` / `merge3_cnnz`(cols + 表)。
+- 逐矩阵表 + 类别表 + 分阶段表 + 柱状图(7 法:cuBLAS/Ocean/cuSPARSE/ESC/merge-ser/merge-par/merge3)。
+- **新 `print_lose_ocean(df)`**:自动输出 merge2/merge3 输给 Ocean 的 case 列表(按比值降序)。
+
+### 当前管线状态(回退 merge6/7 后)
+- `spgemm_test`:5 法 —— cuSPARSE / ESC / merge(串行) / merge2(并行 warp) / merge3(分桶)。
+- `profile_aa.py`:解析以上 5 法 + cuBLAS + Ocean(7 方法柱状图 + 输 Ocean 的 case 列表)。
+- merge6/7 代码留在 `spgemm_merge.cu` 作死代码(编译无碍,不影响)。
+
 ## 工具链(本 session 新增/扩展)
 
-- **`profile_aa.py`**:从 cu+gust 两法扩到 **4 法**(加 `merge`/`mrg2` tag、Time/nnz 解析、列、阶段映射);merge 的 merge 阶段映到「排序」列与 gust.sort 直接对照。
+- **`profile_aa.py`**:解析 **5 法**(cu/gust/merge/mrg2/mrg3)+ cuBLAS + Ocean;逐矩阵表 + 类别表(含 mrg3 列)+ 分阶段表(6 法)+ **7 方法柱状图** + **`print_lose_ocean`**(输出输 Ocean 的 case);compute-only 口径;merge3 的 bucket_count/merge 映到「符号/排序」列。
 - **`analyze_merge.py`**(新):merge 专项分析,出 3 图(scatter / speedup / winloss),**输出到 `compare/merge_vs_esc_<时间戳>/`**(自包含:图 + 源 CSV),每次运行新建文件夹。
-- **`main.cu`**:warmup + T4b(merge serial)+ T4c(merge2 par)计时块。
+- **`main.cu`**:warmup + T4b(merge serial)+ T4c(merge2 par)+ T4d(merge3 bucket)计时块。
 - `compare/` 约定:不同 compare 对象各占一个子文件夹(v1 归档 `compare/merge_serial_v1_2026-07-16/`、v2 当前 `compare/merge_vs_esc_<ts>/`,与既有 ocean_compute_only 等一致)。
 
 ## 产物清单
 
-- 代码:`src/spgemm_merge.cu`(v1+v2)、`src/main.cu`、`include/spgemm.h`、`Makefile`、`suitesparse_crawl/profile_aa.py`(含 6 法 `chart_methods_bar`)、`suitesparse_crawl/analyze_merge.py`、`suitesparse_crawl/baseline_cublas.py`(ctypes cuBLAS)、`suitesparse_crawl/baseline_ocean.py`(Ocean 阶段求和)、`scripts/run_full_compare.sh`(终极 6 法一键)、`USAGE.md`。
+- 代码:`src/spgemm_merge.cu`(merge serial + merge2 warp + **merge3 bucket** + merge6/7 死代码)、`src/main.cu`(5 法:cu/ESC/mrg/mrgP/merge3)、`include/spgemm.h`、`Makefile`、`suitesparse_crawl/profile_aa.py`(含 7 法 `chart_methods_bar` + `print_lose_ocean`)、`suitesparse_crawl/analyze_merge.py`、`suitesparse_crawl/baseline_cublas.py`、`suitesparse_crawl/baseline_ocean.py`、`scripts/run_full_compare.sh`、`USAGE.md`。
 - worklog:`merge_serial_v1_2026-07-16.md`、`merge_parallel_v2_2026-07-16.md`、本文件。
-- 数据:`results/aa/first100_aa/log/*.log`(100,含 `[merge]`/`[mrg2]` 桩)、`suitesparse_crawl/profile_aa{,_summary}.csv`、`baseline_cublas.csv`、`baseline_ocean.csv`。
+- 数据:`results/aa/first100_aa/log/*.log`(100,含 `[merge]`/`[mrg2]`/`[mrg3]` 桩)、`suitesparse_crawl/profile_aa{,_summary}.csv`、`baseline_cublas.csv`、`baseline_ocean.csv`。
 - 图:`compare/full_compare_<ts>/`(终极 6 法:日志 + `profile_methods_bar.png` 6 法柱状图 + 各 baseline CSV)、`compare/merge_vs_esc_<ts>/`(merge 专项)、`suitesparse_crawl/charts/profile_methods_bar.png`、`profile_aa.png`。
 
 ## 复现
 
 ```bash
-# 终极一键(6 法 + 日志 + 柱状图 → compare/full_compare_<ts>/):
+# 终极一键(7 法 + 日志 + 柱状图 + 输 Ocean case → compare/full_compare_<ts>/):
 bash scripts/run_full_compare.sh
 # 分步:
-make                                                  # 编译(4 法)
-USE_MEMPOOL=1 bash scripts/run_aa.sh                  # 全 100 矩阵(开 arena,d2h 干净;作准)
-.venv/bin/python suitesparse_crawl/profile_aa.py      # 分阶段 + 汇总(4 法,含 par/cu 列)
-.venv/bin/python suitesparse_crawl/analyze_merge.py   # → compare/merge_vs_esc_<ts>/(含 par vs cu)
+make                                                  # 编译(5 C 法)
+USE_MEMPOOL=1 bash scripts/run_aa.sh                  # 全 100 矩阵(开 arena)
+.venv/bin/python suitesparse_crawl/profile_aa.py      # 分阶段 + 汇总(5 法 + cuBLAS + Ocean,含输 Ocean case)
 ```
 
 ## 下一步候选
 
-- **追平 Ocean(最难)**:大矩阵上 k-way merge 算法层面难赢 hash(Ocean geo 1.225×、总时间 1.80× 领先 par)。路径:① Tier 1(shared 缓存段头)+ 更激进并行压 merge kernel;② 大矩阵改用 hash 累加器思路(本质换路线);③ 重行 hash 化/拆行治 bp_*+bcsstk08。
-- **严谨性升级**:C 法计时从单次改成「3 warmup + N(如10)timed 取 **min**」(main.cu),与 Ocean 同等迭代且用 min 比 Ocean 的 mean 更压长尾 → 消除 par ~6% 单次抖动。
-- **双口径报表**:日志/图同时报 ①几何均值 + ③总和比(ΣA/ΣB),两个视角都给(par/Ocean 1.225× vs 1.80× 都显示)。
-- **自适应派发**(方向 B):小矩阵走 sort、中大走 merge/hash,理论全矩阵不输 ESC/cuSPARSE。
-- **小矩阵固定开销**:par 的 6 段 pipeline(count/scan/merge/compact/final/pack)在小/对角矩阵上输 Ocean 的 launch/sync → 融合阶段减开销。
+- **消除 merge3 的 bucket_count(35-40% 瓶颈)**:改用 count_intermediates(便宜上界)+ compact(像 merge2),省掉白跑的 merge-count → bcsstk30 预计省 6.5ms,接近 merge2。
+- **桶内换 hash**:把 merge3 桶内的 warp-merge 换成 hash-scatter(消除串行链)→ 收敛到 Ocean 路线,大矩阵有望追平。但小矩阵 hash 建表开销可能更慢。
+- **merge3 的 K 值调优**:大矩阵 K=1(退化为 merge2),只 straggler 用 K=4(= 自适应,但需解决 merge4/6 的开销教训)。
+- **严谨性升级**:C 法从单次改成「3 warmup + N timed 取 min」(实测 bcsstk30 merge3 极差仅 1%,已很稳)。
+- **转 hash 路线**:merge 走到头(分桶 + 桶内换 hash = Ocean)。若目标追平 SOTA,可直接实现 hash SpGEMM(参考 Ocean 的 binning + hash accumulator)。
