@@ -3,3 +3,7 @@
 .venv/
 /suitesparse_crawl/__pycache__
 /ocean/
+/ref/
+/external_sota/
+/worklog/
+/SOTAsummary/
