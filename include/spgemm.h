@@ -85,6 +85,21 @@ void spgemm_self_product_merge2(void *A_buffer, int A_rows, int A_cols, int A_nn
 void spgemm_self_product_merge3(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                         void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
+// C = A × A,【hash SPA】版:每行一个 SMEM hash 累加器(atomicCAS 插列 + atomicAdd 累值),
+// hash 做 dedup+sum,末尾按 (row,col) 排序成 CSR。溢出(某行 distinct>HASH_CAP)时 C_nnz=-1
+// 供上层 dispatcher 回退 merge。大/稠密阵上 hash 主场,与 merge 对照。
+void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                        void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+
+// C = A × A,【自适应 Auto】版:完整数据流 —— 分流依据 ① 规模 n ② 重行不均(max_row_nnz / skew)。
+//   hash SPA = 大阵(n>ADAPTIVE_SIZE_THR 默认 1e4) 或 重行(max_row>ADAPTIVE_HEAVY_THR 默认 128,或 skew>ADAPTIVE_SKEW_THR 默认 12);
+//   否则 merge3(中小 + 均衡)。hash 溢出回退 merge3。
+void spgemm_self_product_adaptive(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                        void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+
+// METHOD 环境变量单方法门控:null/empty/"all" → 跑全部;否则只跑匹配的方法块
+bool should_run_method(const char *key);
+
 // 三种公式对照(均为 ESC 合并;Gustavson=上面那个 manual)
 // 外积(outer, 外层=k):读 A 的列k ⊗ 行k
 void spgemm_self_product_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,
