@@ -36,7 +36,6 @@ static double env_double(const char *k, double def) {
     return def;
 }
 
-#define USE_HASH_ROW_NUM 0
 
 void spgemm_self_product_adaptive(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
@@ -57,9 +56,10 @@ void spgemm_self_product_adaptive(
 
     int    size_thr  = env_int("ADAPTIVE_SIZE_THR", 10000);    // 大阵:n > 此值(默认 1 万,taxonomy 的 L 线)
     int    heavy_thr = env_int("ADAPTIVE_HEAVY_THR", 128);     // 重行:max_row_nnz > 此值(bp_* ≈300)
+    int    small_thr = env_int("ADAPTIVE_SMALL_THR", 256);
     double skew_thr  = env_double("ADAPTIVE_SKEW_THR", 12.0);  // 极不平均:skew = max/avg > 此值(bp_* ≈60)
     int large = (A_rows > size_thr);
-    int heavy = (max_row_nnz > heavy_thr) || (skew > skew_thr);
+    int heavy = ((max_row_nnz > heavy_thr) || (skew > skew_thr)) && (A_rows > small_thr);
     int use_hash = large || heavy;
     const char *why = large ? (heavy ? "large+heavy" : "large") : (heavy ? "heavy" : "-");
     dbg("[adapt] n=%d maxrow=%d skew=%.1f → %s (%s)\n", A_rows, max_row_nnz, skew, use_hash ? "hash" : "merge3", why);

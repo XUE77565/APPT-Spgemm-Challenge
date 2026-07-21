@@ -5,6 +5,7 @@
 #include <thrust/device_ptr.h>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 // ==========================================================================
 //  hash SPA:C = A·A,每行一个 SMEM hash 累加器(atomicCAS 插列号 + atomicAdd 累值)
@@ -25,34 +26,35 @@ extern __global__ void count_intermediates_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub);
 
 #ifndef HASH_CAP
-#define HASH_CAP 8192          // 每行 SMEM hash 表最大槽位(→ col+val = 64KB/块)
+#define HASH_CAP 16384         // 重行桶 hash 表最大槽位(→ col+val = 128KB/块)
 #endif
 #define HASH_BLOCK 256
+// 按 flop(每行中间项数)分桶:轻行桶用小 hash 表 → 高 SMEM 占用率;重行桶用大表
+#define HASH_N_BUCKETS 4
 
-// 行内 SMEM hash 累加,extract 去重后的 (key=row<<32|col, val) 到 over-alloc tmp
+// 按【桶】跑:blockIdx.x = 桶内行索引,实际行号 = bucket_rows[idx];ht_size = 该桶 hash 表大小(2 的幂,全 launch 统一)。
+// binning:轻行桶用小表 → 高 SMEM 占用率;重行桶用大表;distinct>ht_size → overflow_flag(上层回退 merge3)。
 __global__ void hash_spa_kernel(
     const int *A_row_ptr, const int *A_col_idx, const float *A_val,
-    int A_rows, const int *row_off, const int *flop_ub,
+    const int *bucket_rows, int n_in_bucket, int ht_size,
+    const int *row_off,
     unsigned long long *tmp_key, float *tmp_val,
     int *row_nnz, int *overflow_flag)
 {
-    int i = blockIdx.x;
-    if (i >= A_rows) return;
+    int idx = blockIdx.x;
+    if (idx >= n_in_bucket) return;
+    int i = bucket_rows[idx];                  // 实际行号
     int tid = threadIdx.x;
-
-    int fub = flop_ub[i];
-    int ht = 64;
-    while (ht < fub && ht < HASH_CAP) ht <<= 1;     // next pow2,封顶 HASH_CAP
-    int mask = ht - 1;
+    int mask = ht_size - 1;
 
     extern __shared__ int smem[];
-    int   *sh_col = smem;                  // [ht]
-    float *sh_val = (float*)(smem + ht);   // [ht]
-    for (int s = tid; s < ht; s += HASH_BLOCK) { sh_col[s] = -1; sh_val[s] = 0.0f; }
+    int   *sh_col = smem;                      // [ht_size]
+    float *sh_val = (float*)(smem + ht_size);  // [ht_size]
+    for (int s = tid; s < ht_size; s += HASH_BLOCK) { sh_col[s] = -1; sh_val[s] = 0.0f; }
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    for (int p = rs; p < re; p++) {                 // 整块顺序遍历 k
+    for (int p = rs; p < re; p++) {                     // 整块顺序遍历 k
         int k = A_col_idx[p];
         float a_ik = A_val[p];
         int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
@@ -65,7 +67,7 @@ __global__ void hash_spa_kernel(
                 int old = atomicCAS(&sh_col[slot], -1, j);
                 if (old == -1 || old == j) { atomicAdd(&sh_val[slot], v); break; }
                 slot = (slot + 1) & mask;                            // 线性探测
-                if (++probes >= ht) { atomicExch(overflow_flag, 1); break; }   // 溢出
+                if (++probes >= ht_size) { atomicExch(overflow_flag, 1); break; }   // 溢出
             }
         }
     }
@@ -76,7 +78,7 @@ __global__ void hash_spa_kernel(
     if (tid == 0) cnt = 0;
     __syncthreads();
     int base = row_off[i];
-    for (int s = tid; s < ht; s += HASH_BLOCK) {
+    for (int s = tid; s < ht_size; s += HASH_BLOCK) {
         int c = sh_col[s];
         if (c >= 0) {
             int pos = base + atomicAdd(&cnt, 1);
@@ -139,20 +141,46 @@ void spgemm_self_product_hash(
     int total_ub; CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     dbg("[hash] count+scan (total_ub=%d)\n", total_ub);
 
-    // Stage 2: SMEM hash 累加 + extract
+    // Stage 2: 按 flop 分桶 → 每桶一个 hash kernel(hash 表大小按桶配 → 轻/重行各得合适 SMEM)
     int *d_row_nnz; CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
     int *d_overflow; CHECK_CUDA(cudaMalloc(&d_overflow, sizeof(int)));
     CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
     unsigned long long *d_tmp_key; float *d_tmp_val;
     CHECK_CUDA(cudaMalloc(&d_tmp_key, (size_t)total_ub * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_tmp_val, (size_t)total_ub * sizeof(float)));
-    size_t smem = (size_t)HASH_CAP * 2 * sizeof(int);          // col[] + val[]
-    if (smem > 48 * 1024)
-        CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem));
-    hash_spa_kernel<<<A_rows, HASH_BLOCK, smem>>>(
-        dA_rp, dA_ci, dA_val, A_rows, d_off, d_ub, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+
+    // flop_ub 拷回 host,按 ht=next_pow2(flop) 分桶(细粒度 → 无过度分配;每桶 SMEM=ht×8)
+    std::vector<int> h_ub(A_rows);
+    CHECK_CUDA(cudaMemcpy(h_ub.data(), d_ub, A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+    const int N_HT = 9;                                  // ht = 64<<i, i=0..8 → 64..16384
+    std::vector<int> bk[N_HT];
+    for (int i = 0; i < A_rows; i++) {
+        int f = h_ub[i], ht = 64;
+        while (ht < f && ht < HASH_CAP) ht <<= 1;        // next_pow2,封顶 HASH_CAP
+        int bi = 0; while ((64 << bi) < ht) bi++;        // bi = log2(ht) - 6
+        bk[bi].push_back(i);
+    }
+    {   // opt-in 最大 SMEM(HASH_CAP=16384 → 128KB)
+        size_t maxsm = (size_t)HASH_CAP * 2 * sizeof(int);
+        if (maxsm > 48 * 1024)
+            CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)maxsm));
+    }
+    int *d_bucket_rows = nullptr;
+    for (int bi = 0; bi < N_HT; bi++) {
+        int n = (int)bk[bi].size();
+        if (n == 0) continue;
+        int ht = 64 << bi;
+        CHECK_CUDA(cudaMalloc(&d_bucket_rows, (size_t)n * sizeof(int)));
+        CHECK_CUDA(cudaMemcpy(d_bucket_rows, bk[bi].data(), n * sizeof(int), cudaMemcpyHostToDevice));
+        size_t smem = (size_t)ht * 2 * sizeof(int);            // col[] + val[]
+        dbg("[hash] ht=%d: n=%d rows\n", ht, n);
+        hash_spa_kernel<<<n, HASH_BLOCK, smem>>>(
+            dA_rp, dA_ci, dA_val, d_bucket_rows, n, ht, d_off,
+            d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+        CHECK_CUDA(cudaFree(d_bucket_rows)); d_bucket_rows = nullptr;
+    }
     CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[hash] accumulate+extract\n");
+    dbg("[hash] binned accumulate+extract (ht-buckets)\n");
 
     int overflow; CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));
     if (overflow) {
