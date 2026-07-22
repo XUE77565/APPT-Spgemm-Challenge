@@ -31,10 +31,182 @@ extern __global__ void count_intermediates_kernel(
 #define HASH_BLOCK 256
 #define N_BINS 11    // 10 hash ht-buckets(ht=32<<i, i=0..9) + 1 ultra(flop≤16)
 
-// HLL(HyperLogLog)概率基数估计:替 flop_ub 定 tmp buffer 大小
-#define HLL_P 10                      // precision bits → m=1024 寄存器,误差~3%
+// HLL(HyperLogLog)概率基数估计:替 flop_ub 定 tmp buffer + hash 表大小(统一 sizing)
+// Ocean 两阶段架构:Phase1 对 B(=A 自乘)每行建 sketch(O(nnz));Phase2 对 A 每行读 B 的 sketch 做 packed merge(O(nnz))
+// 原理详见 worklog/hll_estimation_explained.md
+#define HLL_P 7                       // precision bits → m=128 寄存器(对齐 Ocean HLL_CONSTANT 表上限),误差~9.2%
 #define HLL_M (1 << HLL_P)
-#define HLL_EXPAND 2.0                // expansion(覆盖 HLL 低估;×2 → 安全)
+#define HLL_EXPAND 2.0                // expansion(覆盖 HLL 低估;×2 → 安全;溢出 → 回退 merge3 兜底)
+#define HLL_ULTRA_THR 16              // bin-snap:est≤此值 → ultrasparse(线性 kernel,CAP=32 留 2× 余量)
+#define WARP_SIZE 32
+// HLL 偏差校正 α(标准公式 0.7213/(1+1.079/m) 预算;对齐 Ocean HLL_CONSTANT[Common.h])
+constexpr double HLL_CONSTANT[8] = {0.0, 0.0, 0.0, 0.0, 0.673, 0.697, 0.709, 0.715};
+
+// MurmurHash3(Ocean MurmurHash.cuh 同款:full mix = body(c1/c2 rotl) + len + fmix32,seed=1234)
+// 替掉旧版只有 fmix32 finalizer 的弱 hash。HLL 两阶段复用此函数(SPA 累加暂仍用 Knuth 乘法,隔离测量)
+__device__ __forceinline__ unsigned int rotl32(unsigned int x, int r) { return (x << r) | (x >> (32 - r)); }
+__device__ __forceinline__ unsigned int murmur_hash3(unsigned int key) {
+    unsigned int h1 = 1234u;                       // MURMUR3_SEED
+    unsigned int c1 = 0xcc9e2d51u, c2 = 0x1b873593u;
+    unsigned int k1 = key;                         // index_t = uint32 → 单 block,len=4
+    k1 *= c1; k1 = rotl32(k1, 15); k1 *= c2;
+    h1 ^= k1; h1 = rotl32(h1, 13); h1 = h1 * 5u + 0xe6546b64u;
+    h1 ^= 4u;                                      // ^= len
+    h1 ^= h1 >> 16; h1 *= 0x85ebca6bu;             // fmix32
+    h1 ^= h1 >> 13; h1 *= 0xc2b2ae35u;
+    h1 ^= h1 >> 16;
+    return h1;
+}
+
+// ============ Phase 1: 对 B(=A)的每行建 HLL sketch(O(nnz),线性扫描) ============
+// 每个 block 处理 rows_per_block 行,线性遍历 B 的 CSR → hash(col) → atomicMax SMEM 寄存器 → 写 global
+__global__ void hll_construct_kernel(
+    const int *B_row_ptr, const int *B_col_ind,
+    int B_rows, int B_nnz,
+    unsigned char *global_hll,           // [B_rows * HLL_M] uint8 寄存器
+    int rows_per_block)
+{
+    int row_start = blockIdx.x * rows_per_block;
+    int row_end = min(row_start + rows_per_block, B_rows);
+    if (row_start >= B_rows) return;
+
+    int elem_start = B_row_ptr[row_start];
+    int elem_end = (row_end < B_rows) ? B_row_ptr[row_end] : B_nnz;
+    int num_rows = row_end - row_start;
+
+    extern __shared__ int smem_raw[];    // 共享 extern(全文件统一 int 基类型)
+    unsigned int *smem = (unsigned int*)smem_raw;    // [num_rows * HLL_M] scratch(uint32,atomicMax 用)
+    int total_items = num_rows * HLL_M;
+    for (int i = threadIdx.x; i < total_items; i += blockDim.x) smem[i] = 0;
+
+    // 行偏移表(用于判断当前元素属于哪行)
+    int *row_offsets = smem_raw + total_items;
+    for (int i = threadIdx.x; i <= num_rows; i += blockDim.x)
+        row_offsets[i] = (row_start + i < B_rows) ? B_row_ptr[row_start + i] : elem_end;
+    __syncthreads();
+
+    // 线性遍历 B 的元素(coalesced!)
+    int current_row = 0;
+    unsigned int *current_scratch = smem;
+    for (int e = elem_start + threadIdx.x; e < elem_end; e += blockDim.x) {
+        unsigned int col = (unsigned int)B_col_ind[e];
+        // 找到当前元素属于哪行
+        while (e >= row_offsets[current_row + 1]) {
+            current_row++;
+            current_scratch = smem + current_row * HLL_M;
+        }
+        unsigned int h = murmur_hash3(col);
+        int idx = h & (HLL_M - 1);                  // 低 P 位 → 寄存器索引
+        unsigned int rho = __clz(h) + 1;            // 全 32 位前导零+1(高位决定;对齐 Ocean hllAdd)
+        const unsigned int rho_max = (32 - HLL_P) + 1;
+        if (rho > rho_max) rho = rho_max;           // 高 (32-P) 位全 0 时封顶(等价旧 rest==0 分支)
+        atomicMax(&current_scratch[idx], rho);
+    }
+    __syncthreads();
+
+    // 收缩 uint32 → uint8 写回 global
+    unsigned char *global_ptr = global_hll + row_start * HLL_M;
+    for (int i = threadIdx.x; i < num_rows * HLL_M; i += blockDim.x)
+        global_ptr[i] = (unsigned char)min(smem[i], 255u);
+}
+
+// ============ Phase 2: 对 A 的每行 merge B 的 HLL sketch(O(nnz_A),packed __vmaxu4) ============
+// 每个 block 处理 A 的一行。读 A 引用的 B 行的 HLL sketch(uint8),packed 4-byte max → SMEM reduce → 估计公式
+__global__ void hll_merge_kernel(
+    const int *A_row_ptr, const int *A_col_ind,
+    int A_rows,
+    const unsigned char *b_hll,           // [B_rows * HLL_M] from Phase 1
+    int *est_nnz)                         // [A_rows] output
+{
+    int row = blockIdx.x;
+    if (row >= A_rows) return;
+    int tid = threadIdx.x;
+
+    // packed merge:每个线程维护一个 uint32 packed max(4 个 uint8 寄存器)
+    // 每次迭代读 4 个 B 行的 4 字节,做 __vmaxu4
+    constexpr int bytes_per_thread = 4;   // 每线程每次读 4 字节
+    int elements_per_iter = blockDim.x * bytes_per_thread;
+    int b_rows_per_iter = elements_per_iter / HLL_M;
+    if (b_rows_per_iter == 0) b_rows_per_iter = 1;
+
+    extern __shared__ int smem_merge_raw[];
+    unsigned char *smem_merge = (unsigned char*)smem_merge_raw;
+    for (int i = tid; i < HLL_M; i += blockDim.x) smem_merge[i] = 0;
+    __syncthreads();
+
+    int start_elem = A_row_ptr[row];
+    int end_elem = A_row_ptr[row + 1];
+
+    // packed merge:每个线程跨 B 行步进,读 4 字节做 __vmaxu4
+    int my_row_offset = tid / (blockDim.x / b_rows_per_iter);
+    int my_col_offset = bytes_per_thread * (tid % (blockDim.x / b_rows_per_iter));
+
+    unsigned int packed_max = 0;
+    for (int e = start_elem + my_row_offset; e < end_elem; e += b_rows_per_iter) {
+        int row_b = A_col_ind[e];
+        int byte_idx = row_b * HLL_M + my_col_offset;
+        // 读 4 字节(packed),__vmaxu4 4 路并行 max
+        if (byte_idx + 4 <= (row_b + 1) * HLL_M) {
+            unsigned int buf = *(const unsigned int*)(b_hll + byte_idx);
+            packed_max = __vmaxu4(packed_max, buf);
+        }
+    }
+
+    // 展开到 SMEM(uint8)
+    #pragma unroll
+    for (int i = 0; i < bytes_per_thread; i++) {
+        smem_merge[tid * bytes_per_thread + i] = (unsigned char)(packed_max & 0xFF);
+        packed_max >>= 8;
+    }
+    __syncthreads();
+
+    // 并行估计 reduce(对齐 Ocean hllMerge:for 累加 → warp shuffle → atomicAdd 跨 warp)
+    constexpr int items_padded = HLL_M < 32 ? 32 : HLL_M;   // P=7 → 128
+    constexpr double a = HLL_CONSTANT[HLL_P];               // α 校正(查表,等价 0.7213/(1+1.079/m))
+    double z = 0.0;
+    int empty_reg = 0;
+    for (int i = tid; i < items_padded; i += blockDim.x) {
+        unsigned char val = 0;
+        if (i < HLL_M) {
+            for (int j = 0; j < b_rows_per_iter; j++)        // 跨 batch 取 max(b_rows_per_iter 路写)
+                if (val < smem_merge[j * HLL_M + i]) val = smem_merge[j * HLL_M + i];
+        }
+        z += 1.0 / (double)(1ULL << val);
+        if (val == 0) empty_reg++;
+    }
+    for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {       // warp 内归约 z / empty_reg
+        z += __shfl_down_sync(0xFFFFFFFF, z, off);
+        empty_reg += __shfl_down_sync(0xFFFFFFFF, empty_reg, off);
+    }
+    __shared__ double total_z;
+    __shared__ int total_empty_reg;
+    if (tid == 0) { total_z = 0.0; total_empty_reg = 0; }
+    __syncthreads();
+    if (tid % WARP_SIZE == 0) { atomicAdd(&total_z, z); atomicAdd(&total_empty_reg, empty_reg); }
+    __syncthreads();
+
+    // HLL 估计公式(thread 0):调和平均 + 小范围 linear counting
+    if (tid == 0) {
+        z = total_z; empty_reg = total_empty_reg;
+        double E = a * (double)HLL_M * (double)HLL_M / z;
+        if (empty_reg != 0 && E <= 2.5 * HLL_M)
+            E = (double)HLL_M * log((double)HLL_M / (double)empty_reg);
+        int temp = (int)(E * HLL_EXPAND);
+        if (temp < 1) temp = 1;
+        // bin-snap(对齐 Ocean hllMerge:估计 → hash 表大小)。统一 sizing:此 est 同时定
+        //   ① tmp buffer 每行槽位(row_off = est 的 prefix sum)② hash 表大小(compute_bucket 直接读)。
+        //   ultra(temp≤HLL_ULTRA_THR)→ 线性 kernel,est 保留紧 temp;否则 snap 到 next_pow2 ∈[32,HASH_CAP]。
+        int est;
+        if (temp <= HLL_ULTRA_THR) {
+            est = temp;
+        } else {
+            int ht = 32;
+            while (ht < temp && ht < HASH_CAP) ht <<= 1;
+            est = ht;
+        }
+        est_nnz[row] = est;
+    }
+}
 
 // 按【桶】跑:blockIdx.x = 桶内行索引,实际行号 = bucket_rows[idx];ht_size = 该桶 hash 表大小(2 的幂,全 launch 统一)。
 // binning:轻行桶用小表 → 高 SMEM 占用率;重行桶用大表;distinct>ht_size → overflow_flag(上层回退 merge3)。
@@ -94,18 +266,19 @@ __global__ void hash_spa_kernel(
     if (tid == 0) row_nnz[i] = cnt;
 }
 
-// ultrasparse:flop ≤ ULTRA_THR。不建 hash,每线程一行,寄存器小数组线性去重累加
+// ultrasparse:est ≤ HLL_ULTRA_THR(HLL 估计 ≤ 16)。不建 hash,每线程一行,寄存器小数组线性去重累加
 //   (省 hash 建表/atomic/行内排序)。对应 Ocean 的 use_ultrasparse_workflow。
+//   CAP=32 给 est≤16(真 distinct ~≤16)留 2× 余量;若仍不够(HLL 低估)→ overflow_flag → 上层回退 merge3。
 __global__ void hash_ultra_kernel(
     const int *A_row_ptr, const int *A_col_idx, const float *A_val,
     const int *ultra_rows, int n_ultra,
     const int *row_off,
-    unsigned long long *tmp_key, float *tmp_val, int *row_nnz)
+    unsigned long long *tmp_key, float *tmp_val, int *row_nnz, int *overflow_flag)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n_ultra) return;
     int i = ultra_rows[idx];
-    const int CAP = 16;                          // flop≤16 → distinct≤16
+    const int CAP = 32;                          // 2× 于 HLL_ULTRA_THR,吸收 HLL 低估
     int u_col[CAP]; float u_val[CAP]; int u_cnt = 0;
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     for (int p = rs; p < re; p++) {
@@ -116,7 +289,10 @@ __global__ void hash_ultra_kernel(
             int pos = -1;
             for (int t = 0; t < u_cnt; t++) if (u_col[t] == j) { pos = t; break; }
             if (pos >= 0) u_val[pos] += v;
-            else { u_col[u_cnt] = j; u_val[u_cnt] = v; u_cnt++; }
+            else {
+                if (u_cnt >= CAP) { atomicExch(overflow_flag, 1); return; }   // 超 CAP → 回退 merge3
+                u_col[u_cnt] = j; u_val[u_cnt] = v; u_cnt++;
+            }
         }
     }
     int base = row_off[i];
@@ -195,16 +371,17 @@ __global__ void hll_estimate_kernel(
 }
 
 // ========== GPU 端分桶(Ocean 风格:无 host 往返)==========
-// 每行算 bucket_id:flop≤ULTRA_THR → ultra(bin 10);否则 ht=next_pow2(flop) → bin 0..9
+// 每行算 bucket_id:est≤HLL_ULTRA_THR → ultra(bin N_BINS-1);否则 est(已是 next_pow2)→ bin 0..9
+//   统一 sizing:bucket 直接由 HLL est 决定(不再依赖 flop_ub)
 __global__ void compute_bucket_kernel(
-    const int *flop_ub, int A_rows, int ultra_thr, int *bucket_id)
+    const int *est, int A_rows, int ultra_thr, int *bucket_id)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
-    int f = flop_ub[i];
-    if (f <= ultra_thr) { bucket_id[i] = N_BINS - 1; return; }
+    int e = est[i];
+    if (e <= ultra_thr) { bucket_id[i] = N_BINS - 1; return; }
     int bi = 0, ht = 32;
-    while (ht < f && ht < HASH_CAP) { ht <<= 1; bi++; }
+    while (ht < e && ht < HASH_CAP) { ht <<= 1; bi++; }
     bucket_id[i] = (bi < N_BINS - 1) ? bi : (N_BINS - 2);
 }
 
@@ -230,47 +407,88 @@ __global__ void scatter_rows_kernel(
 }
 
 // ========== Host ==========
+
+// cudaEvent phase profiler:elapsed 在 GPU stream 上量 → 抗 CPU 争用(不受 host 调度延迟影响)。
+// RAII:函数返回(含 error 路径)时自动打印 TOTAL + 释放 event。DBG-gated;非 DBG 退化为直接执行。
+#ifdef DBG
+struct HashProf {
+    cudaEvent_t s, e; double total = 0.0;
+    HashProf() { cudaEventCreate(&s); cudaEventCreate(&e); }
+    ~HashProf() {
+        dbg("[hash-prof] %-16s %7.3f ms\n", "TOTAL(GPU)", total);
+        cudaEventDestroy(s); cudaEventDestroy(e);
+    }
+    template <class F> void operator()(const char* name, F&& fn) {
+        cudaEventRecord(s);
+        fn();
+        cudaEventRecord(e);
+        cudaEventSynchronize(e);                 // 等 GPU 到 e(elapsed 不含 host 等待)
+        float ms = 0.f; cudaEventElapsedTime(&ms, s, e);
+        dbg("[hash-prof] %-16s %7.3f ms\n", name, (double)ms);
+        total += ms;
+    }
+};
+#else
+struct HashProf { template <class F> void operator()(const char*, F&& fn) { fn(); } };
+#endif
+
 void spgemm_self_product_hash(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
-    dbg("[hash] start (HASH_CAP=%d)\n", HASH_CAP);
+    dbg("[hash] start (HASH_CAP=%d, HLL_P=%d)\n", HASH_CAP, HLL_P);
+    HashProf prof;
 
     size_t A_rp_sz = (A_rows + 1) * sizeof(int);
     size_t A_ci_sz = (size_t)A_nnz * sizeof(int);
     size_t A_v_sz = (size_t)A_nnz * sizeof(float);
     size_t A_total = A_rp_sz + A_ci_sz + A_v_sz;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, A_total));
-    CHECK_CUDA(cudaMemcpy(dA, A_buffer, A_total, cudaMemcpyHostToDevice));
+    prof("h2d", [&]{ CHECK_CUDA(cudaMemcpy(dA, A_buffer, A_total, cudaMemcpyHostToDevice)); });
     char *b = (char*)dA;
     int   *dA_rp  = (int*)b;
     int   *dA_ci  = (int*)(b + A_rp_sz);
     float *dA_val = (float*)(b + A_rp_sz + A_ci_sz);
     dbg("[hash] h2d\n");
 
-    // Stage 1: count flop_ub + scan → row_off + total_ub(输出上界)
-    int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
-    count_intermediates_kernel<<<(A_rows + 255) / 256, 256>>>(dA_rp, dA_ci, A_rows, d_ub);
-    dbg("[hash] count\n");
+    // Stage 1: row_off 改由 HLL est 的 scan 给出(见下 HLL 块)。统一 sizing 到 HLL,删 flop_ub count。
+    //   count_intermediates_kernel 定义在 spgemm_kernel_manual.cu,merge 路径仍在用,这里只不再调用。
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
-    CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
-    thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
-                           thrust::device_ptr<int>(d_ub + A_rows),
-                           thrust::device_ptr<int>(d_off + 1));
-    int total_ub; CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("[hash] scan\n");
 
-    // HLL 估计 → 收紧 row_off(替 flop_ub):tmp buffer 从 total_ub(19× 过估)降到 ~2×C_nnz
+    // HLL 估计(Ocean 两阶段):Phase1 对 B 建 sketch(O(nnz));Phase2 对 A 每行 merge(O(nnz))
     int *d_est; CHECK_CUDA(cudaMalloc(&d_est, A_rows * sizeof(int)));
-    hll_estimate_kernel<<<A_rows, HASH_BLOCK, (size_t)HLL_M * sizeof(unsigned int)>>>(
-        dA_rp, dA_ci, A_rows, d_est);
-    CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
-    thrust::inclusive_scan(thrust::device_ptr<int>(d_est),
-                           thrust::device_ptr<int>(d_est + A_rows),
-                           thrust::device_ptr<int>(d_off + 1));
+    {
+        // Phase 1: 对 A(=B 自乘)每行建 HLL sketch。线性扫 CSR,O(nnz) 非 O(flop)。
+        unsigned char *d_hll; CHECK_CUDA(cudaMalloc(&d_hll, (size_t)A_rows * HLL_M));
+        int rows_per_block = 32;  // 大 rows_per_block 摊薄 SMEM init 开销(32×1024×4=128KB → opt-in)
+        size_t smem_p1 = (size_t)rows_per_block * HLL_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
+        if (smem_p1 > 48 * 1024)
+            CHECK_CUDA(cudaFuncSetAttribute(hll_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
+        int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
+        prof("hll_construct", [&]{
+            hll_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
+                dA_rp, dA_ci, A_rows, A_nnz, d_hll, rows_per_block);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
+        // blockDim = HLL_M / bytes_per_thread,使 blockDim×bpt = HLL_M(smem_merge 大小)
+        int p2_block = HLL_M / 4;   // blockDim = HLL_M/4,使 blockDim×4=HLL_M(smem_merge 大小)
+        int smem_p2 = HLL_M;
+        prof("hll_merge", [&]{
+            hll_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
+                dA_rp, dA_ci, A_rows, d_hll, d_est);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        cudaFree(d_hll);
+    }
+    prof("est_scan", [&]{
+        CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
+        thrust::inclusive_scan(thrust::device_ptr<int>(d_est),
+                               thrust::device_ptr<int>(d_est + A_rows),
+                               thrust::device_ptr<int>(d_off + 1));
+    });
     int total_est; CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("[hash] hll (est=%d vs ub=%d, %.1fx tighter)\n", total_est, total_ub,
-        total_ub > 0 ? (double)total_ub / total_est : 0.0);
+    dbg("[hash] total_est=%d\n", total_est);
 
     // Stage 2: GPU 端分桶(Ocean 风格:全 device,无 host 往返)+ 预分配大 buffer(零 per-bucket malloc/free)
     int *d_row_nnz; CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
@@ -284,27 +502,26 @@ void spgemm_self_product_hash(
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_est * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_est * sizeof(float)));
 
-    // 2a: GPU 端分桶:bucket_id → count → exclusive scan → scatter(全 device)
-    const int ULTRA_THR = 16;
+    // 2a: GPU 端分桶(HLL est → bucket):bucket_id → count → exclusive scan → scatter(全 device)
     int *d_bkid; CHECK_CUDA(cudaMalloc(&d_bkid, A_rows * sizeof(int)));
     int *d_cnt;  CHECK_CUDA(cudaMalloc(&d_cnt,  N_BINS * sizeof(int)));
     int *d_offb; CHECK_CUDA(cudaMalloc(&d_offb, N_BINS * sizeof(int)));
     int *d_pos;  CHECK_CUDA(cudaMalloc(&d_pos,  N_BINS * sizeof(int)));
     int *d_sort; CHECK_CUDA(cudaMalloc(&d_sort, A_rows * sizeof(int)));   // 预分配:桶有序行号
-    compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_ub, A_rows, ULTRA_THR, d_bkid);
-    CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));
-    bucket_count_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_cnt);
-    thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
-                           thrust::device_ptr<int>(d_cnt + N_BINS),
-                           thrust::device_ptr<int>(d_offb));
-    CHECK_CUDA(cudaMemset(d_pos, 0, N_BINS * sizeof(int)));   // scatter 计数器从 0 起(非 offsets)
-    scatter_rows_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_offb, d_pos, d_sort);
-
-    // D2H counts + offsets(11 ints 各,trivial)
+    prof("binning", [&]{
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, HLL_ULTRA_THR, d_bkid);
+        CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));
+        bucket_count_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_cnt);
+        thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
+                               thrust::device_ptr<int>(d_cnt + N_BINS),
+                               thrust::device_ptr<int>(d_offb));
+        CHECK_CUDA(cudaMemset(d_pos, 0, N_BINS * sizeof(int)));   // scatter 计数器从 0 起(非 offsets)
+        scatter_rows_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_offb, d_pos, d_sort);
+    });
+    // D2H counts + offsets(N_BINS ints 各,trivial)
     int h_cnt[N_BINS], h_off[N_BINS];
     CHECK_CUDA(cudaMemcpy(h_cnt,  d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
     CHECK_CUDA(cudaMemcpy(h_off,  d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("[hash] accumulate (GPU-binned)\n");
 
     // 2b: opt-in max SMEM
     {
@@ -312,30 +529,31 @@ void spgemm_self_product_hash(
         if (maxsm > 48 * 1024)
             CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)maxsm));
     }
-    // 2c: per-bin launch,预分配 d_sort + h_off[bi] 偏移(零 per-bucket malloc/free)
-    for (int bi = 0; bi < N_BINS; bi++) {
-        int n = h_cnt[bi];
-        if (n == 0) continue;
-        int *rows_ptr = d_sort + h_off[bi];
-        if (bi == N_BINS - 1) {
-            // ultra(flop≤16):线性,免 hash
-            hash_ultra_kernel<<<(n + 255) / 256, 256>>>(
-                dA_rp, dA_ci, dA_val, rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz);
-        } else {
-            int ht = 32 << bi;
-            size_t smem = (size_t)ht * 2 * sizeof(int);
-            hash_spa_kernel<<<n, HASH_BLOCK, smem>>>(
-                dA_rp, dA_ci, dA_val, rows_ptr, n, ht, d_off,
-                d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+    // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync)
+    prof("accumulate", [&]{
+        for (int bi = 0; bi < N_BINS; bi++) {
+            int n = h_cnt[bi];
+            if (n == 0) continue;
+            int *rows_ptr = d_sort + h_off[bi];
+            if (bi == N_BINS - 1) {
+                // ultra(est≤HLL_ULTRA_THR):线性,免 hash
+                hash_ultra_kernel<<<(n + 255) / 256, 256>>>(
+                    dA_rp, dA_ci, dA_val, rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+            } else {
+                int ht = 32 << bi;
+                size_t smem = (size_t)ht * 2 * sizeof(int);
+                hash_spa_kernel<<<n, HASH_BLOCK, smem>>>(
+                    dA_rp, dA_ci, dA_val, rows_ptr, n, ht, d_off,
+                    d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+            }
         }
-    }
-    CHECK_CUDA(cudaDeviceSynchronize());
+    });
 
     int overflow; CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));
     if (overflow) {
         fprintf(stderr, "[hash] OVERFLOW: 某行 distinct 列 > HASH_CAP=%d → 回退 merge(dispatcher 处理)\n", HASH_CAP);
         *C_buffer_out = nullptr; *C_rows = A_rows; *C_cols = A_cols; *C_nnz = -1;
-        cudaFree(dA); cudaFree(d_ub); cudaFree(d_off); cudaFree(d_row_nnz);
+        cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
         cudaFree(d_key); cudaFree(d_val);
@@ -344,42 +562,42 @@ void spgemm_self_product_hash(
 
     // Stage 3: scan row_nnz → C_row_ptr + C_nnz(精确)
     int *dC_rp; CHECK_CUDA(cudaMalloc(&dC_rp, (A_rows + 1) * sizeof(int)));
-    CHECK_CUDA(cudaMemset(dC_rp, 0, sizeof(int)));
-    thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
-                           thrust::device_ptr<int>(d_row_nnz + A_rows),
-                           thrust::device_ptr<int>(dC_rp + 1));
+    prof("cnnz_scan", [&]{
+        CHECK_CUDA(cudaMemset(dC_rp, 0, sizeof(int)));
+        thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
+                               thrust::device_ptr<int>(d_row_nnz + A_rows),
+                               thrust::device_ptr<int>(dC_rp + 1));
+    });
     int C_nnz_result; CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_rp + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("[hash] cnnz (C_nnz=%d)\n", C_nnz_result);
+    dbg("[hash] C_nnz=%d (est=%d, %.2fx over-alloc)\n", C_nnz_result, total_est,
+        total_est > 0 ? (double)total_est / C_nnz_result : 0.0);
 
     // HLL underflow check: actual C_nnz > estimated total → 回退 merge3
     if (C_nnz_result > total_est) {
         fprintf(stderr, "[hash] HLL underflow: C_nnz=%d > total_est=%d → 回退 merge\n", C_nnz_result, total_est);
         *C_buffer_out = nullptr; *C_rows = A_rows; *C_cols = A_cols; *C_nnz = -1;
-        cudaFree(dA); cudaFree(d_ub); cudaFree(d_off); cudaFree(d_row_nnz);
+        cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
         cudaFree(d_key); cudaFree(d_val); cudaFree(dC_rp);
         return;
     }
 
-    // Stage 4: compact → d_key/d_val(预分配,免 runtime cudaMalloc)
-    hash_compact_kernel<<<(A_rows + 255) / 256, 256>>>(
-        A_rows, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, d_key, d_val);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[hash] compact\n");
+    // Stage 4: compact → d_key/d_val
+    prof("compact", [&]{
+        hash_compact_kernel<<<(A_rows + 255) / 256, 256>>>(
+            A_rows, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, d_key, d_val);
+    });
 
     // Stage 5: 全局 sort by key(row<<32|col)→ 列有序 CSR
-    thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
-                        thrust::device_ptr<unsigned long long>(d_key + C_nnz_result),
-                        thrust::device_ptr<float>(d_val));
-    dbg("[hash] sort\n");
+    prof("sort", [&]{
+        thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
+                            thrust::device_ptr<unsigned long long>(d_key + C_nnz_result),
+                            thrust::device_ptr<float>(d_val));
+    });
 
-    // Stage 6: 拆 key → C_col
+    // Stage 6+7: split key → col,pack 成单块(dC malloc 是 host op,放外面)
     int *dC_ci; CHECK_CUDA(cudaMalloc(&dC_ci, (size_t)C_nnz_result * sizeof(int)));
-    split_key_kernel<<<((size_t)C_nnz_result + 255) / 256, 256>>>(d_key, dC_ci, C_nnz_result);
-    // d_val 已随 sort 排好,直接作 C_val
-
-    // Stage 7: 打包成单块 + D2H
     size_t C_rp_sz = (A_rows + 1) * sizeof(int);
     size_t C_ci_sz = (size_t)C_nnz_result * sizeof(int);
     size_t C_v_sz = (size_t)C_nnz_result * sizeof(float);
@@ -388,20 +606,23 @@ void spgemm_self_product_hash(
     size_t C_total = C_rp_al + C_ci_al + C_v_sz;
     void *dC; CHECK_CUDA(cudaMalloc(&dC, C_total));
     char *cb = (char*)dC;
-    CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(cb + C_rp_al, dC_ci, C_ci_sz, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(cb + C_rp_al + C_ci_al, d_val, C_v_sz, cudaMemcpyDeviceToDevice));
-    dbg("[hash] pack\n");
+    prof("split+pack", [&]{
+        split_key_kernel<<<((size_t)C_nnz_result + 255) / 256, 256>>>(d_key, dC_ci, C_nnz_result);
+        CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(cb + C_rp_al, dC_ci, C_ci_sz, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(cb + C_rp_al + C_ci_al, d_val, C_v_sz, cudaMemcpyDeviceToDevice));
+    });
 
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total));
-    CHECK_CUDA(cudaMemcpy(C_buffer, dC, C_total, cudaMemcpyDeviceToHost));
-    dbg("[hash] d2h\n");
+    prof("d2h", [&]{
+        CHECK_CUDA(cudaMemcpy(C_buffer, dC, C_total, cudaMemcpyDeviceToHost));
+    });
 
     *C_buffer_out = C_buffer;
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = C_nnz_result;
 
-    cudaFree(dA); cudaFree(d_ub); cudaFree(d_off); cudaFree(d_row_nnz);
+    cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
     cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
     cudaFree(dC_rp); cudaFree(d_key); cudaFree(d_val); cudaFree(dC_ci); cudaFree(dC);
 }

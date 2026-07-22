@@ -1,0 +1,12 @@
+对比 100 阵 × ['cu', 'serial', 'merge3', 'Auto'] + Ocean + HSMU → compare/method_cmp_20260722_120400/methods_cmp.csv
+
+[1/100] 1138_bus       n=1138     Auto→merge3 cu=  0.648 serial=  0.554 m3=  0.299 Auto=  0.315 Ocean=  0.224 HSMU=  0.341 (5.2s)
+[2/100] 494_bus        n=494      Auto→merge3 cu=  0.409 serial=  0.238 m3=  0.144 Auto=  0.284 Ocean=  0.237 HSMU=  0.318 (5.1s)
+[3/100] 662_bus        n=662      Auto→merge3 cu=  0.626 serial=  0.398 m3=  0.147 Auto=   0.15 Ocean=  0.232 HSMU=  0.334 (5.1s)
+[4/100] 685_bus        n=685      Auto→merge3 cu=  0.683 serial=  0.294 m3=   0.29 Auto=  0.324 Ocean=  0.232 HSMU=  0.349 (5.1s)
+[5/100] arc130         n=130      Auto→merge3 cu=  0.425 serial=  1.904 m3=  0.302 Auto=  0.252 Ocean=  0.394 HSMU=  0.448 (5.1s)
+[6/100] ash292         n=292      Auto→merge3 cu=  0.503 serial=  0.285 m3=  0.158 Auto=  0.164 Ocean=  0.221 HSMU=  0.331 (5.1s)
+[7/100] ash85          n=85       Auto→merge3 cu=  0.642 serial=  0.223 m3=  0.254 Auto=  0.142 Ocean=  0.212 HSMU=   0.33 (5.1s)
+[8/100] bcspwr01       n=39       Auto→merge3 cu=  0.548 serial=  0.466 m3=  0.281 Auto=  0.279 Ocean=  0.214 HSMU=  0.317 (5.1s)
+[9/100] bcspwr02       n=49       Auto→merge3 cu=  0.619 serial=  0.239 m3=  0.139 Auto=  0.269 Ocean=  0.209 HSMU=  0.315 (5.1s)
+[10/100] bcspwr03       n=118      
