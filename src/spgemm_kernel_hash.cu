@@ -1,5 +1,6 @@
 #include "spgemm.h"
 #include <cuda_runtime.h>
+#include <cub/cub.cuh>
 #include <thrust/scan.h>
 #include <thrust/sort.h>
 #include <thrust/device_ptr.h>
@@ -324,6 +325,51 @@ __global__ void split_key_kernel(const unsigned long long *key, int *col, int n)
     if (t < n) col[t] = (int)(key[t] & 0xffffffffu);
 }
 
+// per-row compact+sort(Ocean sortOutputDyn 式):每 block 一行。
+//   从 tmp(gapped,row_off)读 (col,val) → cub::BlockRadixSort 行内按 col 排 → 直接写 CSR(packed,row_ptr)。
+//   一次替掉 hash_compact_kernel + 全局 thrust::sort + split_key_kernel。
+//   要求 TPB*IPT ≥ ht(该行 hash 表大小);因非溢出行 ht ≥ row_nnz,故装得下。col=key 低 32 位,排序位 [0,32)。
+template<int TPB, int IPT>
+__global__ void hash_compact_sort_kernel(
+    const int *rows, int n_rows,
+    const int *row_off, const int *row_nnz, const int *row_ptr,
+    const unsigned long long *tmp_key, const float *tmp_val,
+    int *out_col, float *out_val)
+{
+    using BlockRadixSort = cub::BlockRadixSort<unsigned int, TPB, IPT, float>;
+    extern __shared__ char csort_smem[];   // 动态 shared(cap 大时 >48KB 需 opt-in,见 launch_csort)
+    typename BlockRadixSort::TempStorage &temp_storage =
+        *reinterpret_cast<typename BlockRadixSort::TempStorage *>(csort_smem);
+    if (blockIdx.x >= n_rows) return;
+    int row = rows[blockIdx.x];
+    int start = row_off[row];
+    int n = row_nnz[row];
+    int out_start = row_ptr[row];
+
+    unsigned int col[IPT];
+    float val[IPT];
+    #pragma unroll
+    for (int i = 0; i < IPT; i++) {
+        int idx = threadIdx.x * IPT + i;   // BLOCKED 排布(匹配 cub::BlockRadixSort 默认)
+        if (idx < n) {
+            col[i] = (unsigned int)(tmp_key[start + idx] & 0xffffffffu);   // key 低 32 = col
+            val[i] = tmp_val[start + idx];
+        } else {
+            col[i] = 0xffffffffu;   // sentinel → 排到末尾(只存前 n 个真实项)
+            val[i] = 0.0f;
+        }
+    }
+    BlockRadixSort(temp_storage).Sort(col, val, 0, 32);   // 按 col 排(低 32 位)
+    #pragma unroll
+    for (int i = 0; i < IPT; i++) {
+        int idx = threadIdx.x * IPT + i;   // BLOCKED 排布(匹配 cub::BlockRadixSort 默认)
+        if (idx < n) {
+            out_col[out_start + idx] = (int)col[i];
+            out_val[out_start + idx] = val[i];
+        }
+    }
+}
+
 // ========== HLL 估计(Ocean 风格:替 flop_ub 收紧 tmp buffer)==========
 // 每行一个 block,SMEM=m=1024 个 uint32 寄存器。
 // 遍历行 i 的所有中间积(列 j)→ hash(j) → atomicMax 寄存器 → thread 0 算 HLL 公式。
@@ -406,6 +452,29 @@ __global__ void scatter_rows_kernel(
     sorted_rows[slot] = i;
 }
 
+// launch helper:按 config 查 BlockRadixSort TempStorage 大小,>48KB 自动 opt-in 动态 shared(H100 可 ~228KB)。
+template<int TPB, int IPT>
+static void launch_csort(int n, const int *rows_ptr, const int *d_off, const int *d_row_nnz,
+                         const int *dC_rp, const unsigned long long *d_tmp_key, const float *d_tmp_val,
+                         int *dC_ci, float *d_val) {
+    using BRS = cub::BlockRadixSort<unsigned int, TPB, IPT, float>;
+    size_t smem = sizeof(typename BRS::TempStorage);
+    if (smem > 48 * 1024)
+        CHECK_CUDA(cudaFuncSetAttribute((const void*)hash_compact_sort_kernel<TPB, IPT>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem));
+    hash_compact_sort_kernel<TPB, IPT><<<n, TPB, smem>>>(
+        rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+}
+
+// DBG 校验:输出 CSR 每行 col 严格升序(验证 compact_sort 排序正确)。
+__global__ void hash_check_sorted_kernel(const int *row_ptr, const int *col, int A_rows, int *violations) {
+    int r = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r >= A_rows) return;
+    int s = row_ptr[r], e = row_ptr[r + 1];
+    for (int i = s; i < e - 1; i++)
+        if (col[i] >= col[i + 1]) atomicAdd(violations, 1);
+}
+
 // ========== Host ==========
 
 // cudaEvent phase profiler:elapsed 在 GPU stream 上量 → 抗 CPU 争用(不受 host 调度延迟影响)。
@@ -481,25 +550,24 @@ void spgemm_self_product_hash(
         });
         cudaFree(d_hll);
     }
+    int total_est;
     prof("est_scan", [&]{
         CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
         thrust::inclusive_scan(thrust::device_ptr<int>(d_est),
                                thrust::device_ptr<int>(d_est + A_rows),
                                thrust::device_ptr<int>(d_off + 1));
+        CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入计时(对齐 Ocean)
     });
-    int total_est; CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     dbg("[hash] total_est=%d\n", total_est);
 
     // Stage 2: GPU 端分桶(Ocean 风格:全 device,无 host 往返)+ 预分配大 buffer(零 per-bucket malloc/free)
     int *d_row_nnz; CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
     int *d_overflow; CHECK_CUDA(cudaMalloc(&d_overflow, sizeof(int)));
-    CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
     unsigned long long *d_tmp_key; float *d_tmp_val;
     CHECK_CUDA(cudaMalloc(&d_tmp_key, (size_t)total_est * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_tmp_val, (size_t)total_est * sizeof(float)));
-    // 预分配 compact 输出(与 tmp 同大小,免 runtime cudaMalloc)
-    unsigned long long *d_key; float *d_val;
-    CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_est * sizeof(unsigned long long)));
+    // compact_sort 直接读 tmp_key、写 d_val(C_val);d_key 已不再需要(compact+sort 融合)
+    float *d_val;
     CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_est * sizeof(float)));
 
     // 2a: GPU 端分桶(HLL est → bucket):bucket_id → count → exclusive scan → scatter(全 device)
@@ -508,6 +576,7 @@ void spgemm_self_product_hash(
     int *d_offb; CHECK_CUDA(cudaMalloc(&d_offb, N_BINS * sizeof(int)));
     int *d_pos;  CHECK_CUDA(cudaMalloc(&d_pos,  N_BINS * sizeof(int)));
     int *d_sort; CHECK_CUDA(cudaMalloc(&d_sort, A_rows * sizeof(int)));   // 预分配:桶有序行号
+    int h_cnt[N_BINS], h_off[N_BINS];
     prof("binning", [&]{
         compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, HLL_ULTRA_THR, d_bkid);
         CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));
@@ -517,11 +586,9 @@ void spgemm_self_product_hash(
                                thrust::device_ptr<int>(d_offb));
         CHECK_CUDA(cudaMemset(d_pos, 0, N_BINS * sizeof(int)));   // scatter 计数器从 0 起(非 offsets)
         scatter_rows_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_offb, d_pos, d_sort);
+        CHECK_CUDA(cudaMemcpy(h_cnt,  d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入(对齐 Ocean)
+        CHECK_CUDA(cudaMemcpy(h_off,  d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
     });
-    // D2H counts + offsets(N_BINS ints 各,trivial)
-    int h_cnt[N_BINS], h_off[N_BINS];
-    CHECK_CUDA(cudaMemcpy(h_cnt,  d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(h_off,  d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
 
     // 2b: opt-in max SMEM
     {
@@ -529,8 +596,10 @@ void spgemm_self_product_hash(
         if (maxsm > 48 * 1024)
             CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)maxsm));
     }
-    // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync)
+    // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync)。memset+overflow D2H 纳入计时(对齐 Ocean)
+    int overflow;
     prof("accumulate", [&]{
+        CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
         for (int bi = 0; bi < N_BINS; bi++) {
             int n = h_cnt[bi];
             if (n == 0) continue;
@@ -547,28 +616,28 @@ void spgemm_self_product_hash(
                     d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
             }
         }
+        CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入
     });
-
-    int overflow; CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));
     if (overflow) {
         fprintf(stderr, "[hash] OVERFLOW: 某行 distinct 列 > HASH_CAP=%d → 回退 merge(dispatcher 处理)\n", HASH_CAP);
         *C_buffer_out = nullptr; *C_rows = A_rows; *C_cols = A_cols; *C_nnz = -1;
         cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
-        cudaFree(d_key); cudaFree(d_val);
+        cudaFree(d_val);
         return;
     }
 
     // Stage 3: scan row_nnz → C_row_ptr + C_nnz(精确)
     int *dC_rp; CHECK_CUDA(cudaMalloc(&dC_rp, (A_rows + 1) * sizeof(int)));
+    int C_nnz_result;
     prof("cnnz_scan", [&]{
         CHECK_CUDA(cudaMemset(dC_rp, 0, sizeof(int)));
         thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
                                thrust::device_ptr<int>(d_row_nnz + A_rows),
                                thrust::device_ptr<int>(dC_rp + 1));
+        CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_rp + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入
     });
-    int C_nnz_result; CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_rp + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     dbg("[hash] C_nnz=%d (est=%d, %.2fx over-alloc)\n", C_nnz_result, total_est,
         total_est > 0 ? (double)total_est / C_nnz_result : 0.0);
 
@@ -579,25 +648,45 @@ void spgemm_self_product_hash(
         cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
-        cudaFree(d_key); cudaFree(d_val); cudaFree(dC_rp);
+        cudaFree(d_val); cudaFree(dC_rp);
         return;
     }
 
-    // Stage 4: compact → d_key/d_val
-    prof("compact", [&]{
-        hash_compact_kernel<<<(A_rows + 255) / 256, 256>>>(
-            A_rows, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, d_key, d_val);
-    });
-
-    // Stage 5: 全局 sort by key(row<<32|col)→ 列有序 CSR
-    prof("sort", [&]{
-        thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
-                            thrust::device_ptr<unsigned long long>(d_key + C_nnz_result),
-                            thrust::device_ptr<float>(d_val));
-    });
-
-    // Stage 6+7: split key → col,pack 成单块(dC malloc 是 host op,放外面)
+    // Stage 4+5+6: per-row compact+sort(Ocean sortOutputDyn 式 BlockRadixSort)一次替掉 compact + 全局 sort + split_key。
+    //   每 block 一行:从 tmp(gapped,row_off)读 → BlockRadixSort 行内按 col 排 → 写 CSR(packed,row_ptr)。
+    //   复用 est-分桶,按 bin 选 config(cap ≥ ht ≥ row_nnz):bi0-1/ultra→64×1, bi2-3→128×2, bi4-5→256×4, bi6-7→512×8, bi8-9→1024×16。
     int *dC_ci; CHECK_CUDA(cudaMalloc(&dC_ci, (size_t)C_nnz_result * sizeof(int)));
+    prof("compact+sort", [&]{
+        for (int bi = 0; bi < N_BINS; bi++) {
+            int n = h_cnt[bi];
+            if (n == 0) continue;
+            int *rows_ptr = d_sort + h_off[bi];
+            if (bi <= 1 || bi == N_BINS - 1)
+                launch_csort<64, 1>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            else if (bi <= 3)
+                launch_csort<128, 2>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            else if (bi <= 5)
+                launch_csort<256, 4>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            else if (bi <= 7)
+                launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            else
+                launch_csort<512, 32>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+        }
+        CHECK_CUDA(cudaGetLastError());
+    });
+
+#ifdef DBG
+    {   // 校验:输出 CSR 每行 col 严格升序(验证 compact_sort 排序正确)
+        int *d_viol; CHECK_CUDA(cudaMalloc(&d_viol, sizeof(int)));
+        CHECK_CUDA(cudaMemset(d_viol, 0, sizeof(int)));
+        hash_check_sorted_kernel<<<(A_rows + 255) / 256, 256>>>(dC_rp, dC_ci, A_rows, d_viol);
+        int viol; CHECK_CUDA(cudaMemcpy(&viol, d_viol, sizeof(int), cudaMemcpyDeviceToHost));
+        dbg("[hash] sorted check: %d 行内乱序违规\n", viol);
+        cudaFree(d_viol);
+    }
+#endif
+
+    // Stage 7: pack 成单块(dC malloc 是 host op,放外面)
     size_t C_rp_sz = (A_rows + 1) * sizeof(int);
     size_t C_ci_sz = (size_t)C_nnz_result * sizeof(int);
     size_t C_v_sz = (size_t)C_nnz_result * sizeof(float);
@@ -606,8 +695,7 @@ void spgemm_self_product_hash(
     size_t C_total = C_rp_al + C_ci_al + C_v_sz;
     void *dC; CHECK_CUDA(cudaMalloc(&dC, C_total));
     char *cb = (char*)dC;
-    prof("split+pack", [&]{
-        split_key_kernel<<<((size_t)C_nnz_result + 255) / 256, 256>>>(d_key, dC_ci, C_nnz_result);
+    prof("pack", [&]{
         CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));
         CHECK_CUDA(cudaMemcpy(cb + C_rp_al, dC_ci, C_ci_sz, cudaMemcpyDeviceToDevice));
         CHECK_CUDA(cudaMemcpy(cb + C_rp_al + C_ci_al, d_val, C_v_sz, cudaMemcpyDeviceToDevice));
@@ -624,5 +712,5 @@ void spgemm_self_product_hash(
 
     cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
     cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
-    cudaFree(dC_rp); cudaFree(d_key); cudaFree(d_val); cudaFree(dC_ci); cudaFree(dC);
+    cudaFree(dC_rp); cudaFree(d_val); cudaFree(dC_ci); cudaFree(dC);
 }
