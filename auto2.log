@@ -1,183 +1,72 @@
 ############################################################
-#  SpGEMM 方法对比  →  compare/method_cmp_20260722_124112/
+#  SpGEMM 方法对比  →  compare/method_cmp_20260722_170108/
 #  Ocean / HSMU / cuSPARSE / merge(serial) / merge3 / Auto
 #  矩阵: ./data/first100  (全部)
 ############################################################
 ### [1/4] 编译 spgemm_test(DBG=1 开 phase 时间戳,含 hash + Auto)###
   ✓ done(spgemm 法计时为 compute-only,排除 h2d/d2h,对标 full_compare)
-### [2/4] 备份 HSMU /tmp CSV → /tmp/hsmu_backup_20260722_124112 ###
+### [2/4] 备份 HSMU /tmp CSV → /tmp/hsmu_backup_20260722_170108 ###
   ✓ 备份 4 个
 ### [3/4] 对比(Ocean+HSMU+cu+serial+merge3+Auto,每方法/矩阵超时 200s)###
-对比 100 阵 × ['cu', 'serial', 'merge3', 'Auto'] + Ocean + HSMU → compare/method_cmp_20260722_124112/methods_cmp.csv
+对比 100 阵 × ['cu', 'serial', 'merge3', 'Auto'] + Ocean + HSMU → compare/method_cmp_20260722_170108/methods_cmp.csv
 
-[1/100] 1138_bus       n=1138     Auto→merge3 cu=  0.635 serial=  0.303 m3=  0.179 Auto=  0.178 Ocean=  0.234 HSMU=  0.343 (5.9s)
-[2/100] 494_bus        n=494      Auto→merge3 cu=  2.135 serial=  0.475 m3=  0.277 Auto=  0.148 Ocean=  0.231 HSMU=  0.339 (5.8s)
-[3/100] 662_bus        n=662      Auto→merge3 cu=  0.633 serial=  0.395 m3=  0.296 Auto=  0.213 Ocean=  0.239 HSMU=  0.342 (6.0s)
-[4/100] 685_bus        n=685      Auto→merge3 cu=  1.029 serial=  0.527 m3=  0.171 Auto=   0.29 Ocean=  0.258 HSMU=  0.319 (5.8s)
-[5/100] arc130         n=130      Auto→merge3 cu=  0.469 serial=   1.92 m3=  0.728 Auto=  0.214 Ocean=  0.376 HSMU=  0.462 (6.0s)
-[6/100] ash292         n=292      Auto→merge3 cu=  1.925 serial=  0.506 m3=  0.318 Auto=  0.305 Ocean=  0.222 HSMU=  0.351 (5.8s)
-[7/100] ash85          n=85       Auto→merge3 cu=  0.417 serial=  0.319 m3=  0.466 Auto=  0.278 Ocean=  0.204 HSMU=  0.323 (6.0s)
-[8/100] bcspwr01       n=39       Auto→merge3 cu=  4.333 serial=  0.482 m3=  0.139 Auto=  0.133 Ocean=  0.199 HSMU=  0.315 (6.0s)
-[9/100] bcspwr02       n=49       Auto→merge3 cu=  0.636 serial=  0.411 m3=  0.285 Auto=  0.133 Ocean=    0.2 HSMU=  0.327 (6.1s)
-[10/100] bcspwr03       n=118      Auto→merge3 cu=  0.828 serial=  0.505 m3=  0.269 Auto=  0.244 Ocean=  0.209 HSMU=  0.333 (5.8s)
-[11/100] bcspwr04       n=274      Auto→merge3 cu=  0.385 serial=  0.344 m3=  0.147 Auto=  0.305 Ocean=  0.232 HSMU=  0.344 (6.1s)
-[12/100] bcspwr05       n=443      Auto→merge3 cu=  0.424 serial=  0.245 m3=  0.296 Auto=  0.288 Ocean=  0.231 HSMU=  0.321 (5.8s)
-[13/100] bcspwr06       n=1454     Auto→merge3 cu=  0.423 serial=  0.506 m3=   0.31 Auto=   0.33 Ocean=  0.232 HSMU=  0.331 (6.1s)
-[14/100] bcspwr07       n=1612     Auto→merge3 cu=  0.527 serial=  0.294 m3=  0.316 Auto=  0.291 Ocean=  0.232 HSMU=  0.336 (6.0s)
-[15/100] bcspwr08       n=1624     Auto→merge3 cu=  0.555 serial=  0.301 m3=  0.319 Auto=    0.2 Ocean=  0.237 HSMU=   0.35 (6.1s)
-[16/100] bcspwr09       n=1723     Auto→merge3 cu=   0.43 serial=  0.305 m3=  0.159 Auto=  0.169 Ocean=  0.241 HSMU=  0.334 (5.9s)
-[17/100] bcspwr10       n=5300     Auto→merge3 cu=  0.553 serial=  0.816 m3=  0.343 Auto=  0.302 Ocean=  0.239 HSMU=  1.046 (6.1s)
-[18/100] bcsstk01       n=48       Auto→merge3 cu=  0.649 serial=  0.505 m3=  0.143 Auto=  0.142 Ocean=  0.314 HSMU=  0.324 (6.1s)
-[19/100] bcsstk02       n=66       Auto→merge3 cu=  0.721 serial=  2.388 m3=  0.309 Auto=  0.294 Ocean=  0.897 HSMU=  0.727 (5.9s)
-[20/100] bcsstk03       n=112      Auto→merge3 cu=   0.46 serial=  0.453 m3=  0.276 Auto=  0.131 Ocean=  0.182 HSMU=  0.324 (6.2s)
-[21/100] bcsstk04       n=132      Auto→merge3 cu=  0.799 serial=  1.555 m3=  0.324 Auto=  0.331 Ocean=  0.597 HSMU=  0.428 (5.9s)
-[22/100] bcsstk05       n=153      Auto→merge3 cu=  0.462 serial=  0.672 m3=   0.18 Auto=  0.323 Ocean=  0.351 HSMU=  0.386 (6.0s)
-[23/100] bcsstk06       n=420      Auto→merge3 cu=  4.872 serial=  0.934 m3=  0.187 Auto=  0.187 Ocean=  0.359 HSMU=  0.378 (6.1s)
-[24/100] bcsstk07       n=420      Auto→merge3 cu=   0.75 serial=  0.893 m3=  0.324 Auto=  0.197 Ocean=  0.361 HSMU=  0.391 (5.8s)
-[25/100] bcsstk08       n=1074     Auto→hash   cu=  1.095 serial= 22.081 m3=  1.409 Auto=  2.231 Ocean=  0.452 HSMU=    1.0 (6.2s)
-[26/100] bcsstk09       n=1083     Auto→merge3 cu=  0.574 serial=  1.346 m3=  0.224 Auto=   0.38 Ocean=  0.361 HSMU=  0.369 (5.9s)
-[27/100] bcsstk10       n=1086     Auto→merge3 cu=  0.819 serial=   1.53 m3=  0.364 Auto=  0.383 Ocean=  0.526 HSMU=  0.393 (6.1s)
-[28/100] bcsstk11       n=1473     Auto→merge3 cu=   0.85 serial=  1.613 m3=  0.388 Auto=  0.392 Ocean=  0.632 HSMU=  0.667 (6.1s)
-[29/100] bcsstk12       n=1473     Auto→merge3 cu=   0.92 serial=  1.604 m3=  0.284 Auto=    0.4 Ocean=  0.554 HSMU=   0.68 (6.0s)
-[30/100] bcsstk13       n=2003     Auto→merge3 cu=  1.422 serial=  6.978 m3=  1.349 Auto=  1.347 Ocean=  0.745 HSMU=  1.124 (6.2s)
-[31/100] bcsstk14       n=1806     Auto→merge3 cu=  1.015 serial=   2.66 m3=  0.783 Auto=   0.81 Ocean=  0.625 HSMU=  0.625 (6.2s)
-[32/100] bcsstk15       n=3948     Auto→merge3 cu=  1.746 serial=  3.265 m3=  1.022 Auto=  1.076 Ocean=   0.46 HSMU=   0.82 (6.3s)
-[33/100] bcsstk16       n=4884     Auto→merge3 cu=  2.446 serial=  9.945 m3=  2.247 Auto=  2.365 Ocean=  0.876 HSMU=  1.587 (7.0s)
-[34/100] bcsstk17       n=10974    Auto→hash   cu=  3.279 serial= 11.447 m3=  2.347 Auto=  2.737 Ocean=   0.87 HSMU=  1.825 (7.4s)
-[35/100] bcsstk18       n=11948    Auto→hash   cu=  1.559 serial=  3.239 m3=   1.13 Auto=  2.213 Ocean=  0.469 HSMU=  1.305 (6.4s)
-[36/100] bcsstk19       n=817      Auto→merge3 cu=  0.433 serial=  0.281 m3=  0.303 Auto=  0.222 Ocean=  0.364 HSMU=  0.366 (5.9s)
-[37/100] bcsstk20       n=485      Auto→merge3 cu=  0.471 serial=  0.261 m3=  0.158 Auto=  0.287 Ocean=  0.228 HSMU=  0.343 (5.9s)
-[38/100] bcsstk21       n=3600     Auto→merge3 cu=  0.728 serial=  0.901 m3=   0.22 Auto=  0.361 Ocean=  0.232 HSMU=  0.454 (6.1s)
-[39/100] bcsstk22       n=138      Auto→merge3 cu=  3.912 serial=  0.507 m3=  0.309 Auto=  0.149 Ocean=  0.247 HSMU=  0.324 (6.0s)
-[40/100] bcsstk23       n=3134     Auto→merge3 cu=  1.109 serial=  2.016 m3=  0.614 Auto=   0.72 Ocean=  0.386 HSMU=  0.615 (6.1s)
-[41/100] bcsstk24       n=3562     Auto→merge3 cu=  1.859 serial=  4.222 m3=  1.091 Auto=  0.897 Ocean=  0.654 HSMU=  1.187 (6.5s)
-[42/100] bcsstk25       n=15439    Auto→hash   cu=   1.84 serial=  4.737 m3=  1.699 Auto=  2.388 Ocean=   0.48 HSMU=  1.692 (6.4s)
-[43/100] bcsstk26       n=1922     Auto→merge3 cu=  0.909 serial=  1.681 m3=  0.242 Auto=  0.367 Ocean=  0.398 HSMU=  0.634 (6.2s)
-[44/100] bcsstk27       n=1224     Auto→merge3 cu=  1.158 serial=  2.865 m3=  0.671 Auto=  0.692 Ocean=  0.532 HSMU=  0.797 (6.2s)
-[45/100] bcsstk28       n=4410     Auto→merge3 cu=  2.022 serial=  6.377 m3=  1.357 Auto=  1.383 Ocean=  0.735 HSMU=  1.485 (6.6s)
-[46/100] bcsstk29       n=13992    Auto→hash   cu=   4.12 serial= 11.089 m3=  2.581 Auto=  3.322 Ocean=  1.058 HSMU=  1.884 (6.7s)
-[47/100] bcsstk30       n=28924    Auto→hash   cu= 12.571 serial= 94.859 m3=   18.9 Auto=  7.328 Ocean=   2.55 HSMU=  4.946 (9.5s)
-[48/100] bcsstk31       n=35588    Auto→hash   cu=  6.653 serial= 21.962 m3=  5.203 Auto=  5.428 Ocean=   1.37 HSMU=  2.855 (7.8s)
-[49/100] bcsstk32       n=44609    Auto→hash   cu= 20.435 serial= 39.282 m3= 10.069 Auto=  6.809 Ocean=  2.454 HSMU=  3.932 (8.5s)
-[50/100] bcsstk33       n=8738     Auto→hash   cu=  4.026 serial= 21.775 m3=  4.663 Auto=   3.31 Ocean=  1.665 HSMU=  2.003 (7.4s)
-[51/100] bcsstm01       n=48       Auto→merge3 cu=  0.572 serial=  0.471 m3=  0.276 Auto=  0.284 Ocean=  0.176 HSMU=  0.318 (5.9s)
-[52/100] bcsstm02       n=66       Auto→merge3 cu=  0.615 serial=  0.413 m3=  0.286 Auto=  0.263 Ocean=   0.18 HSMU=  0.316 (5.8s)
-[53/100] bcsstm03       n=112      Auto→merge3 cu=  0.627 serial=  0.215 m3=  0.132 Auto=  0.286 Ocean=  0.191 HSMU=  0.309 (6.0s)
-[54/100] bcsstm04       n=132      Auto→merge3 cu=  0.423 serial=  0.437 m3=  0.265 Auto=  0.127 Ocean=  0.184 HSMU=  0.312 (5.8s)
-[55/100] bcsstm05       n=153      Auto→merge3 cu=  0.645 serial=  0.452 m3=  0.272 Auto=  0.234 Ocean=  0.178 HSMU=  0.334 (6.0s)
-[56/100] bcsstm06       n=420      Auto→merge3 cu=  1.198 serial=  0.444 m3=  0.278 Auto=  0.262 Ocean=  0.188 HSMU=  0.335 (5.9s)
-[57/100] bcsstm07       n=420      Auto→merge3 cu=  0.766 serial=  0.769 m3=  0.374 Auto=  0.463 Ocean=  0.343 HSMU=  0.353 (6.5s)
-[58/100] bcsstm08       n=1074     Auto→merge3 cu=  0.638 serial=  0.461 m3=  0.292 Auto=  0.139 Ocean=  0.176 HSMU=  0.323 (5.6s)
-[59/100] bcsstm09       n=1083     Auto→merge3 cu=  0.555 serial=  0.451 m3=  0.145 Auto=   0.27 Ocean=  0.183 HSMU=  0.349 (6.1s)
-[60/100] bcsstm10       n=1086     Auto→merge3 cu=  0.812 serial=  1.494 m3=  0.229 Auto=  0.358 Ocean=  0.503 HSMU=    0.4 (5.9s)
-[61/100] bcsstm11       n=1473     Auto→merge3 cu=  0.428 serial=  0.473 m3=  0.169 Auto=  0.146 Ocean=  0.185 HSMU=   0.34 (6.1s)
-[62/100] bcsstm12       n=1473     Auto→merge3 cu=  0.807 serial=  1.138 m3=  0.354 Auto=  0.362 Ocean=  0.384 HSMU=   0.36 (6.1s)
-[63/100] bcsstm13       n=2003     Auto→merge3 cu=  0.846 serial=   3.42 m3=  0.409 Auto=  0.553 Ocean=  0.498 HSMU=  0.692 (6.1s)
-[64/100] bcsstm19       n=817      Auto→merge3 cu=  0.651 serial=  0.218 m3=   0.26 Auto=  0.268 Ocean=  0.184 HSMU=  0.335 (6.1s)
-[65/100] bcsstm20       n=485      Auto→merge3 cu=  0.565 serial=  0.434 m3=   0.32 Auto=  0.272 Ocean=  0.207 HSMU=  0.316 (5.9s)
-[66/100] bcsstm21       n=3600     Auto→merge3 cu=  0.786 serial=  0.466 m3=  0.439 Auto=  0.301 Ocean=  0.181 HSMU=  0.667 (5.6s)
-[67/100] bcsstm22       n=138      Auto→merge3 cu=  0.598 serial=  0.203 m3=  0.353 Auto=  0.251 Ocean=  0.182 HSMU=  0.314 (6.0s)
-[68/100] bcsstm23       n=3134     Auto→merge3 cu=  0.625 serial=  0.423 m3=  0.304 Auto=  0.275 Ocean=  0.202 HSMU=  0.618 (5.9s)
-[69/100] bcsstm24       n=3562     Auto→merge3 cu=  0.433 serial=  0.384 m3=  0.303 Auto=  0.301 Ocean=  0.173 HSMU=  0.617 (6.1s)
-[70/100] bcsstm25       n=15439    Auto→hash   cu=  0.652 serial=  0.348 m3=  0.255 Auto=  0.994 Ocean=  0.188 HSMU=  0.507 (6.1s)
-[71/100] bcsstm26       n=1922     Auto→merge3 cu=  0.629 serial=  0.462 m3=  0.283 Auto=  0.286 Ocean=  0.187 HSMU=  0.341 (5.9s)
-[72/100] bcsstm27       n=1224     Auto→merge3 cu=  1.171 serial=  2.924 m3=  0.579 Auto=  0.685 Ocean=   0.54 HSMU=  0.695 (6.2s)
-[73/100] blckhole       n=2132     Auto→merge3 cu=   0.52 serial=  0.764 m3=  0.373 Auto=  0.368 Ocean=  0.252 HSMU=  0.621 (6.1s)
-[74/100] bp_0           n=822      Auto→hash   cu=  0.638 serial=  11.65 m3=  0.811 Auto=  0.992 Ocean=  0.253 HSMU=  0.508 (6.1s)
-[75/100] bp_1000        n=822      Auto→hash   cu=  0.815 serial= 17.967 m3=  0.891 Auto=  1.188 Ocean=  0.272 HSMU=  0.526 (6.0s)
-[76/100] bp_1200        n=822      Auto→hash   cu=  0.658 serial= 18.299 m3=  0.871 Auto=  1.151 Ocean=  0.271 HSMU=  0.524 (6.0s)
-[77/100] bp_1400        n=822      Auto→hash   cu=   0.68 serial=  18.07 m3=  0.862 Auto=  1.364 Ocean=  0.271 HSMU=  0.523 (6.2s)
-[78/100] bp_1600        n=822      Auto→hash   cu=  0.646 serial= 17.747 m3=  0.881 Auto=  1.508 Ocean=  0.275 HSMU=  0.529 (6.0s)
-[79/100] bp_200         n=822      Auto→hash   cu=  0.665 serial= 14.338 m3=  0.673 Auto=  1.094 Ocean=  0.264 HSMU=  0.515 (6.1s)
-[80/100] bp_400         n=822      Auto→hash   cu=  0.446 serial= 15.685 m3=  0.884 Auto=  1.118 Ocean=  0.263 HSMU=  0.515 (6.0s)
-[81/100] bp_600         n=822      Auto→hash   cu=  0.662 serial= 16.766 m3=  0.702 Auto=  1.142 Ocean=  0.262 HSMU=  0.507 (6.2s)
-[82/100] bp_800         n=822      Auto→hash   cu=  0.629 serial= 17.471 m3=  0.882 Auto=  1.191 Ocean=   0.28 HSMU=  0.536 (6.0s)
-[83/100] can_1054       n=1054     Auto→merge3 cu=  0.769 serial=  1.242 m3=  0.358 Auto=  0.341 Ocean=   0.39 HSMU=  0.387 (6.0s)
-[84/100] can_1072       n=1072     Auto→merge3 cu=  0.554 serial=  1.465 m3=  0.231 Auto=  0.359 Ocean=  0.377 HSMU=   0.38 (5.9s)
-[85/100] can_144        n=144      Auto→merge3 cu=  0.452 serial=  0.521 m3=  0.242 Auto=  0.149 Ocean=  0.323 HSMU=  0.342 (6.1s)
-[86/100] can_161        n=161      Auto→merge3 cu=  0.644 serial=  0.524 m3=  0.212 Auto=  0.283 Ocean=  0.327 HSMU=  0.343 (5.8s)
-[87/100] can_187        n=187      Auto→merge3 cu=  0.414 serial=  0.242 m3=  0.264 Auto=  0.206 Ocean=  0.339 HSMU=  0.346 (6.1s)
-[88/100] can_229        n=229      Auto→merge3 cu=  0.639 serial=  0.478 m3=  0.172 Auto=  0.324 Ocean=  0.349 HSMU=  0.332 (5.8s)
-[89/100] can_24         n=24       Auto→merge3 cu=  0.608 serial=  0.473 m3=  0.131 Auto=  0.289 Ocean=  0.204 HSMU=  0.328 (6.1s)
-[90/100] can_256        n=256      Auto→merge3 cu=  3.161 serial=  2.225 m3=  0.235 Auto=  0.387 Ocean=  0.355 HSMU=  0.402 (5.8s)
-[91/100] can_268        n=268      Auto→merge3 cu=  0.522 serial=  1.044 m3=  0.541 Auto=  0.355 Ocean=  0.361 HSMU=  0.372 (6.0s)
-[92/100] can_292        n=292      Auto→merge3 cu=  0.479 serial=  0.651 m3=  0.323 Auto=  0.319 Ocean=  0.348 HSMU=  0.357 (5.9s)
-[93/100] can_445        n=445      Auto→merge3 cu=  0.696 serial=  0.497 m3=  0.301 Auto=  0.401 Ocean=  0.336 HSMU=  0.345 (6.2s)
-[94/100] can_61         n=61       Auto→merge3 cu=  0.602 serial=  0.623 m3=  0.279 Auto=  0.143 Ocean=  0.343 HSMU=  0.329 (5.9s)
-[95/100] can_62         n=62       Auto→merge3 cu=  0.563 serial=  0.464 m3=  0.147 Auto=  0.132 Ocean=  0.202 HSMU=  0.317 (6.0s)
-[96/100] can_634        n=634      Auto→merge3 cu=  0.917 serial=  0.771 m3=  0.326 Auto=   0.33 Ocean=  0.398 HSMU=  0.351 (5.9s)
-[97/100] can_715        n=715      Auto→merge3 cu=   0.56 serial=  2.118 m3=    0.5 Auto=  0.567 Ocean=  0.431 HSMU=   0.37 (6.0s)
-[98/100] can_73         n=73       Auto→merge3 cu=  0.426 serial=  0.602 m3=  0.141 Auto=   0.29 Ocean=  0.208 HSMU=  0.295 (6.3s)
-[99/100] can_838        n=838      Auto→merge3 cu=   0.76 serial=  1.116 m3=  0.329 Auto=    0.2 Ocean=  0.375 HSMU=   0.38 (5.9s)
-[100/100] can_96         n=96       Auto→merge3 cu=  0.626 serial=  0.483 m3=  0.138 Auto=  0.141 Ocean=  0.348 HSMU=   0.32 (6.2s)
-
-完成 → compare/method_cmp_20260722_124112/methods_cmp.csv
-
-=== 几何均值(ms) ===
-  cu          0.868
-  serial      1.297
-  merge3      0.415
-  Auto        0.431
-  Ocean       0.333
-  HSMU        0.498
-
-=== Auto 选择(共 100 阵)===  hash 19 / merge3 81
-  选 hash 的:bcsstk08, bcsstk17, bcsstk18, bcsstk25, bcsstk29, bcsstk30, bcsstk31, bcsstk32, bcsstk33, bcsstm25, bp_0, bp_1000, bp_1200, bp_1400, bp_1600, bp_200, bp_400, bp_600, bp_800
-  ✓ 对比表: compare/method_cmp_20260722_124112/methods_cmp.csv (100 阵)
-### [4/4] 报告 + 柱状图(仿 full_compare_K=5.txt + profile_methods_bar.png)###
-  ✓ 报告: compare/method_cmp_20260722_124112/methods_cmp_report.txt
-  ✓ 图: compare/method_cmp_20260722_124112/methods_cmp_bar.png
-
-############################################################
-#  完成!产物在 compare/method_cmp_20260722_124112/  (HSMU /tmp CSV 由 EXIT trap 已恢复)
-############################################################
-methods_cmp_bar.png
-methods_cmp.csv
-methods_cmp_report.txt
-run.log
-
-================ 报告(每阵表 + 类别聚合 + 输给 Ocean)================
-[compute-only:稀疏法=各阶段求和去 h2d/d2h(对标 full_compare);Ocean=GPU 阶段求和;HSMU=time2]  ms
-class name                        n    cuSP   Ocean    HSMU  serial     m3    Auto Auto/Oce  m3/cu  m3/Oce
---------------------------------------------------------------------------------------------------------------------
- Dens can_24                       24   0.61   0.20   0.33   0.47   0.13   0.29   1.42   0.22   0.64
- Dens bcsstk02                     66   0.72   0.90   0.73   2.39   0.31   0.29   0.33   0.43   0.34
- Dens bcsstk04                    132   0.80   0.60   0.43   1.55   0.32   0.33   0.55   0.41   0.54
- Mild bcspwr01                     39   4.33   0.20   0.32   0.48   0.14   0.13   0.67   0.03   0.70
- Mild bcsstk01                     48   0.65   0.31   0.32   0.51   0.14   0.14   0.45   0.22   0.46
- Mild bcsstm01                     48   0.57   0.18   0.32   0.47   0.28   0.28   1.61   0.48   1.57
- Mild bcspwr02                     49   0.64   0.20   0.33   0.41   0.28   0.13   0.67   0.45   1.42
- Mild can_61                       61   0.60   0.34   0.33   0.62   0.28   0.14   0.42   0.46   0.81
- Mild can_62                       62   0.56   0.20   0.32   0.46   0.15   0.13   0.65   0.26   0.73
- Mild bcsstm02                     66   0.61   0.18   0.32   0.41   0.29   0.26   1.46   0.47   1.59
- Mild can_73                       73   0.43   0.21   0.29   0.60   0.14   0.29   1.39   0.33   0.68
- Mild ash85                        85   0.42   0.20   0.32   0.32   0.47   0.28   1.36   1.12   2.28
- Mild can_96                       96   0.63   0.35   0.32   0.48   0.14   0.14   0.41   0.22   0.40
- Mild bcsstk03                    112   0.46   0.18   0.32   0.45   0.28   0.13   0.72   0.60   1.52
- Mild bcspwr03                    118   0.83   0.21   0.33   0.51   0.27   0.24   1.17   0.32   1.29
- Mild arc130                      130   0.47   0.38   0.46   1.92   0.73   0.21   0.57   1.55   1.94
- Mild bcsstk22                    138   3.91   0.25   0.32   0.51   0.31   0.15   0.60   0.08   1.25
- Mild can_144                     144   0.45   0.32   0.34   0.52   0.24   0.15   0.46   0.54   0.75
- Mild bcsstk05                    153   0.46   0.35   0.39   0.67   0.18   0.32   0.92   0.39   0.51
- Mild can_161                     161   0.64   0.33   0.34   0.52   0.21   0.28   0.87   0.33   0.65
- Mild can_187                     187   0.41   0.34   0.35   0.24   0.26   0.21   0.61   0.64   0.78
- Mild can_229                     229   0.64   0.35   0.33   0.48   0.17   0.32   0.93   0.27   0.49
- Mild can_256                     256   3.16   0.35   0.40   2.23   0.23   0.39   1.09   0.07   0.66
- Mild can_268                     268   0.52   0.36   0.37   1.04   0.54   0.35   0.98   1.04   1.50
- Mild bcspwr04                    274   0.39   0.23   0.34   0.34   0.15   0.30   1.31   0.38   0.63
- Mild ash292                      292   1.93   0.22   0.35   0.51   0.32   0.30   1.37   0.17   1.43
- Mild can_292                     292   0.48   0.35   0.36   0.65   0.32   0.32   0.92   0.67   0.93
- Mild bcsstk06                    420   4.87   0.36   0.38   0.93   0.19   0.19   0.52   0.04   0.52
- Mild bcsstk07                    420   0.75   0.36   0.39   0.89   0.32   0.20   0.55   0.43   0.90
- Mild bcsstm07                    420   0.77   0.34   0.35   0.77   0.37   0.46   1.35   0.49   1.09
- Mild can_445                     445   0.70   0.34   0.34   0.50   0.30   0.40   1.19   0.43   0.90
- Mild bcsstk27                  1,224   1.16   0.53   0.80   2.87   0.67   0.69   1.30   0.58   1.26
- Mild bcsstm27                  1,224   1.17   0.54   0.69   2.92   0.58   0.69   1.27   0.49   1.07
- Mild bcsstk14                  1,806   1.01   0.62   0.62   2.66   0.78   0.81   1.30   0.77   1.25
- Mild bcsstk13                  2,003   1.42   0.74   1.12   6.98   1.35   1.35   1.81   0.95   1.81
- High bcsstm03                    112   0.63   0.19   0.31   0.21   0.13   0.29   1.50   0.21   0.69
- High bcsstm04                    132   0.42   0.18   0.31   0.44   0.27   0.13   0.69   0.63   1.44
-
-(完整报告: compare/method_cmp_20260722_124112/methods_cmp_report.txt)
-对比表: compare/method_cmp_20260722_124112/methods_cmp.csv | 柱状图: compare/method_cmp_20260722_124112/methods_cmp_bar.png
-### 恢复 HSMU /tmp CSV(从 /tmp/hsmu_backup_20260722_124112)###
+[1/100] 1138_bus       n=1138     Auto→merge3 cu=  0.394 serial=  0.269 m3=  0.154 Auto=  0.141 Ocean=   0.22 HSMU=  0.304 (5.1s)
+[2/100] 494_bus        n=494      Auto→merge3 cu=  0.365 serial=  0.225 m3=   0.15 Auto=  0.124 Ocean=  0.216 HSMU=  0.312 (5.0s)
+[3/100] 662_bus        n=662      Auto→merge3 cu=  0.415 serial=  0.233 m3=   0.12 Auto=  0.121 Ocean=  0.205 HSMU=  0.247 (5.0s)
+[4/100] 685_bus        n=685      Auto→merge3 cu=  0.344 serial=  0.287 m3=  0.178 Auto=  0.147 Ocean=  0.218 HSMU=  0.291 (5.0s)
+[5/100] arc130         n=130      Auto→merge3 cu=  0.398 serial=  1.524 m3=  0.188 Auto=  0.186 Ocean=  0.374 HSMU=  0.404 (5.0s)
+[6/100] ash292         n=292      Auto→merge3 cu=  0.339 serial=  0.242 m3=  0.145 Auto=  0.227 Ocean=  0.219 HSMU=   0.32 (5.0s)
+[7/100] ash85          n=85       Auto→merge3 cu=  0.332 serial=  0.209 m3=  0.131 Auto=   0.12 Ocean=  0.204 HSMU=  0.306 (5.1s)
+[8/100] bcspwr01       n=39       Auto→merge3 cu=   0.34 serial=  0.198 m3=   0.12 Auto=  0.122 Ocean=  0.186 HSMU=  0.276 (5.0s)
+[9/100] bcspwr02       n=49       Auto→merge3 cu=   0.35 serial=  0.214 m3=  0.115 Auto=   0.12 Ocean=  0.201 HSMU=  0.287 (5.0s)
+[10/100] bcspwr03       n=118      Auto→merge3 cu=   0.36 serial=  0.223 m3=   0.12 Auto=  0.151 Ocean=  0.201 HSMU=  0.305 (5.1s)
+[11/100] bcspwr04       n=274      Auto→merge3 cu=  0.387 serial=  0.327 m3=  0.151 Auto=  0.128 Ocean=  0.247 HSMU=  0.299 (5.1s)
+[12/100] bcspwr05       n=443      Auto→merge3 cu=  0.359 serial=  0.292 m3=   0.12 Auto=  0.161 Ocean=  0.227 HSMU=  0.317 (5.1s)
+[13/100] bcspwr06       n=1454     Auto→merge3 cu=  0.346 serial=  0.262 m3=  0.171 Auto=  0.149 Ocean=  0.206 HSMU=  0.298 (5.0s)
+[14/100] bcspwr07       n=1612     Auto→merge3 cu=  0.414 serial=  0.268 m3=  0.154 Auto=  0.182 Ocean=  0.219 HSMU=  0.323 (5.1s)
+[15/100] bcspwr08       n=1624     Auto→merge3 cu=  0.362 serial=  0.253 m3=  0.184 Auto=  0.163 Ocean=  0.223 HSMU=  0.241 (5.1s)
+[16/100] bcspwr09       n=1723     Auto→merge3 cu=  0.412 serial=  0.263 m3=  0.146 Auto=  0.148 Ocean=  0.209 HSMU=  0.317 (5.0s)
+[17/100] bcspwr10       n=5300     Auto→merge3 cu=  0.462 serial=  0.425 m3=  0.177 Auto=  0.182 Ocean=   0.22 HSMU=   0.91 (5.0s)
+[18/100] bcsstk01       n=48       Auto→merge3 cu=  0.346 serial=  0.283 m3=   0.12 Auto=  0.127 Ocean=  0.317 HSMU=  0.283 (5.1s)
+[19/100] bcsstk02       n=66       Auto→merge3 cu=  0.412 serial=   1.72 m3=  0.168 Auto=  0.149 Ocean=  0.864 HSMU=  0.676 (5.1s)
+[20/100] bcsstk03       n=112      Auto→merge3 cu=  0.356 serial=  0.214 m3=  0.116 Auto=  0.115 Ocean=  0.166 HSMU=   0.29 (5.1s)
+[21/100] bcsstk04       n=132      Auto→merge3 cu=  0.427 serial=  1.171 m3=  0.158 Auto=  0.175 Ocean=   0.53 HSMU=  0.388 (5.1s)
+[22/100] bcsstk05       n=153      Auto→merge3 cu=  0.371 serial=  0.349 m3=  0.151 Auto=   0.16 Ocean=  0.306 HSMU=  0.327 (5.0s)
+[23/100] bcsstk06       n=420      Auto→merge3 cu=  0.401 serial=   0.57 m3=  0.166 Auto=  0.171 Ocean=  0.319 HSMU=  0.333 (5.1s)
+[24/100] bcsstk07       n=420      Auto→merge3 cu=  0.461 serial=  0.564 m3=  0.164 Auto=  0.164 Ocean=  0.307 HSMU=  0.353 (5.1s)
+[25/100] bcsstk08       n=1074     Auto→hash   cu=  0.737 serial= 21.062 m3=  1.054 Auto=  0.915 Ocean=   0.39 HSMU=  0.797 (5.2s)
+[26/100] bcsstk09       n=1083     Auto→merge3 cu=  0.451 serial=  0.839 m3=  0.205 Auto=   0.25 Ocean=  0.372 HSMU=  0.349 (5.1s)
+[27/100] bcsstk10       n=1086     Auto→merge3 cu=  0.488 serial=   0.99 m3=  0.243 Auto=   0.21 Ocean=  0.444 HSMU=  0.358 (5.1s)
+[28/100] bcsstk11       n=1473     Auto→merge3 cu=  0.671 serial=   1.04 m3=   0.23 Auto=  0.252 Ocean=  0.416 HSMU=  0.536 (5.1s)
+[29/100] bcsstk12       n=1473     Auto→merge3 cu=  0.623 serial=   1.12 m3=  0.221 Auto=  0.213 Ocean=   0.54 HSMU=  0.522 (5.1s)
+[30/100] bcsstk13       n=2003     Auto→merge3 cu=   0.97 serial=  6.089 m3=  1.016 Auto=  1.023 Ocean=  0.663 HSMU=  0.906 (5.2s)
+[31/100] bcsstk14       n=1806     Auto→merge3 cu=  0.824 serial=  1.973 m3=  0.518 Auto=  0.498 Ocean=  1.104 HSMU=  0.535 (5.2s)
+[32/100] bcsstk15       n=3948     Auto→merge3 cu=   1.19 serial=   2.44 m3=  0.714 Auto=  0.769 Ocean=  0.435 HSMU=  0.686 (5.2s)
+[33/100] bcsstk16       n=4884     Auto→merge3 cu=  1.868 serial=  8.825 m3=  1.825 Auto=  1.818 Ocean=  0.771 HSMU=  1.452 (5.6s)
+[34/100] bcsstk17       n=10974    Auto→hash   cu=  2.432 serial=   9.76 m3=  1.826 Auto=  1.152 Ocean=  0.823 HSMU=  1.772 (5.7s)
+[35/100] bcsstk18       n=11948    Auto→hash   cu=  0.956 serial=  3.434 m3=  0.832 Auto=  1.063 Ocean=  0.452 HSMU=  1.297 (5.4s)
+[36/100] bcsstk19       n=817      Auto→merge3 cu=  0.374 serial=  0.302 m3=  0.154 Auto=  0.145 Ocean=  0.347 HSMU=  0.309 (5.0s)
+[37/100] bcsstk20       n=485      Auto→merge3 cu=  0.347 serial=  0.229 m3=  0.164 Auto=   0.13 Ocean=  0.221 HSMU=  0.305 (5.0s)
+[38/100] bcsstk21       n=3600     Auto→merge3 cu=  0.531 serial=  0.469 m3=  0.213 Auto=   0.19 Ocean=  0.232 HSMU=  0.412 (5.0s)
+[39/100] bcsstk22       n=138      Auto→merge3 cu=  0.395 serial=  0.213 m3=  0.124 Auto=   0.12 Ocean=  0.214 HSMU=  0.317 (5.0s)
+[40/100] bcsstk23       n=3134     Auto→merge3 cu=  0.704 serial=  1.424 m3=  0.403 Auto=  0.397 Ocean=   0.34 HSMU=  0.521 (5.3s)
+[41/100] bcsstk24       n=3562     Auto→merge3 cu=   1.24 serial=  3.231 m3=  0.745 Auto=  0.726 Ocean=  0.604 HSMU=  1.258 (5.0s)
+[42/100] bcsstk25       n=15439    Auto→hash   cu=  1.261 serial=  3.426 m3=  1.227 Auto=  1.039 Ocean=  0.445 HSMU=  1.477 (5.2s)
+[43/100] bcsstk26       n=1922     Auto→merge3 cu=  0.545 serial=  1.172 m3=  0.226 Auto=  0.233 Ocean=  0.301 HSMU=  0.509 (5.0s)
+[44/100] bcsstk27       n=1224     Auto→merge3 cu=  0.728 serial=  2.056 m3=   0.44 Auto=  0.484 Ocean=  0.504 HSMU=  0.643 (5.1s)
+[45/100] bcsstk28       n=4410     Auto→merge3 cu=  1.372 serial=  5.365 m3=  1.008 Auto=  1.021 Ocean=  0.745 HSMU=  1.353 (5.4s)
+[46/100] bcsstk29       n=13992    Auto→hash   cu=  3.172 serial=  9.357 m3=  2.064 Auto=  1.471 Ocean=  0.977 HSMU=  1.736 (5.4s)
+[47/100] bcsstk30       n=28924    Auto→hash   cu=  8.975 serial= 88.227 m3= 15.932 Auto=  3.627 Ocean=  2.428 HSMU=  5.153 (7.4s)
+[48/100] bcsstk31       n=35588    Auto→hash   cu=  5.192 serial= 19.593 m3=  4.316 Auto=  2.285 Ocean=  1.292 HSMU=  2.788 (6.2s)
+[49/100] bcsstk32       n=44609    Auto→hash   cu=  8.618 serial= 36.693 m3=  7.183 Auto=  3.327 Ocean=  1.796 HSMU=  3.804 (7.0s)
+[50/100] bcsstk33       n=8738     Auto→hash   cu=   3.22 serial= 20.201 m3=  3.876 Auto=  1.448 Ocean=  1.583 HSMU=   1.94 (5.6s)
+[51/100] bcsstm01       n=48       Auto→merge3 cu=  0.399 serial=  0.193 m3=  0.105 Auto=  0.103 Ocean=  0.152 HSMU=  0.266 (5.1s)
+[52/100] bcsstm02       n=66       Auto→merge3 cu=  0.328 serial=  0.167 m3=  0.102 Auto=  0.116 Ocean=  0.169 HSMU=  0.299 (5.0s)
+[53/100] bcsstm03       n=112      Auto→merge3 cu=   0.34 serial=  0.181 m3=  0.109 Auto=  0.119 Ocean=   0.16 HSMU=  0.266 (5.0s)
+[54/100] bcsstm04       n=132      Auto→merge3 cu=   0.35 serial=  0.187 m3=  0.106 Auto=  0.109 Ocean=   0.17 HSMU=  0.281 (5.0s)
+[55/100] bcsstm05       n=153      Auto→merge3 cu=  0.336 serial=  0.213 m3=   0.12 Auto=  0.103 Ocean=  0.172 HSMU=  0.274 (5.0s)
+[56/100] bcsstm06       n=420      Auto→merge3 cu=  0.385 serial=  0.169 m3=  0.114 Auto=  0.107 Ocean=  0.176 HSMU=  0.294 (5.0s)
+[57/100] bcsstm07       n=420      Auto→merge3 cu=  0.477 serial=  0.623 m3=  0.181 Auto=  0.147 Ocean=  0.309 HSMU=  0.341 (5.0s)
+[58/100] bcsstm08       n=1074     Auto→merge3 cu=  0.389 serial=  0.168 m3=  0.133 Auto=  0.119 Ocean=  0.173 HSMU=  0.322 (5.1s)
+[59/100] bcsstm09       n=1083     Auto→merge3 cu=  0.353 serial=  0.164 m3=  0.113 Auto=  0.111 Ocean=  0.161 HSMU=  0.312 (5.0s)
+[60/100] bcsstm10       n=1086     
