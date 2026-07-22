@@ -31,6 +31,7 @@ extern __global__ void count_intermediates_kernel(
 #endif
 #define HASH_BLOCK 256
 #define N_BINS 11    // 10 hash ht-buckets(ht=32<<i, i=0..9) + 1 ultra(flop≤16)
+#define CSORT_HT 1024   // ht≤此值的行(bin0-5)在 accumulate 内 count-sort 写有序;compact 阶段只 copy
 
 // HLL(HyperLogLog)概率基数估计:替 flop_ub 定 tmp buffer + hash 表大小(统一 sizing)
 // Ocean 两阶段架构:Phase1 对 B(=A 自乘)每行建 sketch(O(nnz));Phase2 对 A 每行读 B 的 sketch 做 packed merge(O(nnz))
@@ -253,21 +254,44 @@ __global__ void hash_spa_kernel(
     }
     __syncthreads();
 
-    // extract 去重项 → tmp(行内无序,行间按 row_off 连续)
+    // extract 去重项 → tmp。小行(ht≤CSORT_HT)在 SMEM 内 compact+count-sort 写有序(Ocean compactAndSort 式);
+    //   大行无序写(交 compact_sort 的 BlockRadixSort)。
     __shared__ int cnt;
     if (tid == 0) cnt = 0;
     __syncthreads();
     int base = row_off[i];
-    for (int s = tid; s < ht_size; s += HASH_BLOCK) {
-        int c = sh_col[s];
-        if (c >= 0) {
-            int pos = base + atomicAdd(&cnt, 1);
-            tmp_key[pos] = ((unsigned long long)i << 32) | (unsigned int)c;
-            tmp_val[pos] = sh_val[s];
+    if (ht_size <= CSORT_HT) {
+        // compact 到前部:chunked 读进寄存器→sync→写前部(read-before-write 防 race)
+        for (int it = 0; it < (ht_size + HASH_BLOCK - 1) / HASH_BLOCK; it++) {
+            int s = it * HASH_BLOCK + tid;
+            int c = -1; float v = 0.0f;
+            if (s < ht_size) { c = sh_col[s]; v = sh_val[s]; }
+            __syncthreads();
+            if (c >= 0) { int pos = atomicAdd(&cnt, 1); sh_col[pos] = c; sh_val[pos] = v; }
+            __syncthreads();
         }
+        int count = cnt;
+        for (int k = tid; k < count; k += HASH_BLOCK) {      // count-sort:数 < 自己的 → rank → 落有序位
+            int c = sh_col[k]; float v = sh_val[k]; int rank = 0;
+            for (int j = 0; j < count; j++) if (sh_col[j] < c) rank++;
+            tmp_key[base + rank] = ((unsigned long long)i << 32) | (unsigned int)c;
+            tmp_val[base + rank] = v;
+        }
+        __syncthreads();
+        if (tid == 0) row_nnz[i] = count;
+    } else {
+        // 大行:无序 extract(交 compact_sort)
+        for (int s = tid; s < ht_size; s += HASH_BLOCK) {
+            int c = sh_col[s];
+            if (c >= 0) {
+                int pos = base + atomicAdd(&cnt, 1);
+                tmp_key[pos] = ((unsigned long long)i << 32) | (unsigned int)c;
+                tmp_val[pos] = sh_val[s];
+            }
+        }
+        __syncthreads();
+        if (tid == 0) row_nnz[i] = cnt;
     }
-    __syncthreads();
-    if (tid == 0) row_nnz[i] = cnt;
 }
 
 // ultrasparse:est ≤ HLL_ULTRA_THR(HLL 估计 ≤ 16)。不建 hash,每线程一行,寄存器小数组线性去重累加
@@ -453,6 +477,22 @@ __global__ void scatter_rows_kernel(
     int bid = bucket_id[i];
     int slot = offsets[bid] + atomicAdd(&pos[bid], 1);
     sorted_rows[slot] = i;
+}
+
+// 小行专用:accumulate 已在 SMEM 内 count-sort 写有序,这里只把 tmp(gapped)→ CSR(packed) 纯 copy。
+__global__ void hash_compact_copy_kernel(
+    const int *rows, int n_rows,
+    const int *row_off, const int *row_nnz, const int *row_ptr,
+    const unsigned long long *tmp_key, const float *tmp_val,
+    int *out_col, float *out_val)
+{
+    if (blockIdx.x >= n_rows) return;
+    int row = rows[blockIdx.x];
+    int src = row_off[row], n = row_nnz[row], dst = row_ptr[row];
+    for (int t = threadIdx.x; t < n; t += blockDim.x) {
+        out_col[dst + t] = (int)(tmp_key[src + t] & 0xffffffffu);
+        out_val[dst + t] = tmp_val[src + t];
+    }
 }
 
 // launch helper:按 config 查 BlockRadixSort TempStorage 大小,>48KB 自动 opt-in 动态 shared(H100 可 ~228KB)。
@@ -664,16 +704,17 @@ void spgemm_self_product_hash(
             int n = h_cnt[bi];
             if (n == 0) continue;
             int *rows_ptr = d_sort + h_off[bi];
-            if (bi <= 1 || bi == N_BINS - 1)
-                launch_csort<64, 1>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
-            else if (bi <= 3)
-                launch_csort<128, 2>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
-            else if (bi <= 5)
-                launch_csort<256, 4>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
-            else if (bi <= 7)
+            if (bi <= 5) {
+                // 小行(ht≤CSORT_HT):accumulate 已 count-sort,这里只 compact_copy(tmp→CSR)
+                hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            } else if (bi <= 7) {
                 launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
-            else
+            } else if (bi <= 9) {
                 launch_csort<512, 32>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            } else {
+                // ultra(行≤32,无序):小 config sort
+                launch_csort<64, 1>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+            }
         }
         CHECK_CUDA(cudaGetLastError());
     });
