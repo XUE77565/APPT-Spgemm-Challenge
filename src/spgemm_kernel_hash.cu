@@ -27,6 +27,32 @@
 extern __global__ void count_intermediates_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub);
 
+// 并行 count flop_ub:每行一个 block,线程并行 Σ nnz(row k) + block 归约(无 straggler,O(nnz_A))。
+//   小阵 streamline 用它替 HLL 两阶段(1 kernel vs 2),flop_ub 是确定性上界(≥distinct,无 underflow)。
+__global__ void count_intermediates_par_kernel(
+    const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub)
+{
+    int i = blockIdx.x;
+    if (i >= A_rows) return;
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int s = 0;
+    for (int p = rs + threadIdx.x; p < re; p += blockDim.x) {
+        int k = A_col_idx[p];
+        s += A_row_ptr[k + 1] - A_row_ptr[k];
+    }
+    for (int off = 16; off > 0; off >>= 1) s += __shfl_down_sync(0xFFFFFFFF, s, off);   // warp 归约
+    __shared__ int warp_s[32];
+    int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+    if (lane == 0) warp_s[warp] = s;
+    __syncthreads();
+    int nwarps = blockDim.x >> 5;
+    if (warp == 0) {
+        s = (lane < nwarps) ? warp_s[lane] : 0;
+        for (int off = 16; off > 0; off >>= 1) s += __shfl_down_sync(0xFFFFFFFF, s, off);
+        if (lane == 0) ub[i] = s;
+    }
+}
+
 #ifndef HASH_CAP
 #define HASH_CAP 16384         // 重行桶 hash 表最大槽位(→ col+val = 128KB/块)
 #endif
@@ -540,8 +566,10 @@ void spgemm_self_product_hash(
     float *dA_val = (float*)(b + A_rp_sz + A_ci_sz);
     dbg("[hash] h2d\n");
 
-    // Stage 1: row_off 改由 HLL est 的 scan 给出(见下 HLL 块)。统一 sizing 到 HLL,删 flop_ub count。
-    //   count_intermediates_kernel 定义在 spgemm_kernel_manual.cu,merge 路径仍在用,这里只不再调用。
+    // Stage 1: row_off 由 HLL est 的 scan 给出。
+    //   (曾试 pipeline 精简:小阵用 flop_ub count 替 HLL 两阶段 —— bp_0 有效(0.36→0.32),但
+    //    ① count 对高 flop 阵(bcsstk08)异常慢;② 把重行推到 bin8 触发潜在 bin8-9 compact_sort
+    //    config bug("too many resources",该 config 是从未被 launch 的死代码)。已回滚 HLL-only。)
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
 
     // HLL 估计(Ocean 两阶段):Phase1 对 B 建 sketch(O(nnz));Phase2 对 A 每行 merge(O(nnz))
@@ -560,7 +588,6 @@ void spgemm_self_product_hash(
             CHECK_CUDA(cudaGetLastError());
         });
         // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
-        // blockDim = HLL_M / bytes_per_thread,使 blockDim×bpt = HLL_M(smem_merge 大小)
         int p2_block = HLL_M / 4;   // blockDim = HLL_M/4,使 blockDim×4=HLL_M(smem_merge 大小)
         int smem_p2 = HLL_M;
         prof("hll_merge", [&]{
