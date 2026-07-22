@@ -231,11 +231,14 @@ __global__ void hash_spa_kernel(
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    for (int p = rs; p < re; p++) {                     // 整块顺序遍历 k
+    constexpr int G = 16;                                // 每 warp(组)处理一个 k:G 线程并行 j,num_groups 个 k 并行(保 atomic 并发;扫 4/8/16/32/64 → 16 最优)
+    int num_groups = HASH_BLOCK / G;
+    int my_group = tid / G, my_id = tid % G;
+    for (int p = rs + my_group; p < re; p += num_groups) {   // 并行 k(stride num_groups)
         int k = A_col_idx[p];
         float a_ik = A_val[p];
         int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
-        for (int q = ks + tid; q < ke; q += HASH_BLOCK) {
+        for (int q = ks + my_id; q < ke; q += G) {           // 组内 G 线程并行 j
             int j = A_col_idx[q];
             float v = a_ik * A_val[q];
             unsigned slot = ((unsigned)(j * 2654435761u)) & mask;   // Knuth 乘法 hash
