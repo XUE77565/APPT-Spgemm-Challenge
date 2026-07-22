@@ -15,16 +15,47 @@ OCEAN_CFG = "config/bench_detail.json"
 OCEAN_STATS = os.path.join(REPO, "ocean/stats.json")
 HSMU_BIN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/evaluation/script/test")
 HSMU_CSV = "/tmp/NHC_4080S_result.csv"
+# dense baseline(-O0 朴素 dense matmul,cudaEvent kernel time,同口径)缓存:由 scripts/run_dense_baseline.py 生成
+DENSE_CACHE = os.path.join(REPO, "compare/dense_baseline.csv")
+
+def load_dense_cache():
+    """读 compare/dense_baseline.csv → {matrix: dense_ms(float) 或 'timeout'/'fail'}。"""
+    d = {}
+    if os.path.exists(DENSE_CACHE):
+        for r in csv.DictReader(open(DENSE_CACHE)):
+            v = r.get("dense_ms", "")
+            try: v = float(v)
+            except: pass
+            d[r["matrix"]] = v
+    return d
 
 # 每次 spgemm_test/ocean/hsmu 调用的超时(秒),可被 env TIMEOUT 覆盖
 CALL_TIMEOUT = int(os.environ.get("TIMEOUT", "200"))
 
-# METHOD → dbg phase tag(adaptive 由 choice 决定 mrg3/hash)
-METHOD_TAG = {"cu": "cu", "serial": "merge", "merge3": "mrg3", "adaptive": None}
+# METHOD → cudaEvent prof tag(HashProf 输出 [tag-prof];adaptive 由 choice 决定 hash/mrg3)
+METHOD_TAG = {"serial": "merge-prof", "merge3": "mrg3-prof", "hash": "hash-prof", "adaptive": None}
 
+def compute_only_from_prof(stderr, tag):
+    """从 [tag-prof] cudaEvent phase 求 compute-only = TOTAL(GPU) − h2d − d2h。
+    纯 GPU 时间(抗 CPU 争用),内部控制流 D2H 已在 phase 块内 → 与 Ocean 同口径。取最后一次(timed run)。"""
+    if not tag:
+        return None
+    rx = re.compile(r"\[" + re.escape(tag) + r"\]\s+(\S+)\s+([0-9.]+)\s+ms")
+    phases = {}
+    for line in stderr.splitlines():
+        m = rx.search(line)
+        if m:
+            phases[m.group(1)] = float(m.group(2))    # 覆盖 → 保留最后一次
+    if not phases:
+        return None
+    total = phases.get("TOTAL(GPU)")
+    if total is not None:
+        return total - phases.get("h2d", 0.0) - phases.get("d2h", 0.0)
+    return sum(v for k, v in phases.items() if k not in ("h2d", "d2h"))
+
+# fallback:host 时间戳(供无 HashProf 的方法,如 serial)。被 CPU 争用放大,仅次选。
+DBG_TAG = {"serial": "merge", "merge3": "mrg3"}
 def compute_only_from_dbg(stderr, tag):
-    """从 [dbg ms][tag] phase 时间戳算 compute-only(ms):各 phase span 求和,排除 h2d/d2h。
-    取每个 phase 最后一次出现(= timed run,跳过 warmup)。对标 profile_aa._compute_only。"""
     if not tag:
         return None
     phases = {}
@@ -32,19 +63,19 @@ def compute_only_from_dbg(stderr, tag):
     for line in stderr.splitlines():
         m = rx.search(line)
         if m:
-            phases[m.group(2)] = float(m.group(1))    # 覆盖 → 保留最后一次
+            phases[m.group(2)] = float(m.group(1))
     if len(phases) < 2:
         return None
-    items = sorted(phases.items(), key=lambda kv: kv[1])   # 按时间戳排序
+    items = sorted(phases.items(), key=lambda kv: kv[1])
     total = 0.0
     for i in range(1, len(items)):
-        if items[i][0] in ("h2d", "d2h"):                  # 排除传输
+        if items[i][0] in ("h2d", "d2h"):
             continue
         total += items[i][1] - items[i - 1][1]
     return total
 
-# spgemm_test 方法名 → METHOD 关键字(主程序的 should_run_method)
-SPGEMM_METHODS = [("cu", "cu"), ("serial", "serial"), ("merge3", "merge3"), ("Auto", "adaptive")]
+# spgemm_test 方法名 → METHOD 关键字(cuSPARSE 已移除,换 baseline dense 算子)
+SPGEMM_METHODS = [("serial", "serial"), ("merge3", "merge3"), ("Auto", "adaptive")]
 
 def find_mtx(name):
     for d in ("data/first100", "data/sota_27_final", "data/sota_27"):
@@ -88,11 +119,13 @@ def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT):
     else:
         mm = re.findall(r"→\s*(hash|merge3)", adapt)
         choice = mm[-1] if mm else ""
-    # dbg tag:adaptive 用 choice 决定 mrg3/hash
+    # cudaEvent prof tag:adaptive 用 choice 决定 hash-prof/mrg3-prof
     tag = METHOD_TAG.get(method_key)
     if method_key == "adaptive":
-        tag = "hash" if choice.startswith("hash") else "mrg3"
-    comp = compute_only_from_dbg(r.stderr, tag)
+        tag = "hash-prof" if choice.startswith("hash") else "mrg3-prof"
+    comp = compute_only_from_prof(r.stderr, tag)
+    if comp is None:   # fallback:host 时间戳(serial 等无 HashProf 的方法,被争用放大,次选)
+        comp = compute_only_from_dbg(r.stderr, DBG_TAG.get(method_key))
     if wall:
         w = float(wall.group(1))
         return (comp if comp is not None else w, w, int(nz.group(1)) if nz else -1, choice)
@@ -157,7 +190,7 @@ def main():
     if os.path.exists(args.out):
         for r in csv.DictReader(open(args.out)):
             done.add(r["matrix"])
-    fieldnames = ["matrix", "n", "sym", "density_pct", "cu", "serial", "merge3", "Auto",
+    fieldnames = ["matrix", "n", "sym", "density_pct", "baseline", "serial", "merge3", "Auto",
                   "Auto_choice", "Ocean", "HSMU", "cnnz"]
     fout = open(args.out, "a", newline="")
     w = csv.DictWriter(fout, fieldnames=fieldnames)
@@ -165,7 +198,8 @@ def main():
         w.writeheader()
 
     N = len(names)
-    print(f"对比 {N} 阵 × {[m[0] for m in SPGEMM_METHODS]} + Ocean + HSMU → {args.out}\n", flush=True)
+    dense_cache = load_dense_cache()
+    print(f"对比 {N} 阵 × {[m[0] for m in SPGEMM_METHODS]} + Ocean + HSMU + dense-baseline(cache) → {args.out}\n", flush=True)
     for i, name in enumerate(names):
         if name in done:
             continue
@@ -188,10 +222,13 @@ def main():
         row["Ocean"] = round(run_ocean(p), 3) if not args.no_ocean else ""
         # HSMU
         row["HSMU"] = round(run_hsmu(p, name), 3) if not args.no_hsmu else ""
+        # dense baseline(从 cache 读,不重跑)
+        bv = dense_cache.get(name, "")
+        row["baseline"] = round(bv, 3) if isinstance(bv, float) else bv
         w.writerow(row); fout.flush()
         dt = time.time() - t0
         # 结果行:Auto 选择放最前(每阵旁边),紧跟矩阵名
-        print(f"Auto→{row.get('Auto_choice','?'):<6} cu={row['cu']!s:>7} serial={row['serial']!s:>7} "
+        print(f"Auto→{row.get('Auto_choice','?'):<6} dense={row['baseline']!s:>8} serial={row['serial']!s:>7} "
               f"m3={row['merge3']!s:>7} Auto={row['Auto']!s:>7} Ocean={row['Ocean']!s:>7} "
               f"HSMU={row['HSMU']!s:>7} ({dt:.1f}s)", flush=True)
     fout.close()
@@ -204,7 +241,7 @@ def main():
         if not xs: return float("nan")
         return math.exp(sum(math.log(x) for x in xs) / len(xs))
     print("\n=== 几何均值(ms) ===")
-    for col in [m[0] for m in SPGEMM_METHODS] + ["Ocean", "HSMU"]:
+    for col in ["baseline"] + [m[0] for m in SPGEMM_METHODS] + ["Ocean", "HSMU"]:
         gm = geomean(col)
         if gm == gm:
             print(f"  {col:8} {gm:8.3f}")

@@ -27,6 +27,13 @@ clean:
 test: $(TARGET)
 	./$(TARGET) data/sphere2/sphere2.mtx
 
+# 稠密 baseline 算子(比赛基准;朴素 dense matmul,-O0 不优化,独立 binary)
+# cudaEvent 只计 kernel(不含 h2d/d2h)= 与 hash/Ocean compute-only 同口径
+spgemm_dense: src/spgemm_dense.cu src/matrix_utils.cu src/mempool.cu $(HEADERS)
+	$(NVCC) -O0 -arch=sm_90 -std=c++14 $(INCLUDES) -o $@ src/spgemm_dense.cu src/matrix_utils.cu src/mempool.cu $(LIBS)
+
+dense: spgemm_dense
+
 run_all: $(TARGET)
 	bash scripts/run_all.sh
 

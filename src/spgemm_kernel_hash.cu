@@ -1,4 +1,5 @@
 #include "spgemm.h"
+#include "hash_prof.h"
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
 #include <thrust/scan.h>
@@ -520,36 +521,12 @@ __global__ void hash_check_sorted_kernel(const int *row_ptr, const int *col, int
 
 // ========== Host ==========
 
-// cudaEvent phase profiler:elapsed 在 GPU stream 上量 → 抗 CPU 争用(不受 host 调度延迟影响)。
-// RAII:函数返回(含 error 路径)时自动打印 TOTAL + 释放 event。DBG-gated;非 DBG 退化为直接执行。
-#ifdef DBG
-struct HashProf {
-    cudaEvent_t s, e; double total = 0.0;
-    HashProf() { cudaEventCreate(&s); cudaEventCreate(&e); }
-    ~HashProf() {
-        dbg("[hash-prof] %-16s %7.3f ms\n", "TOTAL(GPU)", total);
-        cudaEventDestroy(s); cudaEventDestroy(e);
-    }
-    template <class F> void operator()(const char* name, F&& fn) {
-        cudaEventRecord(s);
-        fn();
-        cudaEventRecord(e);
-        cudaEventSynchronize(e);                 // 等 GPU 到 e(elapsed 不含 host 等待)
-        float ms = 0.f; cudaEventElapsedTime(&ms, s, e);
-        dbg("[hash-prof] %-16s %7.3f ms\n", name, (double)ms);
-        total += ms;
-    }
-};
-#else
-struct HashProf { template <class F> void operator()(const char*, F&& fn) { fn(); } };
-#endif
-
 void spgemm_self_product_hash(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
     dbg("[hash] start (HASH_CAP=%d, HLL_P=%d)\n", HASH_CAP, HLL_P);
-    HashProf prof;
+    HashProf prof("hash-prof");
 
     size_t A_rp_sz = (A_rows + 1) * sizeof(int);
     size_t A_ci_sz = (size_t)A_nnz * sizeof(int);

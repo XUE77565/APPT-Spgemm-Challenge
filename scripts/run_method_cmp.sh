@@ -1,7 +1,7 @@
 #!/bin/bash
 # ===========================================================================
 #  方法对比脚本(仿 run_full_compare.sh)
-#  对比:Ocean / HSMU / cuSPARSE / merge(serial) / merge3 / Auto
+#  对比:Ocean / HSMU / dense-baseline(-O0) / merge(serial) / merge3 / Auto
 #    Auto = src/spgemm_adaptive.cu 的自适应(flop_proxy=A_nnz²/n >1e8 → hash,否则 merge3)
 #  每矩阵:METHOD=<m> 跑 spgemm_test 取该方法时间 + ocean/convert+spgemm + HSMU test
 #  → 增量 CSV + 几何均值。
@@ -43,19 +43,27 @@ trap restore_hsmu EXIT INT TERM
 
 echo "############################################################"
 echo "#  SpGEMM 方法对比  →  $OUT/"
-echo "#  Ocean / HSMU / cuSPARSE / merge(serial) / merge3 / Auto"
+echo "#  Ocean / HSMU / dense-baseline(-O0) / merge(serial) / merge3 / Auto"
 echo "#  矩阵: $MATRIX_DIR  $([ $LIMIT -gt 0 ] && echo "(前 $LIMIT 阵)" || echo "(全部)")"
 echo "############################################################"
 
-echo "### [1/4] 编译 spgemm_test(DBG=1 开 phase 时间戳,含 hash + Auto)###"
-make DBG=1 >/dev/null 2>&1 || { echo "  ✗ make 失败"; exit 1; }
-echo "  ✓ done(spgemm 法计时为 compute-only,排除 h2d/d2h,对标 full_compare)"
+echo "### [1/4] 编译 spgemm_test(DBG=1,cudaEvent phase 计时,含 hash + Auto) + spgemm_dense(-O0 baseline)###"
+make DBG=1 dense >/dev/null 2>&1 || { echo "  ✗ make 失败"; exit 1; }
+echo "  ✓ done(spgemm 法 = cudaEvent compute-only[同 Ocean 口径];dense baseline = -O0 cudaEvent kernel)"
+
+echo "### [1b/4] dense baseline cache 检查(缺失则生成,一次性 ~10min)###"
+if [ -f compare/dense_baseline.csv ] && [ "$(($(wc -l < compare/dense_baseline.csv)-1))" -gt 0 ]; then
+  echo "  ✓ cache 已存在: compare/dense_baseline.csv ($(($(wc -l < compare/dense_baseline.csv)-1)) 阵)"
+else
+  echo "  cache 缺失 → 生成 dense baseline(-O0,first100 全阵)..."
+  $PY -u scripts/run_dense_baseline.py 2>&1 | tail -3
+fi
 
 echo "### [2/4] 备份 HSMU /tmp CSV → $BACKUP ###"
 for f in "${HSMU_CSVS[@]}"; do [ -f "/tmp/$f.csv" ] && cp "/tmp/$f.csv" "$BACKUP/"; done
 echo "  ✓ 备份 $(ls "$BACKUP" 2>/dev/null | wc -l) 个"
 
-echo "### [3/4] 对比(Ocean+HSMU+cu+serial+merge3+Auto,每方法/矩阵超时 ${TIMEOUT}s)###"
+echo "### [3/4] 对比(Ocean+HSMU+dense[cache]+serial+merge3+Auto,每方法/矩阵超时 ${TIMEOUT}s)###"
 ARGS="--out $OUT/methods_cmp.csv --dir $MATRIX_DIR"
 [ "$LIMIT" -gt 0 ]      && ARGS="$ARGS --limit $LIMIT"
 [ "$NO_OCEAN" -eq 1 ]   && ARGS="$ARGS --no-ocean"

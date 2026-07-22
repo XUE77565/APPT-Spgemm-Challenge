@@ -37,10 +37,10 @@ def main():
     for r in rows:
         r["_class"] = classify(r.get("density_pct", ""))
 
-    methods = [("Ocean", "#4a3aa7"), ("HSMU", "#1baf7a"), ("cuSPARSE", "#898781"),
+    methods = [("Ocean", "#4a3aa7"), ("HSMU", "#1baf7a"), ("dense", "#898781"),
                ("merge(serial)", "#c98a1e"), ("merge3", "#e0533d"), ("Auto", "#2a78d6")]
-    # CSV 列名 → 显示名
-    colmap = {"Ocean": "Ocean", "HSMU": "HSMU", "cuSPARSE": "cu",
+    # CSV 列名 → 显示名(dense baseline 从 compare/dense_baseline.csv 读)
+    colmap = {"Ocean": "Ocean", "HSMU": "HSMU", "dense": "baseline",
               "merge(serial)": "serial", "merge3": "merge3", "Auto": "Auto"}
 
     classes = [c for c in CLASS_ORDER if any(r["_class"] == c for r in rows)]
