@@ -47,36 +47,36 @@ def main():
 
     out = []
     out.append("[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h,同 Ocean 口径);dense=dense baseline(-O0) cudaEvent kernel]  ms")
-    out.append("class name                        n  dense   Ocean    HSMU  serial     m3    Auto Auto/Oce m3/base  m3/Oce")
+    out.append("class name                        n  dense   Ocean    HSMU     m3    Auto Auto/Oce Auto/base  m3/Oce")
     out.append("-" * 116)
     for r in rows:
-        base, oc, hs, se, m3, au = (fnum(r, k) for k in ("baseline", "Ocean", "HSMU", "serial", "merge3", "Auto"))
+        base, oc, hs, m3, au = (fnum(r, k) for k in ("baseline", "Ocean", "HSMU", "merge3", "Auto"))
         n_str = f"{r['_n']:,}"
         def ratio(a, b): return a / b if (a and b and b > 0) else None
         out.append(f"{CLASS_TAG.get(r['_class'],'?'):>5} {r['matrix']:<24}{n_str:>7}"
-                   f"{fmt(base)}{fmt(oc)}{fmt(hs)}{fmt(se)}{fmt(m3)}{fmt(au)}"
-                   f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(m3, base), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
+                   f"{fmt(base)}{fmt(oc)}{fmt(hs)}{fmt(m3)}{fmt(au)}"
+                   f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(au, base), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
 
     # ---- 按类别聚合 ----
     out.append("")
     out.append("=" * 116)
     out.append("按类别聚合(compute-only 均值,毫秒;比值为该类各阵比值的均值)")
     out.append("-" * 116)
-    out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'dense':>10}{'serial':>9}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'m3/base':>8}{'m3/Oce':>9}")
+    out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'dense':>10}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'Auto/base':>9}{'m3/Oce':>9}")
     for c in CLASS_ORDER:
         sub = [r for r in rows if r["_class"] == c]
         if not sub: continue
         oc = mean([fnum(r, "Ocean") for r in sub]); hs = mean([fnum(r, "HSMU") for r in sub])
-        base = mean([fnum(r, "baseline") for r in sub]); se = mean([fnum(r, "serial") for r in sub])
+        base = mean([fnum(r, "baseline") for r in sub])
         m3 = mean([fnum(r, "merge3") for r in sub]); au = mean([fnum(r, "Auto") for r in sub])
         ra = mean([fnum(r, "Auto") / fnum(r, "Ocean") for r in sub
                    if fnum(r, "Auto") and fnum(r, "Ocean")])
-        rmc = mean([fnum(r, "merge3") / fnum(r, "baseline") for r in sub
-                    if fnum(r, "merge3") and fnum(r, "baseline")])
+        rab = mean([fnum(r, "Auto") / fnum(r, "baseline") for r in sub
+                    if fnum(r, "Auto") and fnum(r, "baseline")])
         rmo = mean([fnum(r, "merge3") / fnum(r, "Ocean") for r in sub
                     if fnum(r, "merge3") and fnum(r, "Ocean")])
-        out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}{fmt(base,10,2)}{fmt(se,9,2)}"
-                   f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rmc,8,2)}{fmt(rmo,9,2)}")
+        out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}{fmt(base,10,2)}"
+                   f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rab,9,2)}{fmt(rmo,9,2)}")
 
     # ---- vs 参照法(Ocean / HSMU)的赢/输 ----
     def vs_section(label, col, ref_col, ref_name):

@@ -74,8 +74,8 @@ def compute_only_from_dbg(stderr, tag):
         total += items[i][1] - items[i - 1][1]
     return total
 
-# spgemm_test 方法名 → METHOD 关键字(cuSPARSE 已移除,换 baseline dense 算子)
-SPGEMM_METHODS = [("serial", "serial"), ("merge3", "merge3"), ("Auto", "adaptive")]
+# spgemm_test 方法名 → METHOD 关键字(cuSPARSE→baseline dense;serial 已移除)
+SPGEMM_METHODS = [("merge3", "merge3"), ("Auto", "adaptive")]
 
 def find_mtx(name):
     for d in ("data/first100", "data/sota_27_final", "data/sota_27"):
@@ -190,7 +190,7 @@ def main():
     if os.path.exists(args.out):
         for r in csv.DictReader(open(args.out)):
             done.add(r["matrix"])
-    fieldnames = ["matrix", "n", "sym", "density_pct", "baseline", "serial", "merge3", "Auto",
+    fieldnames = ["matrix", "n", "sym", "density_pct", "baseline", "merge3", "Auto",
                   "Auto_choice", "Ocean", "HSMU", "cnnz"]
     fout = open(args.out, "a", newline="")
     w = csv.DictWriter(fout, fieldnames=fieldnames)
@@ -228,7 +228,7 @@ def main():
         w.writerow(row); fout.flush()
         dt = time.time() - t0
         # 结果行:Auto 选择放最前(每阵旁边),紧跟矩阵名
-        print(f"Auto→{row.get('Auto_choice','?'):<6} dense={row['baseline']!s:>8} serial={row['serial']!s:>7} "
+        print(f"Auto→{row.get('Auto_choice','?'):<6} dense={row['baseline']!s:>8} "
               f"m3={row['merge3']!s:>7} Auto={row['Auto']!s:>7} Ocean={row['Ocean']!s:>7} "
               f"HSMU={row['HSMU']!s:>7} ({dt:.1f}s)", flush=True)
     fout.close()

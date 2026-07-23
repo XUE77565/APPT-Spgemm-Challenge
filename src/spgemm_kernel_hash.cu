@@ -67,6 +67,7 @@ __global__ void count_intermediates_par_kernel(
 #define HLL_M (1 << HLL_P)
 #define HLL_EXPAND 2.0                // expansion(覆盖 HLL 低估;×2 → 安全;溢出 → 回退 merge3 兜底)
 #define HLL_ULTRA_THR 16              // bin-snap:est≤此值 → ultrasparse(线性 kernel,CAP=32 留 2× 余量)
+#define STREAMLINE_NNZ 100000         // 小阵 pipeline 精简:A_nnz<此值 → flop_ub(1 count kernel)替 HLL 两阶段
 #define WARP_SIZE 32
 // HLL 偏差校正 α(标准公式 0.7213/(1+1.079/m) 预算;对齐 Ocean HLL_CONSTANT[Common.h])
 constexpr double HLL_CONSTANT[8] = {0.0, 0.0, 0.0, 0.0, 0.673, 0.697, 0.709, 0.715};
@@ -567,17 +568,18 @@ void spgemm_self_product_hash(
     dbg("[hash] h2d\n");
 
     // Stage 1: row_off 由 HLL est 的 scan 给出。
-    //   (曾试 pipeline 精简:小阵用 flop_ub count 替 HLL 两阶段 —— bp_0 有效(0.36→0.32),但
-    //    ① count 对高 flop 阵(bcsstk08)异常慢;② 把重行推到 bin8 触发潜在 bin8-9 compact_sort
-    //    config bug("too many resources",该 config 是从未被 launch 的死代码)。已回滚 HLL-only。)
+    //   (streamline:小阵用 flop_ub count 替 HLL 两阶段。bp_0 有效(0.36→0.32);bin8-9 sort
+    //    landmine 已修(<256,64>);count 实测 0.011ms 快(旧 0.85 是 clock 抖动)。现已重开。)
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
 
-    // HLL 估计(Ocean 两阶段):Phase1 对 B 建 sketch(O(nnz));Phase2 对 A 每行 merge(O(nnz))
-    //   (bin8-9 sort landmine 已修:compact_sort 用 launch_csort<256,64>。小阵 count 替 HLL 的
-    //    streamline 已验证可行 —— count 实测 0.011ms(快,之前 0.85ms 是 GPU clock 抖动),默认仍 HLL,
-    //    需要时可重开 count 路径,count_intermediates_par_kernel 已就位。)
+    // 估计每行 distinct:小阵(A_nnz<STREAMLINE_NNZ)→ flop_ub(1 并行 count kernel);大阵 → HLL 两阶段
     int *d_est; CHECK_CUDA(cudaMalloc(&d_est, A_rows * sizeof(int)));
-    {
+    if (A_nnz < STREAMLINE_NNZ) {
+        prof("count_flop", [&]{
+            count_intermediates_par_kernel<<<A_rows, 256>>>(dA_rp, dA_ci, A_rows, d_est);
+            CHECK_CUDA(cudaGetLastError());
+        });
+    } else {
         // Phase 1: 对 A(=B 自乘)每行建 HLL sketch。线性扫 CSR,O(nnz) 非 O(flop)。
         unsigned char *d_hll; CHECK_CUDA(cudaMalloc(&d_hll, (size_t)A_rows * HLL_M));
         int rows_per_block = 32;  // 大 rows_per_block 摊薄 SMEM init 开销(32×1024×4=128KB → opt-in)
