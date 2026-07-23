@@ -593,8 +593,8 @@ void spgemm_self_product_hash(
             CHECK_CUDA(cudaGetLastError());
         });
         // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
-        int p2_block = HLL_M / 4;   // blockDim = HLL_M/4,使 blockDim×4=HLL_M(smem_merge 大小)
-        int smem_p2 = HLL_M;
+        int p2_block = HLL_M / 2;   // blockDim×4 = 2×HLL_M → b_rows_per_iter=2(Ocean 同款,2× 吞吐)
+        int smem_p2 = HLL_M * 2;   // 2 批 × HLL_M(smem_merge 用)
         prof("hll_merge", [&]{
             hll_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
                 dA_rp, dA_ci, A_rows, d_hll, d_est);
