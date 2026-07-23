@@ -260,7 +260,7 @@ __global__ void hash_spa_kernel(
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    constexpr int G = 16;                                // 每 warp(组)处理一个 k:G 线程并行 j,num_groups 个 k 并行(保 atomic 并发;扫 4/8/16/32/64 → 16 最优)
+    constexpr int G = 16;                                // 固定 G=16(扫 4/8/16/32/64 → 16 最优;localLoadBalance 尝试 → 净负,因 scan 开销 > G 优化收益)
     int num_groups = HASH_BLOCK / G;
     int my_group = tid / G, my_id = tid % G;
     for (int p = rs + my_group; p < re; p += num_groups) {   // 并行 k(stride num_groups)
