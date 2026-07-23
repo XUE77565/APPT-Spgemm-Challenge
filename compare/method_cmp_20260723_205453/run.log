@@ -1,0 +1,5 @@
+对比 100 阵 × ['merge3', 'Auto'] + Ocean + HSMU → compare/method_cmp_20260723_205453/methods_cmp.csv
+
+[1/100] 1138_bus       n=1138     Auto→merge3 m3=  0.137 Auto=  0.126 Ocean=  0.222 HSMU=  0.337 (2.6s)
+[2/100] 494_bus        n=494      Auto→merge3 m3=  0.099 Auto=  0.122 Ocean=  0.196 HSMU=  0.337 (2.6s)
+[3/100] 662_bus        n=662      

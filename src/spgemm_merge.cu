@@ -695,18 +695,9 @@ void spgemm_self_product_merge3(
         CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     });
 
-    // ---- Stage 3: 每桶 merge 写值(精确分配,无需 compact)----
-    int *dC_col_idx; float *dC_val;
-    CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(float)));
-    prof("merge", [&]{
-        bucket_merge_kernel<<<grid, block32, smem_merge>>>(
-            dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, dC_row_ptr, d_bucket_off,
-            dC_col_idx, dC_val);
-        CHECK_CUDA(cudaGetLastError());
-    });
-
-    // ---- 打包 + D2h ----
+    // ---- Stage 3: 每桶 merge 写值 + 连续输出 dC_buffer=[row_ptr|col|val] ----
+    //   dC_col_idx/dC_val 是 dC_buffer 偏移别名 → merge 直写连续布局,免 pack 的 col/val 两个大 D2D gather(对齐 Ocean)。
+    //   dC_row_ptr(scan 产物)落位 dC_buffer 头部用 1 个小 D2D。精确大小(C_nnz_result 已知)。
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
     size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
@@ -716,11 +707,16 @@ void spgemm_self_product_merge3(
     void *dC_buffer;
     CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
     char *dC_base = (char*)dC_buffer;
-    prof("pack", [&]{
-        CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
-        CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx, C_col_idx_size, cudaMemcpyDeviceToDevice));
-        CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned, dC_val, C_val_size, cudaMemcpyDeviceToDevice));
+    int   *dC_col_idx = (int*)(dC_base + C_row_ptr_aligned);
+    float *dC_val     = (float*)(dC_base + C_row_ptr_aligned + C_col_idx_aligned);
+    prof("merge", [&]{
+        CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));   // row_ptr 落位(微秒级,纳入计时)
+        bucket_merge_kernel<<<grid, block32, smem_merge>>>(
+            dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, dC_row_ptr, d_bucket_off,
+            dC_col_idx, dC_val);
+        CHECK_CUDA(cudaGetLastError());
     });
+
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
     prof("d2h", [&]{ CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost)); });
@@ -729,6 +725,5 @@ void spgemm_self_product_merge3(
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = C_nnz_result;
 
     cudaFree(dA_buffer); cudaFree(d_bucket_nnz); cudaFree(d_bucket_off);
-    cudaFree(d_row_nnz); cudaFree(dC_row_ptr); cudaFree(dC_col_idx);
-    cudaFree(dC_val); cudaFree(dC_buffer);
+    cudaFree(d_row_nnz); cudaFree(dC_row_ptr); cudaFree(dC_buffer);   // dC_col_idx/dC_val 是 dC_buffer 别名
 }

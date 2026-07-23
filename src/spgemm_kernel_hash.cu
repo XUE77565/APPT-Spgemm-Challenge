@@ -620,9 +620,8 @@ void spgemm_self_product_hash(
     unsigned long long *d_tmp_key; float *d_tmp_val;
     CHECK_CUDA(cudaMalloc(&d_tmp_key, (size_t)total_est * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_tmp_val, (size_t)total_est * sizeof(float)));
-    // compact_sort 直接读 tmp_key、写 d_val(C_val);d_key 已不再需要(compact+sort 融合)
-    float *d_val;
-    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_est * sizeof(float)));
+    // d_val(C_val)现 alias 进连续 dC(compact+sort 直写,见 cnnz_scan 后),不再单独分配/释放。
+    float *d_val = nullptr;
 
     // 2a: GPU 端分桶(HLL est → bucket):bucket_id → count → exclusive scan → scatter(全 device)
     int *d_bkid; CHECK_CUDA(cudaMalloc(&d_bkid, A_rows * sizeof(int)));
@@ -678,7 +677,6 @@ void spgemm_self_product_hash(
         cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
-        cudaFree(d_val);
         return;
     }
 
@@ -702,15 +700,27 @@ void spgemm_self_product_hash(
         cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
-        cudaFree(d_val); cudaFree(dC_rp);
+        cudaFree(dC_rp);
         return;
     }
 
     // Stage 4+5+6: per-row compact+sort(Ocean sortOutputDyn 式 BlockRadixSort)一次替掉 compact + 全局 sort + split_key。
     //   每 block 一行:从 tmp(gapped,row_off)读 → BlockRadixSort 行内按 col 排 → 写 CSR(packed,row_ptr)。
     //   复用 est-分桶,按 bin 选 config(cap ≥ ht ≥ row_nnz):bi0-1/ultra→64×1, bi2-3→128×2, bi4-5→256×4, bi6-7→512×8, bi8-9→1024×16。
-    int *dC_ci; CHECK_CUDA(cudaMalloc(&dC_ci, (size_t)C_nnz_result * sizeof(int)));
+    //   输出连续 dC=[row_ptr|col|val](精确大小):dC_ci/d_val 是 dC 偏移别名 → compact+sort 直写连续布局,
+    //   免去旧 pack 的 col/val 两个大 D2D gather(对齐 Ocean 连续 C)。dC_rp(scan 产物)落位 dC 头部用 1 个小 D2D。
+    size_t C_rp_sz  = (A_rows + 1) * sizeof(int);
+    size_t C_ci_sz  = (size_t)C_nnz_result * sizeof(int);
+    size_t C_v_sz   = (size_t)C_nnz_result * sizeof(float);
+    size_t C_rp_al  = (C_rp_sz + 3) & ~3;
+    size_t C_ci_al  = (C_ci_sz + 3) & ~3;
+    size_t C_total  = C_rp_al + C_ci_al + C_v_sz;
+    void *dC; CHECK_CUDA(cudaMalloc(&dC, C_total));
+    char *cb = (char*)dC;
+    int   *dC_ci = (int*)(cb + C_rp_al);
+    d_val        = (float*)(cb + C_rp_al + C_ci_al);
     prof("compact+sort", [&]{
+        CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));   // row_ptr 落位(~A_rows ints,微秒级,纳入计时)
         for (int bi = 0; bi < N_BINS; bi++) {
             int n = h_cnt[bi];
             if (n == 0) continue;
@@ -741,20 +751,7 @@ void spgemm_self_product_hash(
     }
 #endif
 
-    // Stage 7: pack 成单块(dC malloc 是 host op,放外面)
-    size_t C_rp_sz = (A_rows + 1) * sizeof(int);
-    size_t C_ci_sz = (size_t)C_nnz_result * sizeof(int);
-    size_t C_v_sz = (size_t)C_nnz_result * sizeof(float);
-    size_t C_rp_al = (C_rp_sz + 3) & ~3;
-    size_t C_ci_al = (C_ci_sz + 3) & ~3;
-    size_t C_total = C_rp_al + C_ci_al + C_v_sz;
-    void *dC; CHECK_CUDA(cudaMalloc(&dC, C_total));
-    char *cb = (char*)dC;
-    prof("pack", [&]{
-        CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));
-        CHECK_CUDA(cudaMemcpy(cb + C_rp_al, dC_ci, C_ci_sz, cudaMemcpyDeviceToDevice));
-        CHECK_CUDA(cudaMemcpy(cb + C_rp_al + C_ci_al, d_val, C_v_sz, cudaMemcpyDeviceToDevice));
-    });
+    // Stage 7: 连续 dC 已就位(compact+sort 直写 col/val + row_ptr 已落位)→ 直接 D2H 前 C_total 字节 = packed [rp|ci|val]。免 pack。
 
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total));
@@ -767,5 +764,5 @@ void spgemm_self_product_hash(
 
     cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
     cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
-    cudaFree(dC_rp); cudaFree(d_val); cudaFree(dC_ci); cudaFree(dC);
+    cudaFree(dC_rp); cudaFree(dC);   // dC_ci/d_val 是 dC 的偏移别名,随 dC 一起释放
 }
