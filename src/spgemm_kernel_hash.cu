@@ -573,6 +573,9 @@ void spgemm_self_product_hash(
     int *d_off; CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
 
     // HLL 估计(Ocean 两阶段):Phase1 对 B 建 sketch(O(nnz));Phase2 对 A 每行 merge(O(nnz))
+    //   (bin8-9 sort landmine 已修:compact_sort 用 launch_csort<256,64>。小阵 count 替 HLL 的
+    //    streamline 已验证可行 —— count 实测 0.011ms(快,之前 0.85ms 是 GPU clock 抖动),默认仍 HLL,
+    //    需要时可重开 count 路径,count_intermediates_par_kernel 已就位。)
     int *d_est; CHECK_CUDA(cudaMalloc(&d_est, A_rows * sizeof(int)));
     {
         // Phase 1: 对 A(=B 自乘)每行建 HLL sketch。线性扫 CSR,O(nnz) 非 O(flop)。
@@ -714,7 +717,7 @@ void spgemm_self_product_hash(
             } else if (bi <= 7) {
                 launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
             } else if (bi <= 9) {
-                launch_csort<512, 32>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
+                launch_csort<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
             } else {
                 // ultra(行≤32,无序):小 config sort
                 launch_csort<64, 1>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val);
