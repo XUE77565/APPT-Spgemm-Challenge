@@ -260,7 +260,9 @@ __global__ void hash_spa_kernel(
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    constexpr int G = 16;                                // 固定 G=16(扫 4/8/16/32/64 → 16 最优;localLoadBalance 尝试 → 净负,因 scan 开销 > G 优化收益)
+    // G 从 ht_size 推(零 scan):ht_size 大 = 重行(更多 distinct → 更长 B-row → 更多 j) → G 大;
+    //   ht_size 小 = 轻行(短 B-row) → G 小(更多 k 并行)。G ∈ {4,8,16,32}。
+    int G = (ht_size <= 64) ? 4 : (ht_size <= 256) ? 8 : (ht_size <= 1024) ? 16 : 32;
     int num_groups = HASH_BLOCK / G;
     int my_group = tid / G, my_id = tid % G;
     for (int p = rs + my_group; p < re; p += num_groups) {   // 并行 k(stride num_groups)
