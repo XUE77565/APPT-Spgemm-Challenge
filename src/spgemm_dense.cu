@@ -18,22 +18,32 @@
         }                                                                      \
     } while (0)
 
-// 最朴素的稠密矩阵乘：一个线程只负责算 C 的一个元素。
+// 最普通的内积式矩阵乘：每个 C[row, col] 是 A 的一行和 B 的一列的内积。
 // A 是 M x K，B 是 K x N，C 是 M x N，三个矩阵都按行优先存放。
 __global__ void dense_matmul_kernel(const float *A, const float *B, float *C,
                                     int M, int K, int N) {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t total = static_cast<size_t>(M) * N;
+    int lane = threadIdx.x;
 
-    if (row >= M || col >= N) {
-        return;
-    }
+    // 一个完整 warp 共同计算一个输出元素，然后依次处理下一个元素。
+    for (size_t index = 0; index < total; ++index) {
+        int row = static_cast<int>(index / N);
+        int col = static_cast<int>(index % N);
 
-    float sum = 0.0f;
-    for (int k = 0; k < K; ++k) {
-        sum += A[row * K + k] * B[k * N + col];
+        float sum = 0.0f;
+        for (int k = lane; k < K; k += 32) {
+            sum += A[static_cast<size_t>(row) * K + k] *
+                   B[static_cast<size_t>(k) * N + col];
+        }
+
+        for (int offset = 16; offset > 0; offset /= 2) {
+            sum += __shfl_down_sync(0xffffffffu, sum, offset);
+        }
+
+        if (lane == 0) {
+            C[index] = sum;
+        }
     }
-    C[row * N + col] = sum;
 }
 
 static bool read_as_dense(const char *path, std::vector<float> &dense,
@@ -143,16 +153,14 @@ int main(int argc, char **argv) {
     CHECK_CUDA(cudaMemcpy(dA, hA.data(), A_bytes, cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(dB, hB.data(), B_bytes, cudaMemcpyHostToDevice));
 
-    dim3 block(16, 16);
-    dim3 grid((B_cols + block.x - 1) / block.x,
-              (A_rows + block.y - 1) / block.y);
+    int block_size = 32;
 
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
     CHECK_CUDA(cudaEventRecord(start));
-    dense_matmul_kernel<<<grid, block>>>(dA, dB, dC,
-                                         A_rows, A_cols, B_cols);
+    dense_matmul_kernel<<<1, block_size>>>(dA, dB, dC,
+                                           A_rows, A_cols, B_cols);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaEventRecord(stop));
     CHECK_CUDA(cudaEventSynchronize(stop));

@@ -1,0 +1,56 @@
+======================================================================
+DISPATCHER PERFORMANCE MODEL — Hash vs Merge3 SpGEMM
+Hardware: NVIDIA H100 PCIe (51 TFLOPS FP32, 2.0 TB/s HBM3, 114 SMs)
+Algorithm: C = A·A self-product, 100 matrices (SuiteSparse first100)
+======================================================================
+
+ANALYTICAL TIME MODELS
+----------------------------------------
+
+Hash:
+  T_hash = α_h × flop / min(n, 114) / 256
+         + β_h × nnz_A / (2.0 TB/s)
+         + γ_h
+
+  α_h = 2.7354e-04 ms·thread/intermediate
+  β_h = 6.7769e+04 ms·s/B (memory coefficient)
+  γ_h = 0.2069 ms (fixed: HLL + binning + compact/sort + launches)
+  R²  = 0.948
+
+Merge3:
+  T_merge3 = α_m × flop / min(n, 114) / 32
+           + β_m × nnz_A / (2.0 TB/s)
+           + γ_m
+
+  α_m = 4.8716e-04 ms·warp/intermediate
+  β_m = -4.0856e+05 ms·s/B
+  γ_m = 0.1890 ms (fixed: count + scan + launches)
+  R²  = 0.974
+
+DISPATCHER DECISION
+----------------------------------------
+
+hash   ⟺  T_hash < T_merge3
+
+Model dispatch accuracy: 82.0%
+
+SIMPLIFIED RULE (large n, symmetric A):
+  hash   ⟺  flop > 1.44e+05
+  merge3 ⟺  flop ≤ 1.44e+05
+  where flop ≈ A_nnz²/n for symmetric A
+
+ALGORITHM-HARDWARE INTERPRETATION
+----------------------------------------
+
+Hash wins because:
+  • Parallelism: min(n,114)×256 threads (hash) vs min(n,114)×32 (merge3)
+    → 8× more thread-level parallelism per row
+  • Dedup efficiency: hash O(1) per duplicate vs merge3 O(log₂5) per duplicate
+  • Per-intermediate cost: α_h=2.74e-04 vs α_m=4.87e-04 (parallelism-adjusted)
+
+Merge3 wins because:
+  • No sort: merge produces sorted output (saves O(C_nnz log) sort cost)
+  • Lower fixed overhead: γ_m=0.189 vs γ_h=0.207 ms
+    (no HLL estimation, no hash table allocation/init)
+
+hash wins: 25/100, merge3 wins: 75/100
