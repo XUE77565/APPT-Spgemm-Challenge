@@ -44,39 +44,57 @@ def main():
         r["_n"] = int(r["n"]) if r.get("n", "").isdigit() else 0
     # 按 (class_order, n) 排序
     rows.sort(key=lambda r: (CLASS_ORDER.index(r["_class"]) if r["_class"] in CLASS_ORDER else 99, r["_n"]))
+    has_dense = bool(rows) and "baseline" in rows[0]   # CSV 是否有 dense baseline 列(--no-dense 时无)
 
     out = []
-    out.append("[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h,同 Ocean 口径);dense=dense baseline(-O0) cudaEvent kernel]  ms")
-    out.append("class name                        n  dense   Ocean    HSMU     m3    Auto Auto/Oce Auto/base  m3/Oce")
+    tag = "[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h,同 Ocean 口径)" + ("; dense=dense baseline(-O0) cudaEvent kernel" if has_dense else "; 无 dense(--no-dense)") + "]  ms"
+    out.append(tag)
+    if has_dense:
+        out.append("class name                        n  dense   Ocean    HSMU     m3    Auto Auto/Oce Auto/base  m3/Oce")
+    else:
+        out.append("class name                        n  Ocean    HSMU     m3    Auto Auto/Oce  m3/Oce")
     out.append("-" * 116)
     for r in rows:
-        base, oc, hs, m3, au = (fnum(r, k) for k in ("baseline", "Ocean", "HSMU", "merge3", "Auto"))
+        oc, hs, m3, au = (fnum(r, k) for k in ("Ocean", "HSMU", "merge3", "Auto"))
+        base = fnum(r, "baseline") if has_dense else None
         n_str = f"{r['_n']:,}"
         def ratio(a, b): return a / b if (a and b and b > 0) else None
-        out.append(f"{CLASS_TAG.get(r['_class'],'?'):>5} {r['matrix']:<24}{n_str:>7}"
-                   f"{fmt(base)}{fmt(oc)}{fmt(hs)}{fmt(m3)}{fmt(au)}"
-                   f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(au, base), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
+        if has_dense:
+            out.append(f"{CLASS_TAG.get(r['_class'],'?'):>5} {r['matrix']:<24}{n_str:>7}"
+                       f"{fmt(base)}{fmt(oc)}{fmt(hs)}{fmt(m3)}{fmt(au)}"
+                       f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(au, base), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
+        else:
+            out.append(f"{CLASS_TAG.get(r['_class'],'?'):>5} {r['matrix']:<24}{n_str:>7}"
+                       f"{fmt(oc)}{fmt(hs)}{fmt(m3)}{fmt(au)}"
+                       f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
 
     # ---- 按类别聚合 ----
     out.append("")
     out.append("=" * 116)
     out.append("按类别聚合(compute-only 均值,毫秒;比值为该类各阵比值的均值)")
     out.append("-" * 116)
-    out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'dense':>10}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'Auto/base':>9}{'m3/Oce':>9}")
+    if has_dense:
+        out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'dense':>10}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'Auto/base':>9}{'m3/Oce':>9}")
+    else:
+        out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'m3/Oce':>9}")
     for c in CLASS_ORDER:
         sub = [r for r in rows if r["_class"] == c]
         if not sub: continue
         oc = mean([fnum(r, "Ocean") for r in sub]); hs = mean([fnum(r, "HSMU") for r in sub])
-        base = mean([fnum(r, "baseline") for r in sub])
+        base = mean([fnum(r, "baseline") for r in sub]) if has_dense else None
         m3 = mean([fnum(r, "merge3") for r in sub]); au = mean([fnum(r, "Auto") for r in sub])
         ra = mean([fnum(r, "Auto") / fnum(r, "Ocean") for r in sub
                    if fnum(r, "Auto") and fnum(r, "Ocean")])
-        rab = mean([fnum(r, "Auto") / fnum(r, "baseline") for r in sub
-                    if fnum(r, "Auto") and fnum(r, "baseline")])
         rmo = mean([fnum(r, "merge3") / fnum(r, "Ocean") for r in sub
                     if fnum(r, "merge3") and fnum(r, "Ocean")])
-        out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}{fmt(base,10,2)}"
-                   f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rab,9,2)}{fmt(rmo,9,2)}")
+        if has_dense:
+            rab = mean([fnum(r, "Auto") / fnum(r, "baseline") for r in sub
+                        if fnum(r, "Auto") and fnum(r, "baseline")])
+            out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}{fmt(base,10,2)}"
+                       f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rab,9,2)}{fmt(rmo,9,2)}")
+        else:
+            out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}"
+                       f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rmo,9,2)}")
 
     # ---- vs 参照法(Ocean / HSMU)的赢/输 ----
     def vs_section(label, col, ref_col, ref_name):
@@ -103,7 +121,8 @@ def main():
 
     vs_section("Auto", "Auto", "Ocean", "Ocean")
     vs_section("m3",   "merge3", "Ocean", "Ocean")
-    vs_section("Auto", "Auto", "baseline", "baseline")
+    if has_dense:
+        vs_section("Auto", "Auto", "baseline", "baseline")
 
     report = "\n".join(out) + "\n"
     open(out_path, "w").write(report)

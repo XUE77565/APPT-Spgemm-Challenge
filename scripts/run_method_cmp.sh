@@ -27,6 +27,7 @@ MATRIX_DIR=${MATRIX_DIR:-./data/first100}
 LIMIT=${LIMIT:-0}
 NO_OCEAN=${NO_OCEAN:-0}
 NO_HSMU=${NO_HSMU:-0}
+NO_DENSE=${NO_DENSE:-0}
 TS=$(date +%Y%m%d_%H%M%S)
 OUT="compare/method_cmp_${TS}"
 mkdir -p "$OUT"
@@ -68,6 +69,7 @@ ARGS="--out $OUT/methods_cmp.csv --dir $MATRIX_DIR"
 [ "$LIMIT" -gt 0 ]      && ARGS="$ARGS --limit $LIMIT"
 [ "$NO_OCEAN" -eq 1 ]   && ARGS="$ARGS --no-ocean"
 [ "$NO_HSMU" -eq 1 ]    && ARGS="$ARGS --no-hsmu"
+[ "$NO_DENSE" -eq 1 ]   && ARGS="$ARGS --no-dense"
 $PY -u scripts/compare_methods.py $ARGS 2>&1 | tee "$OUT/run.log" \
   || { echo "  ✗ compare_methods.py 失败(见 $OUT/run.log)"; exit 1; }
 echo "  ✓ 对比表: $OUT/methods_cmp.csv ($(($(wc -l < "$OUT/methods_cmp.csv")-1)) 阵)"

@@ -173,6 +173,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(REPO, "compare/methods_cmp.csv"))
     ap.add_argument("--no-ocean", action="store_true")
     ap.add_argument("--no-hsmu", action="store_true")
+    ap.add_argument("--no-dense", action="store_true", help="不比较 dense baseline(dense 未跑完时用)")
     ap.add_argument("--limit", type=int, default=0, help="只跑前 N 个(调试)")
     args = ap.parse_args()
 
@@ -190,16 +191,19 @@ def main():
     if os.path.exists(args.out):
         for r in csv.DictReader(open(args.out)):
             done.add(r["matrix"])
-    fieldnames = ["matrix", "n", "sym", "density_pct", "baseline", "merge3", "Auto",
+    fieldnames = ["matrix", "n", "sym", "density_pct", "merge3", "Auto",
                   "Auto_choice", "Ocean", "HSMU", "cnnz"]
+    if not args.no_dense:
+        fieldnames.insert(4, "baseline")   # dense baseline 列(在 density_pct 后)
     fout = open(args.out, "a", newline="")
     w = csv.DictWriter(fout, fieldnames=fieldnames)
     if not os.path.exists(args.out) or os.path.getsize(args.out) == 0:
         w.writeheader()
 
     N = len(names)
-    dense_cache = load_dense_cache()
-    print(f"对比 {N} 阵 × {[m[0] for m in SPGEMM_METHODS]} + Ocean + HSMU + dense-baseline(cache) → {args.out}\n", flush=True)
+    dense_cache = load_dense_cache() if not args.no_dense else {}
+    print(f"对比 {N} 阵 × {[m[0] for m in SPGEMM_METHODS]} + Ocean + HSMU"
+          + ("" if args.no_dense else " + dense-baseline(cache)") + f" → {args.out}\n", flush=True)
     for i, name in enumerate(names):
         if name in done:
             continue
@@ -222,13 +226,15 @@ def main():
         row["Ocean"] = round(run_ocean(p), 3) if not args.no_ocean else ""
         # HSMU
         row["HSMU"] = round(run_hsmu(p, name), 3) if not args.no_hsmu else ""
-        # dense baseline(从 cache 读,不重跑)
-        bv = dense_cache.get(name, "")
-        row["baseline"] = round(bv, 3) if isinstance(bv, float) else bv
+        # dense baseline(从 cache 读,不重跑;--no-dense 时跳过)
+        if not args.no_dense:
+            bv = dense_cache.get(name, "")
+            row["baseline"] = round(bv, 3) if isinstance(bv, float) else bv
         w.writerow(row); fout.flush()
         dt = time.time() - t0
-        # 结果行:Auto 选择放最前(每阵旁边),紧跟矩阵名
-        print(f"Auto→{row.get('Auto_choice','?'):<6} dense={row['baseline']!s:>8} "
+        # 结果行
+        dense_str = f" dense={row['baseline']!s:>8}" if not args.no_dense else ""
+        print(f"Auto→{row.get('Auto_choice','?'):<6}{dense_str} "
               f"m3={row['merge3']!s:>7} Auto={row['Auto']!s:>7} Ocean={row['Ocean']!s:>7} "
               f"HSMU={row['HSMU']!s:>7} ({dt:.1f}s)", flush=True)
     fout.close()
@@ -237,11 +243,17 @@ def main():
     import math
     rows = list(csv.DictReader(open(args.out)))
     def geomean(col):
-        xs = [float(r[col]) for r in rows if r.get(col) not in (None, "", "None")]
+        xs = []
+        for r in rows:
+            v = r.get(col)
+            if v in (None, "", "None"): continue
+            try: xs.append(float(v))
+            except ValueError: continue    # 跳过 'timeout' 等非数字
         if not xs: return float("nan")
         return math.exp(sum(math.log(x) for x in xs) / len(xs))
     print("\n=== 几何均值(ms) ===")
-    for col in ["baseline"] + [m[0] for m in SPGEMM_METHODS] + ["Ocean", "HSMU"]:
+    cols = ([["baseline"]] if not args.no_dense else []) + [m[0] for m in SPGEMM_METHODS] + ["Ocean", "HSMU"]
+    for col in cols:
         gm = geomean(col)
         if gm == gm:
             print(f"  {col:8} {gm:8.3f}")
