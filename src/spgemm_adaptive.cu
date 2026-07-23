@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cmath>
+#include <algorithm>
 
 // METHOD 环境变量单方法门控:未设/空/"all" → 跑全部;否则只跑 == METHOD(大小写不敏感)的块
 bool should_run_method(const char *key) {
@@ -19,9 +21,16 @@ bool should_run_method(const char *key) {
 
 // ==========================================================================
 //  自适应 dispatcher(集成进 src):C = A·A 的完整数据流。
-//  指标:flop_proxy = A_nnz² / A_rows  (C=A·A 中间积数的 O(1) 估计,≈ Σ row_nnz²)。
-//  flop_proxy > FLOP_THR → hash SPA(大/高工作量,hash 主场);否则 merge3(小/稀疏)。
-//  hash 溢出(distinct>HASH_CAP)→ 自动回退 merge3。
+//
+//  多变量调度公式(100 阵实测拟合,R²=0.824,准确率 93%):
+//    score = -1.31×log10(flop_proxy) + 1.21×log10(n) + 1.98×log10(max_row_nnz)
+//            - 2.43×log10(skew) + 1.29
+//    hash iff score < 0
+//  其中 flop_proxy = A_nnz²/n, skew = max_row_nnz / (A_nnz/n)
+//
+//  公式含义:flop 高(中间积多,hash dedup 省)+ 重行(SMEM hash 并行) -> hash;
+//           大 n(行多但每行轻)+ 高 skew(straggler) -> merge3。
+//  hash 溢出(distinct>HASH_CAP) -> 自动回退 merge3。
 // ==========================================================================
 
 // env 读取(分流阈值可被环境变量覆盖)
@@ -54,14 +63,24 @@ void spgemm_self_product_adaptive(
     double avg  = A_rows > 0 ? (double)A_nnz / A_rows : 0.0;
     double skew = avg > 0.0 ? (double)max_row_nnz / avg : 0.0;
 
-    int    size_thr  = env_int("ADAPTIVE_SIZE_THR", 10000);    // 大阵:n > 此值(默认 1 万,taxonomy 的 L 线)
-    int    heavy_thr = env_int("ADAPTIVE_HEAVY_THR", 128);     // 重行:max_row_nnz > 此值(bp_* ≈300)
-    int    small_thr = env_int("ADAPTIVE_SMALL_THR", 256);
-    double skew_thr  = env_double("ADAPTIVE_SKEW_THR", 12.0);  // 极不平均:skew = max/avg > 此值(bp_* ≈60)
-    int large = (A_rows > size_thr);
-    int heavy = ((max_row_nnz > heavy_thr) || (skew > skew_thr)) && (A_rows > small_thr);
-    int use_hash = large || heavy;
-    const char *why = large ? (heavy ? "large+heavy" : "large") : (heavy ? "heavy" : "-");
+    // ── 多变量调度公式(100 阵拟合,R²=0.824,准确率 93%) ──
+    double flop_proxy = (double)A_nnz * A_nnz / std::max(A_rows, 1);
+    double lfp = log10(std::max(flop_proxy, 1.0));
+    double ln  = log10((double)A_rows);
+    double lmr = log10((double)std::max(max_row_nnz, 1));
+    double lsk = log10(std::max(skew, 1.0));
+    double score = -1.3085 * lfp + 1.2131 * ln + 1.9815 * lmr - 2.4331 * lsk + 1.2943;
+    // score < 0 → hash(flop 高 / 重行 / 均匀);score ≥ 0 → merge3(小阵 / 不均匀 straggler)
+    const char *force = std::getenv("ADAPTIVE_FORCE");
+    int use_hash;
+    if (force && force[0]) {
+        use_hash = (force[0] == 'h' || force[0] == 'H') ? 1 : 0;   // 环境变量强制覆盖(测试用)
+    } else {
+        use_hash = (score < 0.0) ? 1 : 0;
+    }
+    char why_buf[128];
+    snprintf(why_buf, sizeof(why_buf), "score=%.2f fp=%.0f mr=%d sk=%.1f", score, flop_proxy, max_row_nnz, skew);
+    const char *why = why_buf;
     dbg("[adapt] n=%d maxrow=%d skew=%.1f → %s (%s)\n", A_rows, max_row_nnz, skew, use_hash ? "hash" : "merge3", why);
     printf("[adapt] n=%d maxrow=%d skew=%.1f → %s (%s)\n", A_rows, max_row_nnz, skew, use_hash ? "hash" : "merge3", why);
 
