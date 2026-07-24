@@ -39,9 +39,9 @@ __global__ void csc_count_kernel(const int *col_idx, int nnz, int *col_count)
 
 // 逐行把 (i, col_idx[p], val[p]) 散到 CSC:用 tmp_off[col] 作每列写指针
 __global__ void csc_fill_kernel(
-    const int *row_ptr, const int *col_idx, const float *val,
+    const int *row_ptr, const int *col_idx, const double *val,
     int A_rows, int *tmp_off,
-    int *csc_row_idx, float *csc_val)
+    int *csc_row_idx, double *csc_val)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
@@ -53,9 +53,9 @@ __global__ void csc_fill_kernel(
     }
 }
 
-static void build_csc(const int *d_row_ptr, const int *d_col_idx, const float *d_val,
+static void build_csc(const int *d_row_ptr, const int *d_col_idx, const double *d_val,
                       int A_rows, int A_nnz,
-                      int **col_ptr_out, int **row_idx_out, float **val_out)
+                      int **col_ptr_out, int **row_idx_out, double **val_out)
 {
     int *d_col_count;
     CHECK_CUDA(cudaMalloc(&d_col_count, A_rows * sizeof(int)));
@@ -76,9 +76,9 @@ static void build_csc(const int *d_row_ptr, const int *d_col_idx, const float *d
     CHECK_CUDA(cudaMalloc(&d_tmp, A_rows * sizeof(int)));
     CHECK_CUDA(cudaMemcpy(d_tmp, d_col_ptr, A_rows * sizeof(int), cudaMemcpyDeviceToDevice));
 
-    int *d_csc_row; float *d_csc_val;
+    int *d_csc_row; double *d_csc_val;
     CHECK_CUDA(cudaMalloc(&d_csc_row, A_nnz * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_csc_val, A_nnz * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_csc_val, A_nnz * sizeof(double)));
     {
         int grid = (A_rows + 255) / 256;
         csc_fill_kernel<<<grid, 256>>>(d_row_ptr, d_col_idx, d_val, A_rows,
@@ -96,8 +96,8 @@ static void build_csc(const int *d_row_ptr, const int *d_col_idx, const float *d
 // ===================== 共用:ESC 合并(排序 + 去重求和 → CSR)=====================
 
 __global__ void esc_finalize_kernel(
-    const unsigned long long *red_key, const float *red_val,
-    int C_nnz, int *C_col_idx, float *C_val, int *C_row_nnz)
+    const unsigned long long *red_key, const double *red_val,
+    int C_nnz, int *C_col_idx, double *C_val, int *C_row_nnz)
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= C_nnz) return;
@@ -109,31 +109,31 @@ __global__ void esc_finalize_kernel(
 
 // 输入展开好的 d_key[total]=(row<<32|col), d_val[total];
 // 输出(设备)*dC_col_idx[Cnnz], *dC_val[Cnnz], *dC_row_ptr[A_rows+1]; 返回 Cnnz。
-static int esc_merge(unsigned long long *d_key, float *d_val, int total, int A_rows,
-                     int **dC_col_idx, float **dC_val, int **dC_row_ptr)
+static int esc_merge(unsigned long long *d_key, double *d_val, int total, int A_rows,
+                     int **dC_col_idx, double **dC_val, int **dC_row_ptr)
 {
     thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
                         thrust::device_ptr<unsigned long long>(d_key + total),
-                        thrust::device_ptr<float>(d_val));
+                        thrust::device_ptr<double>(d_val));
     dbg("[%s] sort\n", g_tag);
-    unsigned long long *d_rk; float *d_rv;
+    unsigned long long *d_rk; double *d_rv;
     CHECK_CUDA(cudaMalloc(&d_rk, (size_t)total * sizeof(unsigned long long)));
-    CHECK_CUDA(cudaMalloc(&d_rv, (size_t)total * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_rv, (size_t)total * sizeof(double)));
     thrust::pair<thrust::device_ptr<unsigned long long>,
-                 thrust::device_ptr<float> > e =
+                 thrust::device_ptr<double> > e =
         thrust::reduce_by_key(
             thrust::device_ptr<unsigned long long>(d_key),
             thrust::device_ptr<unsigned long long>(d_key + total),
-            thrust::device_ptr<float>(d_val),
+            thrust::device_ptr<double>(d_val),
             thrust::device_ptr<unsigned long long>(d_rk),
-            thrust::device_ptr<float>(d_rv));
+            thrust::device_ptr<double>(d_rv));
     int Cnnz = (int)(e.first - thrust::device_ptr<unsigned long long>(d_rk));
     CHECK_CUDA(cudaDeviceSynchronize());
     dbg("[%s] reduce\n", g_tag);
 
-    int *c_col; float *c_val; int *c_row_nnz;
+    int *c_col; double *c_val; int *c_row_nnz;
     CHECK_CUDA(cudaMalloc(&c_col, (size_t)Cnnz * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&c_val, (size_t)Cnnz * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&c_val, (size_t)Cnnz * sizeof(double)));
     CHECK_CUDA(cudaMalloc(&c_row_nnz, A_rows * sizeof(int)));
     CHECK_CUDA(cudaMemset(c_row_nnz, 0, A_rows * sizeof(int)));
     {
@@ -156,12 +156,12 @@ static int esc_merge(unsigned long long *d_key, float *d_val, int total, int A_r
 }
 
 // 把 (row_ptr|col_idx|val) 三段打包成单块并 D2H(与 Gustavson 版一致)
-static void *pack_and_download(int *d_row_ptr, int *d_col_idx, float *d_val,
+static void *pack_and_download(int *d_row_ptr, int *d_col_idx, double *d_val,
                                int A_rows, int Cnnz)
 {
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = (size_t)Cnnz * sizeof(int);
-    size_t vv = (size_t)Cnnz * sizeof(float);
+    size_t vv = (size_t)Cnnz * sizeof(double);
     size_t rp_a = (rp + 3) & ~3;
     size_t ci_a = (ci + 3) & ~3;
     size_t total = rp_a + ci_a + vv;
@@ -195,10 +195,10 @@ __global__ void count_outer_kernel(
 
 // 每个 k 一块:把 (列k 的每个 i) × (行k 的每个 j) 散出去
 __global__ void expand_outer_kernel(
-    const int *csr_row_ptr, const int *csr_col_idx, const float *csr_val,
-    const int *csc_col_ptr, const int *csc_row_idx, const float *csc_val,
+    const int *csr_row_ptr, const int *csr_col_idx, const double *csr_val,
+    const int *csc_col_ptr, const int *csc_row_idx, const double *csc_val,
     int A_rows, const int *off,
-    unsigned long long *key, float *val)
+    unsigned long long *key, double *val)
 {
     int k = blockIdx.x;
     if (k >= A_rows) return;
@@ -210,7 +210,7 @@ __global__ void expand_outer_kernel(
     int rs = csr_row_ptr[k], re = csr_row_ptr[k + 1];   // 行 k 的 j 们
     for (int pi = cs + threadIdx.x; pi < ce; pi += blockDim.x) {
         int i = csc_row_idx[pi];
-        float a_ik = csc_val[pi];
+        double a_ik = csc_val[pi];
         for (int q = rs; q < re; q++) {
             int slot = atomicAdd(&pos, 1);
             key[slot] = ((unsigned long long)i << 32) | (unsigned int)csr_col_idx[q];
@@ -226,15 +226,15 @@ void spgemm_self_product_outer(
     g_tag = "outer"; dbg("[outer] start\n");
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = A_nnz * sizeof(int);
-    size_t vv = A_nnz * sizeof(float);
+    size_t vv = A_nnz * sizeof(double);
     size_t totalA = rp + ci + vv;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, totalA));
     CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
     dbg("[outer] h2d\n");
     char *b = (char*)dA;
-    int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); float *d_v = (float*)(b + rp + ci);
+    int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); double *d_v = (double*)(b + rp + ci);
 
-    int *d_csc_cp, *d_csc_ri; float *d_csc_v;
+    int *d_csc_cp, *d_csc_ri; double *d_csc_v;
     build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [outer] csc
 
     int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
@@ -250,15 +250,15 @@ void spgemm_self_product_outer(
     int total; CHECK_CUDA(cudaMemcpy(&total, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     dbg("[outer] scan\n");
 
-    unsigned long long *d_key; float *d_val;
+    unsigned long long *d_key; double *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total * sizeof(unsigned long long)));
-    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(double)));
     expand_outer_kernel<<<A_rows, 256>>>(d_rp, d_ci, d_v, d_csc_cp, d_csc_ri, d_csc_v,
                                          A_rows, d_off, d_key, d_val);
     CHECK_CUDA(cudaDeviceSynchronize());
     dbg("[outer] expand\n");
 
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
 
     *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);        // -> pack/d2h
@@ -289,9 +289,9 @@ __global__ void count_colwise_kernel(
 
 // 每个 j 一块:对 列j 的每个 k,再把 列k 的每个 i 散到 (i,j)
 __global__ void expand_colwise_kernel(
-    const int *csc_col_ptr, const int *csc_row_idx, const float *csc_val,
+    const int *csc_col_ptr, const int *csc_row_idx, const double *csc_val,
     int A_rows, const int *off,
-    unsigned long long *key, float *val)
+    unsigned long long *key, double *val)
 {
     int j = blockIdx.x;
     if (j >= A_rows) return;
@@ -302,7 +302,7 @@ __global__ void expand_colwise_kernel(
     int js = csc_col_ptr[j], je = csc_col_ptr[j + 1];   // 列 j 的 k 们
     for (int p = js + threadIdx.x; p < je; p += blockDim.x) {
         int k = csc_row_idx[p];
-        float a_kj = csc_val[p];
+        double a_kj = csc_val[p];
         int ks = csc_col_ptr[k], ke = csc_col_ptr[k + 1];   // 列 k 的 i 们
         for (int q = ks; q < ke; q++) {
             int slot = atomicAdd(&pos, 1);
@@ -319,15 +319,15 @@ void spgemm_self_product_colwise(
     g_tag = "colw"; dbg("[colw] start\n");
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = A_nnz * sizeof(int);
-    size_t vv = A_nnz * sizeof(float);
+    size_t vv = A_nnz * sizeof(double);
     size_t totalA = rp + ci + vv;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, totalA));
     CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
     dbg("[colw] h2d\n");
     char *b = (char*)dA;
-    int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); float *d_v = (float*)(b + rp + ci);
+    int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); double *d_v = (double*)(b + rp + ci);
 
-    int *d_csc_cp, *d_csc_ri; float *d_csc_v;
+    int *d_csc_cp, *d_csc_ri; double *d_csc_v;
     build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [colw] csc
 
     int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
@@ -343,14 +343,14 @@ void spgemm_self_product_colwise(
     int total; CHECK_CUDA(cudaMemcpy(&total, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     dbg("[colw] scan\n");
 
-    unsigned long long *d_key; float *d_val;
+    unsigned long long *d_key; double *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total * sizeof(unsigned long long)));
-    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(double)));
     expand_colwise_kernel<<<A_rows, 256>>>(d_csc_cp, d_csc_ri, d_csc_v, A_rows, d_off, d_key, d_val);
     CHECK_CUDA(cudaDeviceSynchronize());
     dbg("[colw] expand\n");
 
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
 
     *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);        // -> pack/d2h
@@ -374,16 +374,16 @@ void spgemm_self_product_colwise(
 extern __global__ void count_intermediates_kernel(const int *A_row_ptr,
                                                   const int *A_col_idx, int A_rows, int *ub);
 extern __global__ void expand_intermediates_kernel(const int *A_row_ptr, const int *A_col_idx,
-                                                   const float *A_val, int A_rows,
+                                                   const double *A_val, int A_rows,
                                                    const int *row_off,
-                                                   unsigned long long *key, float *val);
+                                                   unsigned long long *key, double *val);
 
 // 归并点积:row_i(csr, 按 col 有序) ∩ col_j(csc, 按 row 有序)
-__device__ __forceinline__ float merge_dot(
-    const int *csr_ci, const float *csr_v, int rs, int re,
-    const int *csc_ri, const float *csc_v, int cs, int ce)
+__device__ __forceinline__ double merge_dot(
+    const int *csr_ci, const double *csr_v, int rs, int re,
+    const int *csc_ri, const double *csc_v, int cs, int ce)
 {
-    float dot = 0.0f;
+    double dot = 0.0f;
     int p = rs, q = cs;
     while (p < re && q < ce) {
         int kp = csr_ci[p];
@@ -397,9 +397,9 @@ __device__ __forceinline__ float merge_dot(
 
 // 数值阶段(内积本体):每个输出元素独立归并 row_i 与 col_j
 __global__ void inner_numeric_kernel(
-    const int *csr_rp, const int *csr_ci, const float *csr_v,
-    const int *csc_cp, const int *csc_ri, const float *csc_v,
-    int A_rows, const int *C_rp, const int *C_ci, float *C_val)
+    const int *csr_rp, const int *csr_ci, const double *csr_v,
+    const int *csc_cp, const int *csc_ri, const double *csc_v,
+    int A_rows, const int *C_rp, const int *C_ci, double *C_val)
 {
     int i = blockIdx.x;
     if (i >= A_rows) return;
@@ -419,15 +419,15 @@ void spgemm_self_product_inner(
     g_tag = "inner"; dbg("[inner] start\n");
     size_t rp = (A_rows + 1) * sizeof(int);
     size_t ci = A_nnz * sizeof(int);
-    size_t vv = A_nnz * sizeof(float);
+    size_t vv = A_nnz * sizeof(double);
     size_t totalA = rp + ci + vv;
     void *dA; CHECK_CUDA(cudaMalloc(&dA, totalA));
     CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
     dbg("[inner] h2d\n");
     char *b = (char*)dA;
-    int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); float *d_v = (float*)(b + rp + ci);
+    int *d_rp = (int*)b; int *d_ci = (int*)(b + rp); double *d_v = (double*)(b + rp + ci);
 
-    int *d_csc_cp, *d_csc_ri; float *d_csc_v;
+    int *d_csc_cp, *d_csc_ri; double *d_csc_v;
     build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [inner] csc
 
     // ---- 符号阶段:ESC 展开+排序+去重,只取结构 ----
@@ -442,13 +442,13 @@ void spgemm_self_product_inner(
                            thrust::device_ptr<int>(d_off + 1));
     int total; CHECK_CUDA(cudaMemcpy(&total, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
     dbg("[inner] scan\n");
-    unsigned long long *d_key; float *d_val;
+    unsigned long long *d_key; double *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total * sizeof(unsigned long long)));
-    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total * sizeof(double)));
     expand_intermediates_kernel<<<A_rows, 256>>>(d_rp, d_ci, d_v, A_rows, d_off, d_key, d_val);
     CHECK_CUDA(cudaDeviceSynchronize());
     dbg("[inner] expand\n");
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
     cudaFree(d_ub); cudaFree(d_off); cudaFree(d_key); cudaFree(d_val);
 
@@ -492,8 +492,8 @@ static int rows_grid(int n) { return (n + 255) / 256; }
 
 // compact 的 device kernel:把每行紧凑写在 off[] slot(带间隙)的条目搬到连续位置
 __global__ void att_compact_kernel(const int *off, const int *act, const int *coff,
-                                   const unsigned long long *sk, const float *sv,
-                                   unsigned long long *dk, float *dv, int A_rows) {
+                                   const unsigned long long *sk, const double *sv,
+                                   unsigned long long *dk, double *dv, int A_rows) {
     int ax = blockIdx.x;
     if (ax >= A_rows) return;
     int s = off[ax], n = act[ax], d = coff[ax];
@@ -505,25 +505,25 @@ __global__ void att_compact_kernel(const int *off, const int *act, const int *co
 struct AttCtx {
     void  *dA = nullptr;                              // A 的单块 CSR(row_ptr|col_idx|val)
     int   *csr_rp = nullptr, *csr_ci = nullptr;
-    float *csr_val = nullptr;
+    double *csr_val = nullptr;
     int   *csc_cp = nullptr, *csc_ri = nullptr;       // A 的 CSC(build_csc 建的)
-    float *csc_val = nullptr;
+    double *csc_val = nullptr;
     int   *row_ub = nullptr;                          // 每行中间项数(上界)
     int   *off = nullptr, *act = nullptr;             // 行偏移 / 实际写出数
-    unsigned long long *key = nullptr; float *val = nullptr;   // 中间项 COO
+    unsigned long long *key = nullptr; double *val = nullptr;   // 中间项 COO
     int    A_rows = 0;
 
     // 上传 A(H2D)+ 建 CSC。build_csc 会发 [tag] csc 桩。
     void init(void *A_buffer, int rows, int nnz) {
         A_rows = rows;
         size_t rp = (rows + 1) * sizeof(int), ci = nnz * sizeof(int),
-               vv = nnz * sizeof(float), totalA = rp + ci + vv;
+               vv = nnz * sizeof(double), totalA = rp + ci + vv;
         CHECK_CUDA(cudaMalloc(&dA, totalA));
         CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
         char *b = (char*)dA;
         csr_rp  = (int*)b;
         csr_ci  = (int*)(b + rp);
-        csr_val = (float*)(b + rp + ci);
+        csr_val = (double*)(b + rp + ci);
         build_csc(csr_rp, csr_ci, csr_val, rows, nnz, &csc_cp, &csc_ri, &csc_val);
         CHECK_CUDA(cudaMalloc(&row_ub, rows * sizeof(int)));
     }
@@ -536,7 +536,7 @@ struct AttCtx {
         int total_ub;
         CHECK_CUDA(cudaMemcpy(&total_ub, off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaMalloc(&key, (size_t)total_ub * sizeof(unsigned long long)));
-        CHECK_CUDA(cudaMalloc(&val, (size_t)total_ub * sizeof(float)));
+        CHECK_CUDA(cudaMalloc(&val, (size_t)total_ub * sizeof(double)));
         CHECK_CUDA(cudaMalloc(&act, A_rows * sizeof(int)));
         return total_ub;
     }
@@ -549,13 +549,13 @@ struct AttCtx {
         thrust::inclusive_scan(dcpi(act), dcpi(act + A_rows), dpi(coff + 1));
         int total;
         CHECK_CUDA(cudaMemcpy(&total, coff + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-        unsigned long long *nkey; float *nval;
+        unsigned long long *nkey; double *nval;
         CHECK_CUDA(cudaMalloc(&nkey, (size_t)total * sizeof(unsigned long long)));
-        CHECK_CUDA(cudaMalloc(&nval, (size_t)total * sizeof(float)));
+        CHECK_CUDA(cudaMalloc(&nval, (size_t)total * sizeof(double)));
         att_compact_kernel<<<A_rows, 256>>>(off, act, coff, key, val, nkey, nval, A_rows);
         CHECK_CUDA(cudaDeviceSynchronize());
         CHECK_CUDA(cudaMemcpy(key, nkey, (size_t)total * sizeof(unsigned long long), cudaMemcpyDeviceToDevice));
-        CHECK_CUDA(cudaMemcpy(val, nval, (size_t)total * sizeof(float), cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(val, nval, (size_t)total * sizeof(double), cudaMemcpyDeviceToDevice));
         cudaFree(coff); cudaFree(nkey); cudaFree(nval);
         return total;
     }
@@ -573,9 +573,9 @@ __global__ void att_outer_count(const int *csc_cp, int A_rows, int *ub) {
     long long c = csc_cp[k + 1] - csc_cp[k];
     ub[k] = (int)(c * (c + 1) / 2);
 }
-__global__ void att_outer_expand(const int *csc_cp, const int *csc_ri, const float *csc_v,
+__global__ void att_outer_expand(const int *csc_cp, const int *csc_ri, const double *csc_v,
                                  int A_rows, const int *off,
-                                 unsigned long long *key, float *val) {
+                                 unsigned long long *key, double *val) {
     int k = blockIdx.x;
     if (k >= A_rows) return;
     __shared__ int pos;
@@ -583,7 +583,7 @@ __global__ void att_outer_expand(const int *csc_cp, const int *csc_ri, const flo
     __syncthreads();
     int cs = csc_cp[k], ce = csc_cp[k + 1];
     for (int a = cs + threadIdx.x; a < ce; a += blockDim.x) {
-        int i = csc_ri[a]; float va = csc_v[a];
+        int i = csc_ri[a]; double va = csc_v[a];
         for (int b = a; b < ce; b++) {
             int j = csc_ri[b];
             int lo = i < j ? i : j, hi = i < j ? j : i;   // 强制上三角(CSC 列内不一定有序)
@@ -603,17 +603,17 @@ __global__ void att_gust_count(const int *csr_rp, const int *csr_ci, const int *
     for (int p = csr_rp[i]; p < csr_rp[i + 1]; p++) { int k = csr_ci[p]; s += csc_cp[k + 1] - csc_cp[k]; }
     ub[i] = (int)s;
 }
-__global__ void att_gust_expand(const int *csr_rp, const int *csr_ci, const float *csr_v,
-                                const int *csc_cp, const int *csc_ri, const float *csc_v,
+__global__ void att_gust_expand(const int *csr_rp, const int *csr_ci, const double *csr_v,
+                                const int *csc_cp, const int *csc_ri, const double *csc_v,
                                 int A_rows, const int *off, int *act,
-                                unsigned long long *key, float *val) {
+                                unsigned long long *key, double *val) {
     int i = blockIdx.x;
     if (i >= A_rows) return;
     __shared__ int pos;
     if (threadIdx.x == 0) pos = off[i];
     __syncthreads();
     for (int p = csr_rp[i] + threadIdx.x; p < csr_rp[i + 1]; p += blockDim.x) {
-        int k = csr_ci[p]; float aik = csr_v[p];
+        int k = csr_ci[p]; double aik = csr_v[p];
         for (int q = csc_cp[k]; q < csc_cp[k + 1]; q++) {
             int j = csc_ri[q];
             if (j >= i) {
@@ -636,17 +636,17 @@ __global__ void att_colw_count(const int *csr_rp, const int *csr_ci, const int *
     for (int p = csr_rp[j]; p < csr_rp[j + 1]; p++) { int k = csr_ci[p]; s += csc_cp[k + 1] - csc_cp[k]; }
     ub[j] = (int)s;
 }
-__global__ void att_colw_expand(const int *csr_rp, const int *csr_ci, const float *csr_v,
-                                const int *csc_cp, const int *csc_ri, const float *csc_v,
+__global__ void att_colw_expand(const int *csr_rp, const int *csr_ci, const double *csr_v,
+                                const int *csc_cp, const int *csc_ri, const double *csc_v,
                                 int A_rows, const int *off, int *act,
-                                unsigned long long *key, float *val) {
+                                unsigned long long *key, double *val) {
     int j = blockIdx.x;
     if (j >= A_rows) return;
     __shared__ int pos;
     if (threadIdx.x == 0) pos = off[j];
     __syncthreads();
     for (int p = csr_rp[j] + threadIdx.x; p < csr_rp[j + 1]; p += blockDim.x) {
-        int k = csr_ci[p]; float ajk = csr_v[p];
+        int k = csr_ci[p]; double ajk = csr_v[p];
         for (int q = csc_cp[k]; q < csc_cp[k + 1]; q++) {
             int i = csc_ri[q];
             if (i <= j) {
@@ -661,17 +661,17 @@ __global__ void att_colw_expand(const int *csr_rp, const int *csr_ci, const floa
 }
 
 // ---- 内积 att 数值:row_i · row_j ----
-__device__ __forceinline__ float rowrow_dot(const int *ci, const float *v,
+__device__ __forceinline__ double rowrow_dot(const int *ci, const double *v,
                                             int si, int ei, int sj, int ej) {
-    float d = 0.0f; int p = si, q = sj;
+    double d = 0.0f; int p = si, q = sj;
     while (p < ei && q < ej) {
         if (ci[p] == ci[q]) { d += v[p] * v[q]; p++; q++; }
         else if (ci[p] < ci[q]) p++; else q++;
     }
     return d;
 }
-__global__ void att_inner_numeric(const int *csr_rp, const int *csr_ci, const float *csr_v,
-                                  int A_rows, const int *C_rp, const int *C_ci, float *C_val) {
+__global__ void att_inner_numeric(const int *csr_rp, const int *csr_ci, const double *csr_v,
+                                  int A_rows, const int *C_rp, const int *C_ci, double *C_val) {
     int i = blockIdx.x;
     if (i >= A_rows) return;
     int rs = csr_rp[i], re = csr_rp[i + 1];
@@ -699,7 +699,7 @@ void spgemm_att_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     CHECK_CUDA(cudaDeviceSynchronize()); dbg("[atto] expand\n");
     // 外积 count 精确(c_k(c_k+1)/2),填满 off[] 无间隙,无需 compact
 
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(ctx.key, ctx.val, total, A_rows, &c_col, &c_val, &c_rp);
     *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
@@ -723,7 +723,7 @@ void spgemm_att_gust(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     CHECK_CUDA(cudaDeviceSynchronize()); dbg("[attg] expand\n");
     int total = ctx.compact(); dbg("[attg] compact\n");   // filter 后行间有间隙,压紧
 
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(ctx.key, ctx.val, total, A_rows, &c_col, &c_val, &c_rp);
     *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
@@ -747,7 +747,7 @@ void spgemm_att_colw(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     CHECK_CUDA(cudaDeviceSynchronize()); dbg("[attc] expand\n");
     int total = ctx.compact(); dbg("[attc] compact\n");
 
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(ctx.key, ctx.val, total, A_rows, &c_col, &c_val, &c_rp);
     *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
@@ -771,7 +771,7 @@ void spgemm_att_inner(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                                      A_rows, ctx.off, ctx.act, ctx.key, ctx.val);
     CHECK_CUDA(cudaDeviceSynchronize()); dbg("[atti] expand\n");
     int total = ctx.compact(); dbg("[atti] compact\n");
-    int *c_col; float *c_val; int *c_rp;
+    int *c_col; double *c_val; int *c_rp;
     int Cnnz = esc_merge(ctx.key, ctx.val, total, A_rows, &c_col, &c_val, &c_rp);  // c_val 丢弃
     dbg("[atti] symbolic\n");
 

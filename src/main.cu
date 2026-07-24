@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     // 读入矩阵 A（单块连续内存）
     void *A_buffer = nullptr;
     int *A_row_ptr = nullptr, *A_col_idx = nullptr;
-    float *A_val = nullptr;
+    double *A_val = nullptr;
     int A_rows = 0, A_cols = 0, A_nnz = 0;
 
     LOG_BOTH("Reading matrix from %s...\n", input_path);
@@ -186,12 +186,12 @@ int main(int argc, char **argv) {
             char *C_base = (char*)C_buffer;
             size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
             size_t C_col_idx_size = C_nnz * sizeof(int);
-            size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-            size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+            size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+            size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
             
             int *C_row_ptr = (int*)C_base;
             int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
-            float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
+            double *C_val = (double*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
             #if WRITE_MTX
                 std::string output_path = result_dir + "/self_product.mtx";
@@ -231,12 +231,12 @@ int main(int argc, char **argv) {
         char *C_base = (char*)C_buffer;
         size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
         size_t C_col_idx_size = C_nnz * sizeof(int);
-        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+        size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+        size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
         
         int *C_row_ptr = (int*)C_base;
         int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
-        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
+        double *C_val = (double*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
         #if WRITE_MTX
                     std::string output_path = result_dir + "/self_product_manual.mtx";
@@ -274,12 +274,12 @@ int main(int argc, char **argv) {
         char *C_base = (char*)C_buffer;
         size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
         size_t C_col_idx_size = C_nnz * sizeof(int);
-        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+        size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+        size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
 
         int *C_row_ptr = (int*)C_base;
         int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
-        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
+        double *C_val = (double*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
         #if WRITE_MTX
             std::string output_path = result_dir + "/self_product_merge.mtx";
@@ -316,12 +316,12 @@ int main(int argc, char **argv) {
         char *C_base = (char*)C_buffer;
         size_t C_row_ptr_size = (C_rows + 1) * sizeof(int);
         size_t C_col_idx_size = C_nnz * sizeof(int);
-        size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-        size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+        size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+        size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
 
         int *C_row_ptr = (int*)C_base;
         int *C_col_idx = (int*)(C_base + C_row_ptr_size_aligned);
-        float *C_val = (float*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
+        double *C_val = (double*)(C_base + C_row_ptr_size_aligned + C_col_idx_size_aligned);
 
         #if WRITE_MTX
             std::string output_path = result_dir + "/self_product_merge2.mtx";

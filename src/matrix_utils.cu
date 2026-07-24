@@ -43,7 +43,7 @@ bool parse_mm_header(std::ifstream &file, MatrixMarketHeader &header) {
 }
 
 bool read_matrix_market(const char *filename, void **buffer_out, 
-    int **row_ptr_out, int **col_idx_out, float **val_out,
+    int **row_ptr_out, int **col_idx_out, double **val_out,
     int *rows, int *cols, int *nnz) 
 {
     FILE *fp = fopen(filename, "r");
@@ -78,10 +78,10 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     sscanf(line, "%d %d %d", &M, &N, &nz);
 
     // 读取三元组：pattern 无 value（隐含 1.0），symmetric 需镜像补全上三角
-    std::vector<std::vector<std::pair<int, float>>> rows_data(M);
+    std::vector<std::vector<std::pair<int, double>>> rows_data(M);
     for (int i = 0; i < nz; ++i) {
         int r, c;
-        float v;
+        double v;
         if (is_pattern) {
             if (fscanf(fp, "%d %d", &r, &c) != 2) {
                 fclose(fp);
@@ -90,14 +90,14 @@ bool read_matrix_market(const char *filename, void **buffer_out,
             v = 1.0f;
         } else if (is_complex) {
             // complex 数据行是 "row col real imag"，这里只保留实部
-            float re, im;
-            if (fscanf(fp, "%d %d %f %f", &r, &c, &re, &im) != 4) {
+            double re, im;
+            if (fscanf(fp, "%d %d %lf %lf", &r, &c, &re, &im) != 4) {
                 fclose(fp);
                 return false;
             }
             v = re;
         } else {
-            if (fscanf(fp, "%d %d %f", &r, &c, &v) != 3) {
+            if (fscanf(fp, "%d %d %lf", &r, &c, &v) != 3) {
                 fclose(fp);
                 return false;
             }
@@ -119,8 +119,8 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     // 计算总内存大小（按展开后的 nnz）
     size_t row_ptr_size = (M + 1) * sizeof(int);
     size_t col_idx_size = actual_nnz * sizeof(int);
-    size_t val_size = actual_nnz * sizeof(float);
-    size_t total_size = row_ptr_size + col_idx_size + val_size;
+    size_t val_size = actual_nnz * sizeof(double);
+    size_t total_size = ALIGN8(row_ptr_size + col_idx_size) + val_size;
 
     // 分配单块连续 host memory:USE_MEMPOOL=1 → pinned(cudaMallocHost,H2D 走 DMA 直传);
     //                         USE_MEMPOOL=0 → pageable(malloc,走 driver staging)。便于 A/B。
@@ -142,7 +142,7 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     char *base = (char*)buffer;
     int *row_ptr = (int*)base;
     int *col_idx = (int*)(base + row_ptr_size);
-    float *val = (float*)(base + row_ptr_size + col_idx_size);
+    double *val = (double*)(base + ALIGN8(row_ptr_size + col_idx_size));
 
     // 构建 CSR
     row_ptr[0] = 0;
@@ -170,7 +170,7 @@ bool read_matrix_market(const char *filename, void **buffer_out,
 }
 
 bool write_matrix_market(const char *filename,
-                        const int *row_ptr, const int *col_idx, const float *val,
+                        const int *row_ptr, const int *col_idx, const double *val,
                         int rows, int cols, int nnz) 
 {
     std::ofstream file(filename);
@@ -201,9 +201,9 @@ void print_matrix_info(const char *name, int rows, int cols, int nnz) {
               << ", sparsity = " << sparsity << "%\n";
 }
 
-bool verify_csr_matrices(const int *row_ptr1, const int *col_idx1, const float *val1,
-                        const int *row_ptr2, const int *col_idx2, const float *val2,
-                        int rows, int cols, int nnz1, int nnz2, float tolerance) 
+bool verify_csr_matrices(const int *row_ptr1, const int *col_idx1, const double *val1,
+                        const int *row_ptr2, const int *col_idx2, const double *val2,
+                        int rows, int cols, int nnz1, int nnz2, double tolerance) 
 {
     // 检查非零元素数量
     if (nnz1 != nnz2) {
@@ -232,9 +232,9 @@ bool verify_csr_matrices(const int *row_ptr1, const int *col_idx1, const float *
                 return false;
             }
 
-            float diff = std::abs(val1[j] - val2[k]);
-            float max_val = std::max(std::abs(val1[j]), std::abs(val2[k]));
-            float relative_error = (max_val > 0) ? diff / max_val : diff;
+            double diff = std::abs(val1[j] - val2[k]);
+            double max_val = std::max(std::abs(val1[j]), std::abs(val2[k]));
+            double relative_error = (max_val > 0) ? diff / max_val : diff;
 
             if (relative_error > tolerance) {
                 fprintf(stderr, "Verification failed: row %d, col %d, value mismatch (%.6e vs %.6e, rel_err=%.6e)\n",

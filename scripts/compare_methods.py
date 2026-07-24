@@ -15,7 +15,7 @@ OCEAN_CFG = "config/bench_detail.json"
 OCEAN_STATS = os.path.join(REPO, "ocean/stats.json")
 HSMU_BIN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/evaluation/script/test")
 HSMU_CSV = "/tmp/NHC_4080S_result.csv"
-# spECK (Parger PPoPP'20, hash+dense hybrid SOTA, cuda11 分支) — 自乘 C=A·A,单精度
+# spECK (Parger PPoPP'20, hash+dense hybrid SOTA, cuda11 分支) — 自乘 C=A·A,double(与 Ocean/HSMU 同精度;spgemm_test 已统一 double)
 SPECK_RUN = os.path.join(REPO, "spECK/build/runspECK")
 SPECK_CFG = os.path.join(REPO, "spECK/config.ini")
 # dense baseline(-O0 朴素 dense matmul,cudaEvent kernel time,同口径)缓存:由 scripts/run_dense_baseline.py 生成

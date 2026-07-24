@@ -20,7 +20,7 @@
 
 // 最普通的内积式矩阵乘：每个 C[row, col] 是 A 的一行和 B 的一列的内积。
 // A 是 M x K，B 是 K x N，C 是 M x N，三个矩阵都按行优先存放。
-__global__ void dense_matmul_kernel(const float *A, const float *B, float *C,
+__global__ void dense_matmul_kernel(const double *A, const double *B, double *C,
                                     int M, int K, int N) {
     size_t total = static_cast<size_t>(M) * N;
     int lane = threadIdx.x;
@@ -30,7 +30,7 @@ __global__ void dense_matmul_kernel(const float *A, const float *B, float *C,
         int row = static_cast<int>(index / N);
         int col = static_cast<int>(index % N);
 
-        float sum = 0.0f;
+        double sum = 0.0f;
         for (int k = lane; k < K; k += 32) {
             sum += A[static_cast<size_t>(row) * K + k] *
                    B[static_cast<size_t>(k) * N + col];
@@ -46,12 +46,12 @@ __global__ void dense_matmul_kernel(const float *A, const float *B, float *C,
     }
 }
 
-static bool read_as_dense(const char *path, std::vector<float> &dense,
+static bool read_as_dense(const char *path, std::vector<double> &dense,
                           int &rows, int &cols) {
     void *buffer = nullptr;
     int *row_ptr = nullptr;
     int *col_idx = nullptr;
-    float *val = nullptr;
+    double *val = nullptr;
     int nnz = 0;
 
     if (!read_matrix_market(path, &buffer, &row_ptr, &col_idx, &val,
@@ -73,15 +73,15 @@ static bool read_as_dense(const char *path, std::vector<float> &dense,
 }
 
 // 计算过程始终使用稠密 C；这里只在写文件前转回项目现有 writer 需要的 CSR。
-static bool write_dense_result(const char *path, const std::vector<float> &dense,
+static bool write_dense_result(const char *path, const std::vector<double> &dense,
                                int rows, int cols) {
     std::vector<int> row_ptr(rows + 1, 0);
     std::vector<int> col_idx;
-    std::vector<float> val;
+    std::vector<double> val;
 
     for (int row = 0; row < rows; ++row) {
         for (int col = 0; col < cols; ++col) {
-            float x = dense[static_cast<size_t>(row) * cols + col];
+            double x = dense[static_cast<size_t>(row) * cols + col];
             if (std::fabs(x) > 1e-12f) {
                 if (col_idx.size() ==
                     static_cast<size_t>(std::numeric_limits<int>::max())) {
@@ -113,8 +113,8 @@ int main(int argc, char **argv) {
                                            : (argc == 3 ? argv[2]
                                                         : "dense_result.mtx");
 
-    std::vector<float> hA;
-    std::vector<float> hB;
+    std::vector<double> hA;
+    std::vector<double> hB;
     int A_rows = 0, A_cols = 0;
     int B_rows = 0, B_cols = 0;
 
@@ -138,15 +138,15 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    size_t A_bytes = hA.size() * sizeof(float);
-    size_t B_bytes = hB.size() * sizeof(float);
+    size_t A_bytes = hA.size() * sizeof(double);
+    size_t B_bytes = hB.size() * sizeof(double);
     size_t C_elements = static_cast<size_t>(A_rows) * B_cols;
-    size_t C_bytes = C_elements * sizeof(float);
-    std::vector<float> hC(C_elements);
+    size_t C_bytes = C_elements * sizeof(double);
+    std::vector<double> hC(C_elements);
 
-    float *dA = nullptr;
-    float *dB = nullptr;
-    float *dC = nullptr;
+    double *dA = nullptr;
+    double *dB = nullptr;
+    double *dC = nullptr;
     CHECK_CUDA(cudaMalloc(&dA, A_bytes));
     CHECK_CUDA(cudaMalloc(&dB, B_bytes));
     CHECK_CUDA(cudaMalloc(&dC, C_bytes));

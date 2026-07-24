@@ -53,18 +53,18 @@ static void spgemm_cusparse_device(
     size_t A_col_idx_size = A_nnz * sizeof(int);
     int *dA_row_ptr = (int*)dA_base;
     int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
-    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+    double *dA_val = (double*)(dA_base + ALIGN8(A_row_ptr_size + A_col_idx_size));
 
     char *dB_base = (char*)dB_buffer;
     size_t B_row_ptr_size = (B_rows + 1) * sizeof(int);
     size_t B_col_idx_size = B_nnz * sizeof(int);
     int *dB_row_ptr = (int*)dB_base;
     int *dB_col_idx = (int*)(dB_base + B_row_ptr_size);
-    float *dB_val = (float*)(dB_base + B_row_ptr_size + B_col_idx_size);
+    double *dB_val = (double*)(dB_base + ALIGN8(B_row_ptr_size + B_col_idx_size));
 
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
-    cudaDataType computeType = CUDA_R_32F;
+    const double alpha = 1.0f;
+    const double beta = 0.0f;
+    cudaDataType computeType = CUDA_R_64F;
     cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -72,18 +72,18 @@ static void spgemm_cusparse_device(
     CHECK_CUSPARSE(cusparseCreateCsr(
         &matA, A_rows, A_cols, A_nnz,
         dA_row_ptr, dA_col_idx, dA_val,
-        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
     
     CHECK_CUSPARSE(cusparseCreateCsr(
         &matB, B_rows, B_cols, B_nnz,
         dB_row_ptr, dB_col_idx, dB_val,
-        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
 
     int *dC_row_ptr;
     CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
     CHECK_CUSPARSE(cusparseCreateCsr(
         &matC, A_rows, B_cols, 0, dC_row_ptr, nullptr, nullptr,
-        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F));
+        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
 
     cusparseSpGEMMDescr_t spgemmDesc;
     CHECK_CUSPARSE(cusparseSpGEMM_createDescr(&spgemmDesc));
@@ -118,9 +118,9 @@ static void spgemm_cusparse_device(
         (long long)C_rows64, (long long)C_cols64, (long long)C_nnz64);
 
     int *dC_col_idx;
-    float *dC_val;
+    double *dC_val;
     CHECK_CUDA(cudaMalloc(&dC_col_idx, C_nnz * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dC_val, C_nnz * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&dC_val, C_nnz * sizeof(double)));
     CHECK_CUSPARSE(cusparseCsrSetPointers(matC, dC_row_ptr, dC_col_idx, dC_val));
 
     dbg("cusparse: copy begin\n");
@@ -133,11 +133,11 @@ static void spgemm_cusparse_device(
     // 分配对齐的 device 单块内存
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = C_nnz * sizeof(int);
-    size_t C_val_size = C_nnz * sizeof(float);
+    size_t C_val_size = C_nnz * sizeof(double);
     
     // 对齐到 4 字节边界
-    size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+    size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
     size_t C_total_size = C_row_ptr_size_aligned + C_col_idx_size_aligned + C_val_size;
     
     void *dC_buffer;
@@ -174,8 +174,8 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
-    size_t A_val_size = A_nnz * sizeof(float);
-    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+    size_t A_val_size = A_nnz * sizeof(double);
+    size_t A_total_size = ALIGN8(A_row_ptr_size + A_col_idx_size) + A_val_size;
 
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
@@ -192,10 +192,10 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     // 改这里：用对齐后的大小
     size_t C_row_ptr_size = (C_rows_tmp + 1) * sizeof(int);
     size_t C_col_idx_size = C_nnz_tmp * sizeof(int);
-    size_t C_val_size = C_nnz_tmp * sizeof(float);
+    size_t C_val_size = C_nnz_tmp * sizeof(double);
 
-    size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+    size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
     size_t C_total_size = C_row_ptr_size_aligned + C_col_idx_size_aligned + C_val_size;
 
     void *C_buffer;
@@ -221,8 +221,8 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
-    size_t A_val_size = A_nnz * sizeof(float);
-    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+    size_t A_val_size = A_nnz * sizeof(double);
+    size_t A_total_size = ALIGN8(A_row_ptr_size + A_col_idx_size) + A_val_size;
 
     // 单次 H2D
     void *dA_buffer;
@@ -234,19 +234,19 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     char *dA_base = (char*)dA_buffer;
     int *dA_row_ptr = (int*)dA_base;
     int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
-    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+    double *dA_val = (double*)(dA_base + ALIGN8(A_row_ptr_size + A_col_idx_size));
 
     // 转置结果分别分配，保证对齐
     int *dAT_row_ptr, *dAT_col_idx;
-    float *dAT_val;
+    double *dAT_val;
     CHECK_CUDA(cudaMalloc(&dAT_row_ptr, (A_cols + 1) * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&dAT_col_idx, A_nnz * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dAT_val, A_nnz * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&dAT_val, A_nnz * sizeof(double)));
 
     size_t bufferSize = 0;
     CHECK_CUSPARSE(cusparseCsr2cscEx2_bufferSize(
     g_handle, A_rows, A_cols, A_nnz, dA_val, dA_row_ptr, dA_col_idx,
-    dAT_val, dAT_row_ptr, dAT_col_idx, CUDA_R_32F,
+    dAT_val, dAT_row_ptr, dAT_col_idx, CUDA_R_64F,
     CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO,
     CUSPARSE_CSR2CSC_ALG1, &bufferSize));
 
@@ -254,7 +254,7 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     CHECK_CUDA(cudaMalloc(&dBuffer, bufferSize));
     CHECK_CUSPARSE(cusparseCsr2cscEx2(
     g_handle, A_rows, A_cols, A_nnz, dA_val, dA_row_ptr, dA_col_idx,
-    dAT_val, dAT_row_ptr, dAT_col_idx, CUDA_R_32F,
+    dAT_val, dAT_row_ptr, dAT_col_idx, CUDA_R_64F,
     CUSPARSE_ACTION_NUMERIC, CUSPARSE_INDEX_BASE_ZERO,
     CUSPARSE_CSR2CSC_ALG1, dBuffer));
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -264,11 +264,11 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     // 合并 A^T 到单块内存（保证对齐）
     size_t AT_row_ptr_size = (A_cols + 1) * sizeof(int);
     size_t AT_col_idx_size = A_nnz * sizeof(int);
-    size_t AT_val_size = A_nnz * sizeof(float);
+    size_t AT_val_size = A_nnz * sizeof(double);
 
-    // 对齐到 float（4 字节）边界
-    size_t AT_row_ptr_size_aligned = (AT_row_ptr_size + 3) & ~3;
-    size_t AT_col_idx_size_aligned = (AT_col_idx_size + 3) & ~3;
+    // 对齐到 double（4 字节）边界
+    size_t AT_row_ptr_size_aligned = ALIGN8(AT_row_ptr_size);
+    size_t AT_col_idx_size_aligned = ALIGN8(AT_col_idx_size);
     size_t AT_total_size = AT_row_ptr_size_aligned + AT_col_idx_size_aligned + AT_val_size;
 
     void *dAT_buffer;
@@ -294,11 +294,11 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     // 单次 D2H（C 内部已经对齐）
     size_t C_row_ptr_size = (C_rows_tmp + 1) * sizeof(int);
     size_t C_col_idx_size = C_nnz_tmp * sizeof(int);
-    size_t C_val_size = C_nnz_tmp * sizeof(float);
+    size_t C_val_size = C_nnz_tmp * sizeof(double);
 
     // 同样对齐
-    size_t C_row_ptr_size_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_size_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_row_ptr_size_aligned = ALIGN8(C_row_ptr_size);
+    size_t C_col_idx_size_aligned = ALIGN8(C_col_idx_size);
     size_t C_total_size = C_row_ptr_size_aligned + C_col_idx_size_aligned + C_val_size;
 
     void *C_buffer;

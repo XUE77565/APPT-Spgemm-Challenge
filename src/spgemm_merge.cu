@@ -37,9 +37,9 @@ extern __global__ void count_intermediates_kernel(
 // 与 manual 的 expand 区别:这里【串行写】→ 每个 k 的贡献是一段【连续、col 有序】的段,
 // 这样 merge_serial 才能把它当成一条有序列链来归并。
 __global__ void expand_serial_kernel(
-    const int *A_row_ptr, const int *A_col_idx, const float *A_val,
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     int A_rows, const int *row_off,
-    unsigned long long *key, float *val)
+    unsigned long long *key, double *val)
 {
     int i = blockIdx.x;            // 每行一个 block
     if (i >= A_rows) return;       // blockDim = 1,只有 thread 0
@@ -47,7 +47,7 @@ __global__ void expand_serial_kernel(
     int slot = row_off[i];
     for (int p = rs; p < re; p++) {
         int k = A_col_idx[p];
-        float a_ik = A_val[p];
+        double a_ik = A_val[p];
         int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];   // A 的第 k 行(列有序)
         for (int q = ks; q < ke; q++) {
             key[slot] = ((unsigned long long)i << 32) | (unsigned int)A_col_idx[q];
@@ -63,8 +63,8 @@ __global__ void expand_serial_kernel(
 __global__ void merge_serial_kernel(
     const int *A_row_ptr, const int *A_col_idx,
     int A_rows, const int *row_off,
-    const unsigned long long *key, const float *val,
-    int *out_col, float *out_val, int *row_nnz)
+    const unsigned long long *key, const double *val,
+    int *out_col, double *out_val, int *row_nnz)
 {
     int i = blockIdx.x;            // 每行一个 block
     if (i >= A_rows) return;       // blockDim = 1,thread 0
@@ -72,7 +72,7 @@ __global__ void merge_serial_kernel(
     int num_k = re - rs;           // 要归并的列链数
     int base = row_off[i];
 
-    extern __shared__ int smem[];
+    extern __shared__ __align__(8) int smem[];
     int *seg_cur = smem;           // [num_k] 每条链当前读位置
     int *seg_end = smem + num_k;   // [num_k] 每条链结束位置
 
@@ -100,7 +100,7 @@ __global__ void merge_serial_kernel(
         if (min_col == 0x7fffffff) break;          // 所有链耗尽
 
         // 2) 求和所有头部 == min_col 的链,并前进
-        float sum = 0.0f;
+        double sum = 0.0f;
         for (int p = 0; p < num_k; p++) {
             int pos = seg_cur[p];
             if (pos < seg_end[p] && (int)(key[pos] & 0xffffffffu) == min_col) {
@@ -121,8 +121,8 @@ __global__ void merge_serial_kernel(
 // 间隙),按 C_row_ptr 压成连续 CSR。每行一块,块内线程跨步拷贝。
 __global__ void compact_kernel(
     const int *row_off, const int *row_nnz, const int *C_row_ptr,
-    const int *in_col, const float *in_val,
-    int *out_col, float *out_val, int A_rows)
+    const int *in_col, const double *in_val,
+    int *out_col, double *out_val, int A_rows)
 {
     int i = blockIdx.x;
     if (i >= A_rows) return;
@@ -145,8 +145,8 @@ void spgemm_self_product_merge(
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
-    size_t A_val_size = A_nnz * sizeof(float);
-    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+    size_t A_val_size = A_nnz * sizeof(double);
+    size_t A_total_size = ALIGN8(A_row_ptr_size + A_col_idx_size) + A_val_size;
 
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
@@ -156,7 +156,7 @@ void spgemm_self_product_merge(
     char *dA_base = (char*)dA_buffer;
     int *dA_row_ptr = (int*)dA_base;
     int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
-    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+    double *dA_val = (double*)(dA_base + ALIGN8(A_row_ptr_size + A_col_idx_size));
 
     const int block = 256;
 
@@ -199,9 +199,9 @@ void spgemm_self_product_merge(
 
     // ---- Stage 2: 串行展开(每 k 连续有序段)写全局 COO(key, val)----
     unsigned long long *d_key;
-    float *d_val;
+    double *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_ub * sizeof(unsigned long long)));
-    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_ub * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_ub * sizeof(double)));
     dbg("merge: expand_serial begin (%d intermediates)\n", total_ub);
     expand_serial_kernel<<<A_rows, 1>>>(
         dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off, d_key, d_val);
@@ -210,10 +210,10 @@ void spgemm_self_product_merge(
 
     // ---- Stage 3: 串行 k-way merge + dedup + sum → (out_col, out_val), row_nnz ----
     int *d_out_col;
-    float *d_out_val;
+    double *d_out_val;
     int *d_row_nnz;
     CHECK_CUDA(cudaMalloc(&d_out_col, (size_t)total_ub * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(double)));
     CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
     dbg("merge: merge_serial begin\n");
     merge_serial_kernel<<<A_rows, 1, merge_smem>>>(
@@ -238,9 +238,9 @@ void spgemm_self_product_merge(
 
     // ---- Stage 3c: compact 到连续 CSR ----
     int *dC_col_idx;
-    float *dC_val;
+    double *dC_val;
     CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(double)));
     compact_kernel<<<A_rows, block>>>(
         d_off, d_row_nnz, dC_row_ptr, d_out_col, d_out_val, dC_col_idx, dC_val, A_rows);
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -252,9 +252,9 @@ void spgemm_self_product_merge(
     // ---- 打包成单块 + D2H(与 manual 相同)----
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
-    size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
-    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_val_size = (size_t)C_nnz_result * sizeof(double);
+    size_t C_row_ptr_aligned = ALIGN8(C_row_ptr_size);
+    size_t C_col_idx_aligned = ALIGN8(C_col_idx_size);
     size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
 
     void *dC_buffer;
@@ -298,9 +298,9 @@ void spgemm_self_product_merge(
 //      列=A[k_p:]、贡献=weight*A_val[q]);逐次输出全局最小列并合并同列 → 等价 sort+reduce。
 // ==========================================================================
 __global__ void merge_warp_kernel(
-    const int *A_row_ptr, const int *A_col_idx, const float *A_val,
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     int A_rows, const int *row_off,
-    int *out_col, float *out_val, int *row_nnz)
+    int *out_col, double *out_val, int *row_nnz)
 {
     int i = blockIdx.x;                 // 每行一个 block
     if (i >= A_rows) return;
@@ -310,10 +310,10 @@ __global__ void merge_warp_kernel(
     int num_k = re - rs;                // 要归并的列链数
     int base = row_off[i];
 
-    extern __shared__ int smem[];
+    extern __shared__ __align__(8) int smem[];
     int   *seg_ptr = smem;                  // [num_k] 每条链当前读位置(指向 A)
     int   *seg_end = smem + num_k;          // [num_k] 每条链结束位置
-    float *weight  = (float*)(smem + 2*num_k); // [num_k] a_{i,k_p}
+    double *weight  = (double*)(smem + 2*num_k); // [num_k] a_{i,k_p}
 
     // (装载)每个 lane 认领 ⌈num_k/32⌉ 条链的描述符:k_p=A_col_idx[rs+p]
     for (int p = lane; p < num_k; p += 32) {
@@ -344,7 +344,7 @@ __global__ void merge_warp_kernel(
         if (wmin == 0x7fffffff) break;       // 所有链耗尽
 
         // (3) 每个 lane:头部==wmin 的链,累加 weight*A_val 并前进
-        float mysum = 0.0f;
+        double mysum = 0.0f;
         for (int p = lane; p < num_k; p += 32) {
             int pos = seg_ptr[p];
             if (pos < seg_end[p] && A_col_idx[pos] == wmin) {
@@ -376,8 +376,8 @@ void spgemm_self_product_merge2(
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
-    size_t A_val_size = A_nnz * sizeof(float);
-    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+    size_t A_val_size = A_nnz * sizeof(double);
+    size_t A_total_size = ALIGN8(A_row_ptr_size + A_col_idx_size) + A_val_size;
 
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
@@ -387,7 +387,7 @@ void spgemm_self_product_merge2(
     char *dA_base = (char*)dA_buffer;
     int *dA_row_ptr = (int*)dA_base;
     int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
-    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+    double *dA_val = (double*)(dA_base + ALIGN8(A_row_ptr_size + A_col_idx_size));
 
     const int block = 256;
 
@@ -429,10 +429,10 @@ void spgemm_self_product_merge2(
 
     // ---- Stage 2: 并行 k-way merge(直接读 A)→ out_col/out_val + row_nnz ----
     int *d_out_col;
-    float *d_out_val;
+    double *d_out_val;
     int *d_row_nnz;
     CHECK_CUDA(cudaMalloc(&d_out_col, (size_t)total_ub * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(double)));
     CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
     dbg("merge2: merge_warp begin (%d intermediates)\n", total_ub);
     merge_warp_kernel<<<A_rows, 32, merge_smem>>>(
@@ -455,9 +455,9 @@ void spgemm_self_product_merge2(
 
     // ---- Stage 2c: compact 到连续 CSR(复用 compact_kernel)----
     int *dC_col_idx;
-    float *dC_val;
+    double *dC_val;
     CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(double)));
     compact_kernel<<<A_rows, block>>>(
         d_off, d_row_nnz, dC_row_ptr, d_out_col, d_out_val, dC_col_idx, dC_val, A_rows);
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -469,9 +469,9 @@ void spgemm_self_product_merge2(
     // ---- 打包成单块 + D2H ----
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
-    size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
-    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_val_size = (size_t)C_nnz_result * sizeof(double);
+    size_t C_row_ptr_aligned = ALIGN8(C_row_ptr_size);
+    size_t C_col_idx_aligned = ALIGN8(C_col_idx_size);
     size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
 
     void *dC_buffer;
@@ -537,7 +537,7 @@ __global__ void bucket_count_kernel(
     int bhi = (int)((b + 1) * n / K);
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int num_k = re - rs;
-    extern __shared__ int smem[];
+    extern __shared__ __align__(8) int smem[];
     int *seg_ptr = smem;            // [num_k]
     int *seg_end = smem + num_k;    // [num_k]
     for (int p = lane; p < num_k; p += 32) {
@@ -581,9 +581,9 @@ __global__ void bucket_scan_kernel(int A_rows, int K, const int *bucket_nnz,
 
 // (row,bucket) 一块:warp-merge 该桶子区间,写 (col, val) 到全局偏移
 __global__ void bucket_merge_kernel(
-    const int *A_row_ptr, const int *A_col_idx, const float *A_val,
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     int A_rows, int A_cols, int K, const int *C_row_ptr, const int *bucket_off,
-    int *out_col, float *out_val)
+    int *out_col, double *out_val)
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
@@ -593,10 +593,10 @@ __global__ void bucket_merge_kernel(
     int bhi = (int)((b + 1) * n / K);
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int num_k = re - rs;
-    extern __shared__ int smem[];
+    extern __shared__ __align__(8) int smem[];
     int   *seg_ptr = smem;
     int   *seg_end = smem + num_k;
-    float *weight  = (float*)(smem + 2 * num_k);
+    double *weight  = (double*)(smem + 2 * num_k);
     for (int p = lane; p < num_k; p += 32) {
         int k = A_col_idx[rs + p];
         int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
@@ -616,7 +616,7 @@ __global__ void bucket_merge_kernel(
         int wmin = mymin;
         for (int off = 16; off > 0; off >>= 1) { int v = __shfl_xor_sync(0xffffffff, wmin, off); if (v < wmin) wmin = v; }
         if (wmin == 0x7fffffff) break;
-        float mysum = 0.0f;
+        double mysum = 0.0f;
         for (int p = lane; p < num_k; p += 32) {
             int pos = seg_ptr[p];
             if (pos < seg_end[p] && A_col_idx[pos] == wmin) {
@@ -642,15 +642,15 @@ void spgemm_self_product_merge3(
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
-    size_t A_val_size = A_nnz * sizeof(float);
-    size_t A_total_size = A_row_ptr_size + A_col_idx_size + A_val_size;
+    size_t A_val_size = A_nnz * sizeof(double);
+    size_t A_total_size = ALIGN8(A_row_ptr_size + A_col_idx_size) + A_val_size;
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
     prof("h2d", [&]{ CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice)); });
     char *dA_base = (char*)dA_buffer;
     int *dA_row_ptr = (int*)dA_base;
     int *dA_col_idx = (int*)(dA_base + A_row_ptr_size);
-    float *dA_val = (float*)(dA_base + A_row_ptr_size + A_col_idx_size);
+    double *dA_val = (double*)(dA_base + ALIGN8(A_row_ptr_size + A_col_idx_size));
 
     const int block = 256;
     const int *h_row_ptr = (const int*)A_buffer;
@@ -661,7 +661,7 @@ void spgemm_self_product_merge3(
     }
     //根据最长的可能子链来分配空间
     size_t smem_count = (size_t)max_row_nnz * 2 * sizeof(int);
-    size_t smem_merge = (size_t)max_row_nnz * 3 * sizeof(int);
+    size_t smem_merge = (size_t)max_row_nnz * (2 * sizeof(int) + sizeof(double));   // seg_ptr+seg_end[int]+weight[double]
     if (smem_merge > 48 * 1024) {
         CHECK_CUDA(cudaFuncSetAttribute(bucket_merge_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_merge));
         CHECK_CUDA(cudaFuncSetAttribute(bucket_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_count));
@@ -700,15 +700,15 @@ void spgemm_self_product_merge3(
     //   dC_row_ptr(scan 产物)落位 dC_buffer 头部用 1 个小 D2D。精确大小(C_nnz_result 已知)。
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
-    size_t C_val_size = (size_t)C_nnz_result * sizeof(float);
-    size_t C_row_ptr_aligned = (C_row_ptr_size + 3) & ~3;
-    size_t C_col_idx_aligned = (C_col_idx_size + 3) & ~3;
+    size_t C_val_size = (size_t)C_nnz_result * sizeof(double);
+    size_t C_row_ptr_aligned = ALIGN8(C_row_ptr_size);
+    size_t C_col_idx_aligned = ALIGN8(C_col_idx_size);
     size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
     void *dC_buffer;
     CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
     char *dC_base = (char*)dC_buffer;
     int   *dC_col_idx = (int*)(dC_base + C_row_ptr_aligned);
-    float *dC_val     = (float*)(dC_base + C_row_ptr_aligned + C_col_idx_aligned);
+    double *dC_val     = (double*)(dC_base + C_row_ptr_aligned + C_col_idx_aligned);
     prof("merge", [&]{
         CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));   // row_ptr 落位(微秒级,纳入计时)
         bucket_merge_kernel<<<grid, block32, smem_merge>>>(

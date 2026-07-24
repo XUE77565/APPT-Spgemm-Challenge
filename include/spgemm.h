@@ -10,6 +10,9 @@
 #define TEST_READ 0
 #define DBG 1
 #define WRITE_MTX 0
+
+// 8 字节对齐:CSR buffer [row_ptr|col_idx|val] 的 val(double)偏移须 8 对齐。
+#define ALIGN8(x) (((size_t)(x) + 7) & ~(size_t)7)
 #define CU_REF 1
 // pinned 内存池默认开关;运行时可用环境变量 USE_MEMPOOL=0/1 覆盖(便于 A/B)
 #define USE_MEMPOOL 0
@@ -38,12 +41,12 @@ inline void dbg(const char *fmt, ...) {
 
 // 读入 Matrix Market，返回单块连续 pinned memory
 bool read_matrix_market(const char *filename, void **buffer_out,
-                       int **row_ptr_out, int **col_idx_out, float **val_out,
+                       int **row_ptr_out, int **col_idx_out, double **val_out,
                        int *rows, int *cols, int *nnz);
 
 // 写出 Matrix Market
 bool write_matrix_market(const char *filename, const int *row_ptr,
-                        const int *col_idx, const float *val, int rows,
+                        const int *col_idx, const double *val, int rows,
                         int cols, int nnz);
 
 // C = A × A，输入输出都是单块连续内存

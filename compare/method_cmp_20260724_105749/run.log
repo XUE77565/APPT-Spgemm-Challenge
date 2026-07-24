@@ -1,0 +1,19 @@
+对比 5 阵 × ['merge3', 'Auto'] + Ocean + HSMU + spECK → compare/method_cmp_20260724_105749/methods_cmp.csv
+
+[1/5] 1138_bus       n=1138     Auto→merge3 m3=  0.119 Auto=  0.116 Ocean=  0.236 HSMU=  0.367 spECK=   0.07 (4.1s)
+[2/5] 494_bus        n=494      Auto→merge3 m3=  0.117 Auto=  0.105 Ocean=  0.239 HSMU=  0.332 spECK=  0.082 (4.0s)
+[3/5] 662_bus        n=662      Auto→merge3 m3=  0.095 Auto=  0.089 Ocean=   0.23 HSMU=  0.358 spECK=   0.07 (4.0s)
+[4/5] 685_bus        n=685      Auto→merge3 m3=  0.131 Auto=  0.121 Ocean=  0.226 HSMU=  0.353 spECK=  0.069 (4.0s)
+[5/5] arc130         n=130      Auto→hash   m3=  0.153 Auto=  0.282 Ocean=  0.436 HSMU=  0.434 spECK=  0.082 (4.0s)
+
+完成 → compare/method_cmp_20260724_105749/methods_cmp.csv
+
+=== 几何均值(ms) ===
+  merge3      0.122
+  Auto        0.130
+  Ocean       0.264
+  HSMU        0.367
+  spECK       0.074
+
+=== Auto 选择(共 5 阵)===  hash 1 / merge3 4
+  选 hash 的:arc130
