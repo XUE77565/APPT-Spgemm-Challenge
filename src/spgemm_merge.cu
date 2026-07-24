@@ -631,6 +631,118 @@ __global__ void bucket_merge_kernel(
     }
 }
 
+// ==========================================================================
+//  merge3 + flop_ub sizing(设计点② 收尾 / C):
+//  原版 bucket_count 为拿【精确】per-bucket distinct,把整遍 warp-merge 跑了一次(只数不写)
+//  → 占 merge3 ~37%(bcsstk30 count 6.2ms vs merge 10.4ms)。此处改用【flop_ub 上界】定桶区,
+//  省 count pass 的 merge 迭代(仅 lower_bound 定位 + 求和);merge 写到 gapped flop 区 + 记真实数;
+//  再 scan 真实数 + compact 压紧。代价:gapped buffer(=Σflop,大阵 ~2GB,H100 可容)+ 一个 compact pass。
+//  host 端 getenv("MRG3_FLOP_UB") 门控,默认关(走精确 count 原 path,便于 A/B)。
+// ==========================================================================
+
+// (C-1) 每 (row,bucket) 算 flop_ub = Σ_k (seg_end-seg_ptr)(lower_bound 定 [blo,bhi),无 merge 迭代)。
+//   这是该桶 distinct 的确定性上界(≥ distinct)。比 bucket_count 的 merge-iter count 快 ~30×。
+__global__ void bucket_flop_kernel(
+    const int *A_row_ptr, const int *A_col_idx, int A_rows, int A_cols,
+    int K, int *bucket_flop)   // [A_rows * K]
+{
+    int i = blockIdx.x, b = blockIdx.y;
+    if (i >= A_rows) return;
+    int lane = threadIdx.x;
+    long long n = A_cols;
+    int blo = (int)(b * n / K);
+    int bhi = (int)((b + 1) * n / K);
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int num_k = re - rs;
+    extern __shared__ __align__(8) int smem[];
+    int *seg_ptr = smem;            // [num_k]
+    int *seg_end = smem + num_k;    // [num_k]
+    for (int p = lane; p < num_k; p += 32) {
+        int k = A_col_idx[rs + p];
+        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        seg_ptr[p] = dev_lower_bound(A_col_idx, ks, ke, blo);
+        seg_end[p] = dev_lower_bound(A_col_idx, ks, ke, bhi);
+    }
+    __syncwarp();
+    int s = 0;
+    for (int p = lane; p < num_k; p += 32) s += seg_end[p] - seg_ptr[p];
+    for (int off = 16; off > 0; off >>= 1) s += __shfl_xor_sync(0xffffffff, s, off);
+    if (lane == 0) bucket_flop[i * K + b] = s;
+}
+
+// (C-2) 每 (row,bucket) warp-merge 写 (col,val) 到【gapped flop 区】(base = row_off + bucket_flop_off),
+//   并记真实 distinct 数 bucket_real_nnz(= 该桶 merge 产出项数)。逻辑同 bucket_merge_kernel,
+//   仅 base 改 flop-off、末尾多写一个 real 计数。
+__global__ void bucket_merge_flop_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    int A_rows, int A_cols, int K, const int *row_off, const int *bucket_flop_off,
+    int *out_col, double *out_val, int *bucket_real_nnz)   // [A_rows*K]
+{
+    int i = blockIdx.x, b = blockIdx.y;
+    if (i >= A_rows) return;
+    int lane = threadIdx.x;
+    long long n = A_cols;
+    int blo = (int)(b * n / K);
+    int bhi = (int)((b + 1) * n / K);
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int num_k = re - rs;
+    extern __shared__ __align__(8) int smem[];
+    int   *seg_ptr = smem;
+    int   *seg_end = smem + num_k;
+    double *weight  = (double*)(smem + 2 * num_k);
+    for (int p = lane; p < num_k; p += 32) {
+        int k = A_col_idx[rs + p];
+        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        seg_ptr[p] = dev_lower_bound(A_col_idx, ks, ke, blo);
+        seg_end[p] = dev_lower_bound(A_col_idx, ks, ke, bhi);
+        weight[p]  = A_val[rs + p];
+    }
+    __syncwarp();
+    int base = row_off[i] + bucket_flop_off[i * K + b];
+    int out_idx = 0;
+    while (true) {
+        int mymin = 0x7fffffff;
+        for (int p = lane; p < num_k; p += 32) {
+            int pos = seg_ptr[p];
+            if (pos < seg_end[p]) { int col = A_col_idx[pos]; if (col < mymin) mymin = col; }
+        }
+        int wmin = mymin;
+        for (int off = 16; off > 0; off >>= 1) { int v = __shfl_xor_sync(0xffffffff, wmin, off); if (v < wmin) wmin = v; }
+        if (wmin == 0x7fffffff) break;
+        double mysum = 0.0f;
+        for (int p = lane; p < num_k; p += 32) {
+            int pos = seg_ptr[p];
+            if (pos < seg_end[p] && A_col_idx[pos] == wmin) {
+                mysum += weight[p] * A_val[pos];
+                seg_ptr[p] = pos + 1;
+            }
+        }
+        for (int off = 16; off > 0; off >>= 1)
+            mysum += __shfl_xor_sync(0xffffffff, mysum, off);
+        if (lane == 0) { out_col[base + out_idx] = wmin; out_val[base + out_idx] = mysum; }
+        out_idx++;
+    }
+    if (lane == 0) bucket_real_nnz[i * K + b] = out_idx;
+}
+
+// (C-3) compact:把每 (row,bucket) 的真实项从 gapped flop 区拷到精确 CSR(base = C_row_ptr + bucket_off_exact)。
+__global__ void bucket_compact_kernel(
+    int A_rows, int K, const int *row_off, const int *bucket_flop_off,
+    const int *bucket_real_nnz, const int *C_row_ptr, const int *bucket_off_exact,
+    const int *in_col, const double *in_val, int *out_col, double *out_val)
+{
+    int i = blockIdx.x, b = blockIdx.y;
+    if (i >= A_rows) return;
+    int lane = threadIdx.x;
+    int src = row_off[i] + bucket_flop_off[i * K + b];
+    int dst = C_row_ptr[i] + bucket_off_exact[i * K + b];
+    int n = bucket_real_nnz[i * K + b];
+    for (int t = lane; t < n; t += 32) {
+        out_col[dst + t] = in_col[src + t];
+        out_val[dst + t] = in_val[src + t];
+    }
+}
+
 // ========== merge3 Host ==========
 void spgemm_self_product_merge3(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
@@ -669,53 +781,118 @@ void spgemm_self_product_merge3(
 
     dim3 grid(A_rows, K), block32(32);
 
-    // ---- Stage 1: 每桶 count distinct 列 ----
-    int *d_bucket_nnz;
-    CHECK_CUDA(cudaMalloc(&d_bucket_nnz, (size_t)A_rows * K * sizeof(int)));
-    prof("count", [&]{
-        bucket_count_kernel<<<grid, block32, smem_count>>>(
-            dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bucket_nnz);
-        CHECK_CUDA(cudaGetLastError());
-    });
+    // 门控:flop_ub sizing(省 count pass ~37%)vs 精确 count(原版)。默认 flop_ub(净赢 24-32%、无回归);MRG3_FLOP_UB=0 关回精确 count。
+    static int g_flop = -1;
+    if (g_flop < 0) { const char *e = getenv("MRG3_FLOP_UB"); g_flop = (e && *e) ? (atoi(e) > 0 ? 1 : 0) : 1; }
+    if (g_flop && smem_merge > 48 * 1024) {
+        CHECK_CUDA(cudaFuncSetAttribute(bucket_flop_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_count));
+        CHECK_CUDA(cudaFuncSetAttribute(bucket_merge_flop_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_merge));
+    }
 
-    // ---- Stage 2: 行内桶偏移 + row_nnz + C_row_ptr(D2H 纳入 scan 块对齐 Ocean)----
-    int *d_bucket_off, *d_row_nnz;
-    CHECK_CUDA(cudaMalloc(&d_bucket_off, (size_t)A_rows * K * sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
-    int *dC_row_ptr;
-    CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
+    int *dC_row_ptr; CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
     int C_nnz_result;
-    prof("scan", [&]{
-        bucket_scan_kernel<<<(A_rows + block - 1) / block, block>>>(
-            A_rows, K, d_bucket_nnz, d_bucket_off, d_row_nnz);
-        CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
-        thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
-                               thrust::device_ptr<int>(d_row_nnz + A_rows),
-                               thrust::device_ptr<int>(dC_row_ptr + 1));
-        CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    });
+    void *dC_buffer = nullptr;
+    size_t C_total_size = 0;
 
-    // ---- Stage 3: 每桶 merge 写值 + 连续输出 dC_buffer=[row_ptr|col|val] ----
-    //   dC_col_idx/dC_val 是 dC_buffer 偏移别名 → merge 直写连续布局,免 pack 的 col/val 两个大 D2D gather(对齐 Ocean)。
-    //   dC_row_ptr(scan 产物)落位 dC_buffer 头部用 1 个小 D2D。精确大小(C_nnz_result 已知)。
-    size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
-    size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
-    size_t C_val_size = (size_t)C_nnz_result * sizeof(double);
-    size_t C_row_ptr_aligned = ALIGN8(C_row_ptr_size);
-    size_t C_col_idx_aligned = ALIGN8(C_col_idx_size);
-    size_t C_total_size = C_row_ptr_aligned + C_col_idx_aligned + C_val_size;
-    void *dC_buffer;
-    CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
-    char *dC_base = (char*)dC_buffer;
-    int   *dC_col_idx = (int*)(dC_base + C_row_ptr_aligned);
-    double *dC_val     = (double*)(dC_base + C_row_ptr_aligned + C_col_idx_aligned);
-    prof("merge", [&]{
-        CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));   // row_ptr 落位(微秒级,纳入计时)
-        bucket_merge_kernel<<<grid, block32, smem_merge>>>(
-            dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, dC_row_ptr, d_bucket_off,
-            dC_col_idx, dC_val);
-        CHECK_CUDA(cudaGetLastError());
-    });
+    if (g_flop) {
+        // ============ flop_ub path:省 count 的 merge 迭代,代价 = gapped buffer + compact ============
+        int *d_bflop, *d_bflop_off, *d_row_flop, *d_row_off;
+        CHECK_CUDA(cudaMalloc(&d_bflop, (size_t)A_rows * K * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_bflop_off, (size_t)A_rows * K * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_row_flop, A_rows * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_row_off, (A_rows + 1) * sizeof(int)));
+        int total_flop;
+        prof("flop", [&]{   // (C-1) 每 (row,bucket) flop_ub(lower_bound+sum,无 merge 迭代)
+            bucket_flop_kernel<<<grid, block32, smem_count>>>(dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bflop);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        prof("fscan", [&]{  // 行内 scan(flop)→ bucket_flop_off + row_flop;全局 scan → row_off(gapped) + total_flop
+            bucket_scan_kernel<<<(A_rows + block - 1) / block, block>>>(A_rows, K, d_bflop, d_bflop_off, d_row_flop);
+            CHECK_CUDA(cudaMemset(d_row_off, 0, sizeof(int)));
+            thrust::inclusive_scan(thrust::device_ptr<int>(d_row_flop), thrust::device_ptr<int>(d_row_flop + A_rows),
+                                   thrust::device_ptr<int>(d_row_off + 1));
+            CHECK_CUDA(cudaMemcpy(&total_flop, d_row_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+        });
+        // gapped out buffer [total_flop](=Σflop,大阵 ~2GB,H100 可容)
+        int *d_gcol; double *d_gval; int *d_breal;
+        CHECK_CUDA(cudaMalloc(&d_gcol, (size_t)total_flop * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_gval, (size_t)total_flop * sizeof(double)));
+        CHECK_CUDA(cudaMalloc(&d_breal, (size_t)A_rows * K * sizeof(int)));
+        prof("merge", [&]{   // (C-2) warp-merge 写 gapped 区 + 记真实数 bucket_real_nnz
+            bucket_merge_flop_kernel<<<grid, block32, smem_merge>>>(
+                dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, d_row_off, d_bflop_off,
+                d_gcol, d_gval, d_breal);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        int *d_boff_ex, *d_row_nnz;
+        CHECK_CUDA(cudaMalloc(&d_boff_ex, (size_t)A_rows * K * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
+        prof("rscan", [&]{  // scan(真实数)→ exact bucket_off + row_nnz → C_row_ptr + C_nnz
+            bucket_scan_kernel<<<(A_rows + block - 1) / block, block>>>(A_rows, K, d_breal, d_boff_ex, d_row_nnz);
+            CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
+            thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz), thrust::device_ptr<int>(d_row_nnz + A_rows),
+                                   thrust::device_ptr<int>(dC_row_ptr + 1));
+            CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+        });
+        // alloc 精确 dC=[row_ptr|col|val],compact gapped → 精确
+        size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
+        size_t C_rp_al = ALIGN8(C_row_ptr_size);
+        size_t C_ci_al = ALIGN8((size_t)C_nnz_result * sizeof(int));
+        C_total_size = C_rp_al + C_ci_al + (size_t)C_nnz_result * sizeof(double);
+        CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
+        char *cb = (char*)dC_buffer;
+        int   *dC_ci = (int*)(cb + C_rp_al);
+        double *dC_val = (double*)(cb + C_rp_al + C_ci_al);
+        prof("compact", [&]{
+            CHECK_CUDA(cudaMemcpy(cb, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+            bucket_compact_kernel<<<grid, block32>>>(A_rows, K, d_row_off, d_bflop_off, d_breal, dC_row_ptr, d_boff_ex,
+                                                      d_gcol, d_gval, dC_ci, dC_val);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        cudaFree(d_bflop); cudaFree(d_bflop_off); cudaFree(d_row_flop); cudaFree(d_row_off);
+        cudaFree(d_gcol); cudaFree(d_gval); cudaFree(d_breal); cudaFree(d_boff_ex); cudaFree(d_row_nnz);
+    } else {
+        // ============ exact-count path(原版)============
+        // ---- Stage 1: 每桶 count distinct 列 ----
+        int *d_bucket_nnz;
+        CHECK_CUDA(cudaMalloc(&d_bucket_nnz, (size_t)A_rows * K * sizeof(int)));
+        prof("count", [&]{
+            bucket_count_kernel<<<grid, block32, smem_count>>>(
+                dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bucket_nnz);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        // ---- Stage 2: 行内桶偏移 + row_nnz + C_row_ptr(D2H 纳入 scan 块对齐 Ocean)----
+        int *d_bucket_off, *d_row_nnz;
+        CHECK_CUDA(cudaMalloc(&d_bucket_off, (size_t)A_rows * K * sizeof(int)));
+        CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
+        prof("scan", [&]{
+            bucket_scan_kernel<<<(A_rows + block - 1) / block, block>>>(
+                A_rows, K, d_bucket_nnz, d_bucket_off, d_row_nnz);
+            CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
+            thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
+                                   thrust::device_ptr<int>(d_row_nnz + A_rows),
+                                   thrust::device_ptr<int>(dC_row_ptr + 1));
+            CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+        });
+        // ---- Stage 3: 每桶 merge 写值 + 连续输出 dC_buffer=[row_ptr|col|val] ----
+        size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
+        size_t C_col_idx_aligned = ALIGN8((size_t)C_nnz_result * sizeof(int));
+        size_t C_rp_al = ALIGN8(C_row_ptr_size);
+        C_total_size = C_rp_al + C_col_idx_aligned + (size_t)C_nnz_result * sizeof(double);
+        CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
+        char *dC_base = (char*)dC_buffer;
+        int   *dC_col_idx = (int*)(dC_base + C_rp_al);
+        double *dC_val     = (double*)(dC_base + C_rp_al + C_col_idx_aligned);
+        prof("merge", [&]{
+            CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+            bucket_merge_kernel<<<grid, block32, smem_merge>>>(
+                dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, dC_row_ptr, d_bucket_off,
+                dC_col_idx, dC_val);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        cudaFree(d_bucket_nnz); cudaFree(d_bucket_off); cudaFree(d_row_nnz);
+    }
+
 
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
@@ -724,6 +901,5 @@ void spgemm_self_product_merge3(
     *C_buffer_out = C_buffer;
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = C_nnz_result;
 
-    cudaFree(dA_buffer); cudaFree(d_bucket_nnz); cudaFree(d_bucket_off);
-    cudaFree(d_row_nnz); cudaFree(dC_row_ptr); cudaFree(dC_buffer);   // dC_col_idx/dC_val 是 dC_buffer 别名
+    cudaFree(dA_buffer); cudaFree(dC_row_ptr); cudaFree(dC_buffer);   // 各 path 的临时数组已在分支内 free;dC_ci/dC_val 是 dC_buffer 别名
 }

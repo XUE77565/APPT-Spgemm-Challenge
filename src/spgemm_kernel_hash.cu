@@ -324,6 +324,116 @@ __global__ void hash_spa_kernel(
     }
 }
 
+// hash_spa_priv_kernel —— warp 私有 SPA(创新点原型,HASH_PRIV 门控)。
+//   把 k 循环按 warp 分区(W 张私有 SMEM 表)。关键不变式:CSR 行内列唯一 + k 按 warp 不相交分区
+//   ⇒ 单 warp 内对任一列 j 的访问在时间上不并发(同一 k 内 32 lane 取不同 j;跨 k 顺序执行)
+//   ⇒ Phase A 累加用【plain +=,无 atomicAdd】,只有插入用 atomicCAS(处理碰撞)。
+//   于是热门列的 dup 次 atomicAdd 被整体消除(这正是 flat SPA 的结构瓶颈,worklog §21-24 已证)。
+//   Phase B 把 warp 1..W-1 的私表并入 warp 0 表(跨 warp 共享 → atomicAdd,fan-in ≤ W)。
+//   Phase C extract warp 0 表 → tmp(复用 flat extract)。SMEM = W*ht*(int+double);不 fit → 上层走 flat。
+//   blockDim = W*32(每 warp 一表);W 由 host 传(HASH_PRIV_W,默认 8)。
+__global__ void hash_spa_priv_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *bucket_rows, int n_in_bucket, int ht_size, int W,
+    const int *row_off,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag)
+{
+    int idx = blockIdx.x;
+    if (idx >= n_in_bucket) return;
+    int i = bucket_rows[idx];
+    int tid = threadIdx.x;
+    int warp = tid >> 5, lane = tid & 31;                  // blockDim.x = W*32,warp ∈ [0,W)
+    int mask = ht_size - 1;
+
+    extern __shared__ __align__(8) int smem[];
+    int   *sh_col = smem;                                  // [W*ht]
+    double *sh_val = (double*)(smem + (size_t)W * ht_size);// [W*ht]
+    int   *my_col = sh_col + (size_t)warp * ht_size;
+    double *my_val = sh_val + (size_t)warp * ht_size;
+
+    for (int s = lane; s < ht_size; s += 32) { my_col[s] = -1; my_val[s] = 0.0; }
+    __syncthreads();
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+
+    // ---- Phase A:warp 私有累加(k 按 warp 分区;plain +=,无 atomicAdd)----
+    for (int p = rs + warp; p < re; p += W) {              // 本 warp 的 k(stride W)
+        int k = A_col_idx[p];
+        double a_ik = A_val[p];
+        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {         // warp 内 32 lane 并行 j
+            int j = A_col_idx[q];
+            double v = a_ik * A_val[q];
+            unsigned slot = ((unsigned)(j * 2654435761u)) & mask;
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&my_col[slot], -1, j);
+                if (old == -1 || old == j) { my_val[slot] += v; break; }   // plain +=(同 warp 时间不并发)
+                slot = (slot + 1) & mask;
+                if (++probes >= ht_size) { atomicExch(overflow_flag, 1); break; }
+            }
+        }
+    }
+    __syncthreads();
+
+    // ---- Phase B:merge warp 1..W-1 → warp 0 表(共享,atomicAdd,fan-in ≤ W)----
+    if (warp > 0) {
+        for (int s = lane; s < ht_size; s += 32) {
+            int c = my_col[s];
+            if (c >= 0) {
+                double v = my_val[s];
+                unsigned slot = ((unsigned)(c * 2654435761u)) & mask;
+                int probes = 0;
+                while (true) {
+                    int old = atomicCAS(&sh_col[slot], -1, c);
+                    if (old == -1 || old == c) { atomicAdd(&sh_val[slot], v); break; }
+                    slot = (slot + 1) & mask;
+                    if (++probes >= ht_size) { atomicExch(overflow_flag, 1); break; }
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    // ---- Phase C:extract warp 0 表 → tmp(同 flat)----
+    int *w0_col = sh_col; double *w0_val = sh_val;
+    __shared__ int cnt;
+    if (tid == 0) cnt = 0;
+    __syncthreads();
+    int base = row_off[i];
+    if (ht_size <= CSORT_HT) {
+        for (int it = 0; it < (ht_size + blockDim.x - 1) / blockDim.x; it++) {
+            int s = it * blockDim.x + tid;
+            int c = -1; double v = 0.0;
+            if (s < ht_size) { c = w0_col[s]; v = w0_val[s]; }
+            __syncthreads();
+            if (c >= 0) { int pos = atomicAdd(&cnt, 1); sh_col[pos] = c; sh_val[pos] = v; }
+            __syncthreads();
+        }
+        int count = cnt;
+        for (int k = tid; k < count; k += blockDim.x) {    // count-sort:数 < 自己的 → rank → 落有序位
+            int c = sh_col[k]; double v = sh_val[k]; int rank = 0;
+            for (int j = 0; j < count; j++) if (sh_col[j] < c) rank++;
+            tmp_key[base + rank] = ((unsigned long long)i << 32) | (unsigned int)c;
+            tmp_val[base + rank] = v;
+        }
+        __syncthreads();
+        if (tid == 0) row_nnz[i] = count;
+    } else {
+        for (int s = tid; s < ht_size; s += blockDim.x) {
+            int c = w0_col[s];
+            if (c >= 0) {
+                int pos = base + atomicAdd(&cnt, 1);
+                tmp_key[pos] = ((unsigned long long)i << 32) | (unsigned int)c;
+                tmp_val[pos] = w0_val[s];
+            }
+        }
+        __syncthreads();
+        if (tid == 0) row_nnz[i] = cnt;
+    }
+}
+
 // ultrasparse:est ≤ HLL_ULTRA_THR(HLL 估计 ≤ 16)。不建 hash,每线程一行,寄存器小数组线性去重累加
 //   (省 hash 建表/atomic/行内排序)。对应 Ocean 的 use_ultrasparse_workflow。
 //   CAP=32 给 est≤16(真 distinct ~≤16)留 2× 余量;若仍不够(HLL 低估)→ overflow_flag → 上层回退 merge3。
@@ -649,6 +759,19 @@ void spgemm_self_product_hash(
         if (maxsm > 48 * 1024)
             CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)maxsm));
     }
+    // 2b-priv: warp 私有 SPA 门控(HASH_PRIV=1 启用;HASH_PRIV_W=warp/私有表数,默认 8,范围 [2,8])。
+    //   仅对 SMEM 可容纳的桶(W*ht*(int+double) ≤ PRIV_SMEM_MAX)走 priv,其余桶走 flat。
+    static int g_priv = -1, g_privW = 8;
+    if (g_priv < 0) {
+        const char *e = getenv("HASH_PRIV");
+        g_priv = (e && *e && atoi(e) > 0) ? 1 : 0;
+        const char *ew = getenv("HASH_PRIV_W");
+        if (ew && *ew) { int w = atoi(ew); if (w >= 2 && w <= 8) g_privW = w; }
+        if (g_priv)
+            CHECK_CUDA(cudaFuncSetAttribute(hash_spa_priv_kernel,
+                cudaFuncAttributeMaxDynamicSharedMemorySize, 196 * 1024));   // H100 ≤228KB;launch 时按 bin 再判
+    }
+    const int PRIV_W = g_privW;
     // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync)。memset+overflow D2H 纳入计时(对齐 Ocean)
     int overflow;
     prof("accumulate", [&]{
@@ -663,10 +786,17 @@ void spgemm_self_product_hash(
                     dA_rp, dA_ci, dA_val, rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
             } else {
                 int ht = 32 << bi;
-                size_t smem = (size_t)ht * (sizeof(int) + sizeof(double));   // sh_col[int]+sh_val[double]
-                hash_spa_kernel<<<n, HASH_BLOCK, smem>>>(
-                    dA_rp, dA_ci, dA_val, rows_ptr, n, ht, d_off,
-                    d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+                size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
+                size_t smem_priv = (size_t)PRIV_W * ht * (sizeof(int) + sizeof(double));
+                if (g_priv && smem_priv <= 196 * 1024) {
+                    hash_spa_priv_kernel<<<n, PRIV_W * 32, smem_priv>>>(
+                        dA_rp, dA_ci, dA_val, rows_ptr, n, ht, PRIV_W, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+                } else {
+                    hash_spa_kernel<<<n, HASH_BLOCK, smem_flat>>>(
+                        dA_rp, dA_ci, dA_val, rows_ptr, n, ht, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+                }
             }
         }
         CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入
