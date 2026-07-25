@@ -7,6 +7,7 @@
 #include <thrust/device_ptr.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 // ==========================================================================
@@ -230,6 +231,135 @@ __global__ void hll_merge_kernel(
         if (temp <= HLL_ULTRA_THR) {
             est = temp;
         } else {
+            int ht = 32;
+            while (ht < temp && ht < HASH_CAP) ht <<= 1;
+            est = ht;
+        }
+        est_nnz[row] = est;
+    }
+}
+
+// ==========================================================================
+//  MinHash 估计(非-HLL 上界估计;EST_METHOD=minhash|kmv 启用,默认 HLL)
+// --------------------------------------------------------------------------
+//  与 HLL 的机制差异(刻意与 Ocean 的 HLL 正交,不撞车):
+//    · HLL  :每个 partition 存【leading-zero 寄存器】(uint8),build 用 atomicMax(clz),merge 用 packed __vmaxu4。
+//    · MinHash:每个 partition 存【最小完整 hash 值】(uint32),build 用 atomicMin(hash),merge 用逐 partition min。
+//  estimator:V<m → linear counting(小范围);V==m → 2^32·Σ(1/min_j) − m。
+//  目的是安全上界(给 buffer/hash 表 sizing),非紧点估计;×EXPAND + overflow 回退兜底低估。
+//  注:这是「per-partition MinHash」sketch(bottom-k 家族的 partition 变体),build/merge 代数与 HLL
+//    同形(per-element 一次 atomic、逐位 merge),故可直接复用现有两阶段 pipeline。
+// ==========================================================================
+#define MH_M HLL_M                       // partition 数(=128,与 HLL 同,便于复用 bin-snap 阈值)
+#define MH_EMPTY 0xffffffffu             // 空 partition 哨兵
+
+// Phase 1:对 B(=A)每行建 MinHash sketch(线性扫 CSR,O(nnz))。结构同 hll_construct,仅 max→min、uint8→uint32。
+__global__ void mh_construct_kernel(
+    const int *B_row_ptr, const int *B_col_ind,
+    int B_rows, int B_nnz,
+    unsigned int *global_mh,           // [B_rows * MH_M] uint32
+    int rows_per_block)
+{
+    int row_start = blockIdx.x * rows_per_block;
+    int row_end = min(row_start + rows_per_block, B_rows);
+    if (row_start >= B_rows) return;
+
+    int elem_start = B_row_ptr[row_start];
+    int elem_end = (row_end < B_rows) ? B_row_ptr[row_end] : B_nnz;
+    int num_rows = row_end - row_start;
+
+    extern __shared__ int smem_raw[];
+    unsigned int *smem = (unsigned int*)smem_raw;          // [num_rows * MH_M] uint32 scratch(atomicMin 用)
+    int total_items = num_rows * MH_M;
+    for (int i = threadIdx.x; i < total_items; i += blockDim.x) smem[i] = MH_EMPTY;   // init 空(非 0)
+    int *row_offsets = smem_raw + total_items;
+    for (int i = threadIdx.x; i <= num_rows; i += blockDim.x)
+        row_offsets[i] = (row_start + i < B_rows) ? B_row_ptr[row_start + i] : elem_end;
+    __syncthreads();
+
+    int current_row = 0;
+    unsigned int *current_scratch = smem;
+    for (int e = elem_start + threadIdx.x; e < elem_end; e += blockDim.x) {
+        unsigned int col = (unsigned int)B_col_ind[e];
+        while (e >= row_offsets[current_row + 1]) {
+            current_row++;
+            current_scratch = smem + current_row * MH_M;
+        }
+        unsigned int h = murmur_hash3(col);
+        int idx = h & (MH_M - 1);                  // 低 log2(MH_M) 位 → partition
+        atomicMin(&current_scratch[idx], h);       // MIN 完整 hash(替代 HLL 的 atomicMax(clz))
+    }
+    __syncthreads();
+
+    unsigned int *global_ptr = global_mh + row_start * MH_M;
+    for (int i = threadIdx.x; i < num_rows * MH_M; i += blockDim.x) global_ptr[i] = smem[i];
+}
+
+// Phase 2:对 A 每行,逐 partition min 合并引用 B 行的 MinHash sketch(O(nnz_A))。
+//   blockDim.x = MH_M/4 = 32(单 warp):每线程 owning 4 consecutive partitions,vectorized uint4 merge。
+//   整行 sketch = 128 uint32 = 512B = 32×uint4 → 一个 warp 一次 coalesced 读完一行(对齐 HLL packed 吞吐)。
+__global__ void mh_merge_kernel(
+    const int *A_row_ptr, const int *A_col_ind,
+    int A_rows,
+    const unsigned int *b_mh,           // [B_rows * MH_M] uint32 from Phase 1
+    int *est_nnz)                       // [A_rows] output
+{
+    int row = blockIdx.x;
+    if (row >= A_rows) return;
+    int tid = threadIdx.x;
+
+    extern __shared__ int smem_merge_raw[];
+    unsigned int *smem_merge = (unsigned int*)smem_merge_raw;   // [MH_M] uint32
+    int base_i = tid * 4;                                       // 每线程 owning partitions [base_i..base_i+3]
+    smem_merge[base_i + 0] = MH_EMPTY;
+    smem_merge[base_i + 1] = MH_EMPTY;
+    smem_merge[base_i + 2] = MH_EMPTY;
+    smem_merge[base_i + 3] = MH_EMPTY;
+    __syncthreads();
+
+    int start_elem = A_row_ptr[row];
+    int end_elem = A_row_ptr[row + 1];
+    // 逐引用 B 行,vectorized uint4 min-merge(每线程固定 owning 4 个 partition → 无 race、无需内 sync)
+    for (int e = start_elem; e < end_elem; e++) {
+        int row_b = A_col_ind[e];
+        const uint4 *bsk4 = (const uint4*)(b_mh + (size_t)row_b * MH_M);   // 行首 16B 对齐(512B/行)
+        uint4 v = bsk4[tid];                                               // 16B coalesced
+        unsigned int *sm = smem_merge + base_i;
+        if (v.x < sm[0]) sm[0] = v.x;
+        if (v.y < sm[1]) sm[1] = v.y;
+        if (v.z < sm[2]) sm[2] = v.z;
+        if (v.w < sm[3]) sm[3] = v.w;
+    }
+    __syncthreads();
+
+    // 估计 reduce(单 warp):sum_inv = Σ 1/min_j(非空);V = 非空 partition 数
+    double sum_inv = 0.0;
+    int V = 0;
+    for (int k = 0; k < 4; k++) {
+        unsigned int mv = smem_merge[base_i + k];
+        if (mv != MH_EMPTY) { sum_inv += 1.0 / (double)mv; V++; }
+    }
+    for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {
+        sum_inv += __shfl_down_sync(0xFFFFFFFF, sum_inv, off);
+        V += __shfl_down_sync(0xFFFFFFFF, V, off);
+    }
+
+    if (tid == 0) {
+        double E;
+        int v = V;
+        if (v == 0) {
+            E = 0.0;                                                      // 空行
+        } else if (v < MH_M) {
+            E = (double)MH_M * log((double)MH_M / (double)(MH_M - v));   // linear counting(小范围,偏保守上界)
+        } else {
+            E = (double)0x100000000LL * sum_inv - (double)MH_M;           // 2^32·Σ(1/min_j) − m
+        }
+        int temp = (int)(E * HLL_EXPAND);
+        if (temp < 1) temp = 1;
+        int est;
+        if (temp <= HLL_ULTRA_THR) {                                      // ultra:线性 kernel,est 保留紧 temp
+            est = temp;
+        } else {                                                          // 否则 snap 到 next_pow2 ∈[32,HASH_CAP](同 HLL)
             int ht = 32;
             while (ht < temp && ht < HASH_CAP) ht <<= 1;
             est = ht;
@@ -692,27 +822,58 @@ void spgemm_self_product_hash(
             CHECK_CUDA(cudaGetLastError());
         });
     } else {
-        // Phase 1: 对 A(=B 自乘)每行建 HLL sketch。线性扫 CSR,O(nnz) 非 O(flop)。
-        unsigned char *d_hll; CHECK_CUDA(cudaMalloc(&d_hll, (size_t)A_rows * HLL_M));
-        int rows_per_block = 32;  // 大 rows_per_block 摊薄 SMEM init 开销(32×1024×4=128KB → opt-in)
-        size_t smem_p1 = (size_t)rows_per_block * HLL_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
-        if (smem_p1 > 48 * 1024)
-            CHECK_CUDA(cudaFuncSetAttribute(hll_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
-        int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
-        prof("hll_construct", [&]{
-            hll_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
-                dA_rp, dA_ci, A_rows, A_nnz, d_hll, rows_per_block);
-            CHECK_CUDA(cudaGetLastError());
-        });
-        // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
-        int p2_block = HLL_M / 2;   // blockDim×4 = 2×HLL_M → b_rows_per_iter=2(Ocean 同款,2× 吞吐)
-        int smem_p2 = HLL_M * 2;   // 2 批 × HLL_M(smem_merge 用)
-        prof("hll_merge", [&]{
-            hll_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                dA_rp, dA_ci, A_rows, d_hll, d_est);
-            CHECK_CUDA(cudaGetLastError());
-        });
-        cudaFree(d_hll);
+        // 估计方法门控:EST_METHOD={hll(默认)|minhash|kmv}。HLL 对齐 Ocean;MinHash 为自研非-HLL 上界估计。
+        static int g_est = -1;
+        if (g_est < 0) {
+            const char *e = getenv("EST_METHOD");
+            g_est = (e && (!strcmp(e, "minhash") || !strcmp(e, "kmv"))) ? 1 : 0;
+            dbg("[hash] EST_METHOD=%s → %s\n", e ? e : "(unset)", g_est ? "MinHash" : "HLL");
+        }
+        if (g_est) {
+            // ===== MinHash 两阶段(非-HLL;机制见 mh_construct/mh_merge 注释)=====
+            unsigned int *d_mh; CHECK_CUDA(cudaMalloc(&d_mh, (size_t)A_rows * MH_M * sizeof(unsigned int)));
+            int rows_per_block = 32;
+            size_t smem_p1 = (size_t)rows_per_block * MH_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
+            if (smem_p1 > 48 * 1024)
+                CHECK_CUDA(cudaFuncSetAttribute(mh_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
+            int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
+            prof("mh_construct", [&]{
+                mh_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
+                    dA_rp, dA_ci, A_rows, A_nnz, d_mh, rows_per_block);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
+            int smem_p2 = MH_M * sizeof(unsigned int);   // [MH_M] uint32(smem_merge)
+            prof("mh_merge", [&]{
+                mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
+                    dA_rp, dA_ci, A_rows, d_mh, d_est);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            cudaFree(d_mh);
+        } else {
+            // ===== HLL 两阶段(默认,对齐 Ocean)=====
+            // Phase 1: 对 A(=B 自乘)每行建 HLL sketch。线性扫 CSR,O(nnz) 非 O(flop)。
+            unsigned char *d_hll; CHECK_CUDA(cudaMalloc(&d_hll, (size_t)A_rows * HLL_M));
+            int rows_per_block = 32;  // 大 rows_per_block 摊薄 SMEM init 开销(32×1024×4=128KB → opt-in)
+            size_t smem_p1 = (size_t)rows_per_block * HLL_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
+            if (smem_p1 > 48 * 1024)
+                CHECK_CUDA(cudaFuncSetAttribute(hll_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
+            int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
+            prof("hll_construct", [&]{
+                hll_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
+                    dA_rp, dA_ci, A_rows, A_nnz, d_hll, rows_per_block);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
+            int p2_block = HLL_M / 2;   // blockDim×4 = 2×HLL_M → b_rows_per_iter=2(Ocean 同款,2× 吞吐)
+            int smem_p2 = HLL_M * 2;   // 2 批 × HLL_M(smem_merge 用)
+            prof("hll_merge", [&]{
+                hll_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
+                    dA_rp, dA_ci, A_rows, d_hll, d_est);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            cudaFree(d_hll);
+        }
     }
     int total_est;
     prof("est_scan", [&]{
