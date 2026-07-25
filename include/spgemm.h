@@ -57,17 +57,9 @@ void spgemm_self_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                               void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
-// C = A·Aᵀ 上三角(对称,只算 i≤j)。ESC 实现,返回上三角 CSR。
-void spgemm_att_outer(void *A_buffer, int A_rows, int A_cols, int A_nnz,
-                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
-void spgemm_att_gust(void *A_buffer, int A_rows, int A_cols, int A_nnz,
-                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
-void spgemm_att_colw(void *A_buffer, int A_rows, int A_cols, int A_nnz,
-                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
-void spgemm_att_inner(void *A_buffer, int A_rows, int A_cols, int A_nnz,
-                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
-// C = A·Aᵀ 上三角 → 全对称,【hash SPA】版:只算 j≥i,SMEM hash 累加 A 的列(CSC)贡献,
-//   末尾对称 mirror(2×−diag)。长行 hash / 短行小表(host 按 flop_ub 分 bin)。返回全对称 CSR。
+// C = A·Aᵀ 上三角(只算 j≥i),【hash SPA】版:AA hash SPA 的忠实拷贝 ——
+//   内层 j 来自 Aᵀ(= A 的 CSC),filter j≥i;复用 HLL sizing / binning / compact_sort。
+//   返回上三角 CSR(下三角由对称性可得,不展开)。
 void spgemm_att_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
@@ -106,6 +98,11 @@ void spgemm_self_product_adaptive(void *A_buffer, int A_rows, int A_cols, int A_
 
 // METHOD 环境变量单方法门控:null/empty/"all" → 跑全部;否则只跑匹配的方法块
 bool should_run_method(const char *key);
+
+// GPU 端 CSR→CSC(formulations.cu;ATT 复用:A 的 CSC = Aᵀ 的 CSR)。调用方负责 free 三个输出。
+void build_csc(const int *d_row_ptr, const int *d_col_idx, const double *d_val,
+               int A_rows, int A_nnz,
+               int **col_ptr_out, int **row_idx_out, double **val_out);
 
 // 三种公式对照(均为 ESC 合并;Gustavson=上面那个 manual)
 // 外积(outer, 外层=k):读 A 的列k ⊗ 行k

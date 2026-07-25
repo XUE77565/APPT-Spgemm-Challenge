@@ -372,6 +372,8 @@ __global__ void mh_merge_kernel(
 // binning:轻行桶用小表 → 高 SMEM 占用率;重行桶用大表;distinct>ht_size → overflow_flag(上层回退 merge3)。
 __global__ void hash_spa_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,   // 内层 j 来源:AA=A,ATT=Aᵀ(CSC)
+    int upper_tri,                                                      // 0=自乘;1=ATT 只算 j≥i
     const int *bucket_rows, int n_in_bucket, int ht_size,
     const int *row_off,
     unsigned long long *tmp_key, double *tmp_val,
@@ -398,10 +400,11 @@ __global__ void hash_spa_kernel(
     for (int p = rs + my_group; p < re; p += num_groups) {   // 并行 k(stride num_groups)
         int k = A_col_idx[p];
         double a_ik = A_val[p];
-        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];        // B 的行 k(AA=A;ATT=Aᵀ)
         for (int q = ks + my_id; q < ke; q += G) {           // 组内 G 线程并行 j
-            int j = A_col_idx[q];
-            double v = a_ik * A_val[q];
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;                // ATT 上三角过滤(j≥i)
+            double v = a_ik * B_val[q];
             unsigned slot = ((unsigned)(j * 2654435761u)) & mask;   // Knuth 乘法 hash
             int probes = 0;
             while (true) {
@@ -569,6 +572,8 @@ __global__ void hash_spa_priv_kernel(
 //   CAP=32 给 est≤16(真 distinct ~≤16)留 2× 余量;若仍不够(HLL 低估)→ overflow_flag → 上层回退 merge3。
 __global__ void hash_ultra_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
     const int *ultra_rows, int n_ultra,
     const int *row_off,
     unsigned long long *tmp_key, double *tmp_val, int *row_nnz, int *overflow_flag)
@@ -581,9 +586,10 @@ __global__ void hash_ultra_kernel(
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     for (int p = rs; p < re; p++) {
         int k = A_col_idx[p]; double a_ik = A_val[p];
-        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];          // B 的行 k(AA=A;ATT=Aᵀ)
         for (int q = ks; q < ke; q++) {
-            int j = A_col_idx[q]; double v = a_ik * A_val[q];
+            int j = B_col_idx[q]; double v = a_ik * B_val[q];
+            if (upper_tri && j < i) continue;                   // ATT 上三角过滤
             int pos = -1;
             for (int t = 0; t < u_cnt; t++) if (u_col[t] == j) { pos = t; break; }
             if (pos >= 0) u_val[pos] += v;
@@ -790,12 +796,13 @@ __global__ void hash_check_sorted_kernel(const int *row_ptr, const int *col, int
 
 // ========== Host ==========
 
-void spgemm_self_product_hash(
-    void *A_buffer, int A_rows, int A_cols, int A_nnz,
+static void hash_product(
+    void *A_buffer, int A_rows, int A_cols, int A_nnz, bool att,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
-    dbg("[hash] start (HASH_CAP=%d, HLL_P=%d)\n", HASH_CAP, HLL_P);
-    HashProf prof("hash-prof");
+    const char *tag = att ? "atth" : "hash";
+    dbg("[%s] start (HASH_CAP=%d, HLL_P=%d)\n", tag, HASH_CAP, HLL_P);
+    HashProf prof(att ? "atth-prof" : "hash-prof");
 
     size_t A_rp_sz = (A_rows + 1) * sizeof(int);
     size_t A_ci_sz = (size_t)A_nnz * sizeof(int);
@@ -807,7 +814,19 @@ void spgemm_self_product_hash(
     int   *dA_rp  = (int*)b;
     int   *dA_ci  = (int*)(b + A_rp_sz);
     double *dA_val = (double*)(b + ALIGN8(A_rp_sz + A_ci_sz));
-    dbg("[hash] h2d\n");
+    dbg("[%s] h2d\n", tag);
+
+    // 内层 j 的来源 B:AA → A 本身;ATT → Aᵀ(= A 的 CSC)。hash_spa/ultra/HLL-construct 读 B 的行 k。
+    int *dB_rp, *dB_ci; double *dB_val;
+    int *d_csc_cp = nullptr, *d_csc_ri = nullptr; double *d_csc_val = nullptr;
+    if (att) {
+        build_csc(dA_rp, dA_ci, dA_val, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_val);
+        dB_rp = d_csc_cp; dB_ci = d_csc_ri; dB_val = d_csc_val;
+        dbg("[atth] csc\n");
+    } else {
+        dB_rp = dA_rp; dB_ci = dA_ci; dB_val = dA_val;
+    }
+    const int upper_tri = att ? 1 : 0;
 
     // Stage 1: row_off 由 HLL est 的 scan 给出。
     //   (streamline:小阵用 flop_ub count 替 HLL 两阶段。bp_0 有效(0.36→0.32);bin8-9 sort
@@ -818,7 +837,7 @@ void spgemm_self_product_hash(
     int *d_est; CHECK_CUDA(cudaMalloc(&d_est, A_rows * sizeof(int)));
     if (A_nnz < STREAMLINE_NNZ) {
         prof("count_flop", [&]{
-            count_intermediates_par_kernel<<<A_rows, 256>>>(dA_rp, dA_ci, A_rows, d_est);
+            count_intermediates_par_kernel<<<A_rows, 256>>>(dB_rp, dB_ci, A_rows, d_est);
             CHECK_CUDA(cudaGetLastError());
         });
     } else {
@@ -839,7 +858,7 @@ void spgemm_self_product_hash(
             int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
             prof("mh_construct", [&]{
                 mh_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
-                    dA_rp, dA_ci, A_rows, A_nnz, d_mh, rows_per_block);
+                    dB_rp, dB_ci, A_rows, A_nnz, d_mh, rows_per_block);
                 CHECK_CUDA(cudaGetLastError());
             });
             int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
@@ -861,7 +880,7 @@ void spgemm_self_product_hash(
             int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
             prof("hll_construct", [&]{
                 hll_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
-                    dA_rp, dA_ci, A_rows, A_nnz, d_hll, rows_per_block);
+                    dB_rp, dB_ci, A_rows, A_nnz, d_hll, rows_per_block);
                 CHECK_CUDA(cudaGetLastError());
             });
             // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
@@ -944,18 +963,20 @@ void spgemm_self_product_hash(
             if (bi == N_BINS - 1) {
                 // ultra(est≤HLL_ULTRA_THR):线性,免 hash
                 hash_ultra_kernel<<<(n + 255) / 256, 256>>>(
-                    dA_rp, dA_ci, dA_val, rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+                    dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                    rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
             } else {
                 int ht = 32 << bi;
                 size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
                 size_t smem_priv = (size_t)PRIV_W * ht * (sizeof(int) + sizeof(double));
-                if (g_priv && smem_priv <= 196 * 1024) {
+                if (!att && g_priv && smem_priv <= 196 * 1024) {
                     hash_spa_priv_kernel<<<n, PRIV_W * 32, smem_priv>>>(
                         dA_rp, dA_ci, dA_val, rows_ptr, n, ht, PRIV_W, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
                 } else {
                     hash_spa_kernel<<<n, HASH_BLOCK, smem_flat>>>(
-                        dA_rp, dA_ci, dA_val, rows_ptr, n, ht, d_off,
+                        dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                        rows_ptr, n, ht, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
                 }
             }
@@ -968,6 +989,7 @@ void spgemm_self_product_hash(
         cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
+        cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_val);
         return;
     }
 
@@ -992,6 +1014,7 @@ void spgemm_self_product_hash(
         cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
         cudaFree(d_bkid); cudaFree(d_cnt); cudaFree(d_offb); cudaFree(d_pos); cudaFree(d_sort); cudaFree(d_est);
         cudaFree(dC_rp);
+        cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_val);
         return;
     }
 
@@ -1056,4 +1079,16 @@ void spgemm_self_product_hash(
     cudaFree(dA); cudaFree(d_off); cudaFree(d_row_nnz);
     cudaFree(d_overflow); cudaFree(d_tmp_key); cudaFree(d_tmp_val);
     cudaFree(dC_rp); cudaFree(dC);   // dC_ci/d_val 是 dC 的偏移别名,随 dC 一起释放
+    cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_val);   // ATT 的 Aᵀ(AA 时为 null,no-op)
+}
+
+void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                              void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
+    hash_product(A_buffer, A_rows, A_cols, A_nnz, /*att=*/false, C_buffer_out, C_rows, C_cols, C_nnz);
+}
+
+// C = A·Aᵀ 上三角(j≥i):AA hash SPA 的忠实拷贝,B=Aᵀ(CSC)+ j≥i 过滤。复用 HLL sizing/binning/compact_sort。
+void spgemm_att_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
+    hash_product(A_buffer, A_rows, A_cols, A_nnz, /*att=*/true, C_buffer_out, C_rows, C_cols, C_nnz);
 }
