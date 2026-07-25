@@ -119,6 +119,9 @@ int main(int argc, char **argv) {
             wc = nullptr;
             spgemm_att_inner(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
             if (wc) pinned_free(wc);
+            wc = nullptr;
+            spgemm_att_hash(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) pinned_free(wc);
         }
         auto att_run = [&](const char *label, const char *kind, auto fn) {
             LOG_BOTH("\n=== Computing %s ===\n", label);
@@ -136,6 +139,7 @@ int main(int argc, char **argv) {
         att_run("C = A x A^T upper (Gustavson)", "A·Aᵀ 上三角", spgemm_att_gust);
         att_run("C = A x A^T upper (colwise)", "A·Aᵀ 上三角", spgemm_att_colw);
         att_run("C = A x A^T upper (inner)", "A·Aᵀ 上三角", spgemm_att_inner);
+        att_run("C = A x A^T full (hash)", "A·Aᵀ 全对称", spgemm_att_hash);
         LOG_BOTH("\n=== All att tests completed ===\n");
         fclose(log_file);
         host_free(A_buffer);

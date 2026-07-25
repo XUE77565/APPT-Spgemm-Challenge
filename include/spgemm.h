@@ -66,6 +66,10 @@ void spgemm_att_colw(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 void spgemm_att_inner(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                       void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+// C = A·Aᵀ 上三角 → 全对称,【hash SPA】版:只算 j≥i,SMEM hash 累加 A 的列(CSC)贡献,
+//   末尾对称 mirror(2×−diag)。长行 hash / 短行小表(host 按 flop_ub 分 bin)。返回全对称 CSR。
+void spgemm_att_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
 void spgemm_transpose_product_manual(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);

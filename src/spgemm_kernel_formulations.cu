@@ -6,6 +6,7 @@
 #include <thrust/device_ptr.h>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 // 三种 SpGEMM 公式(自乘 C=A·A)的 ESC 对照实现:
 //   - Gustavson(行向, 外层=i): 见 spgemm_kernel_manual.cu, 保留不动
@@ -517,13 +518,15 @@ struct AttCtx {
     void init(void *A_buffer, int rows, int nnz) {
         A_rows = rows;
         size_t rp = (rows + 1) * sizeof(int), ci = nnz * sizeof(int),
-               vv = nnz * sizeof(double), totalA = rp + ci + vv;
+               vv = nnz * sizeof(double);
+        size_t ci_al = ALIGN8(rp + ci);              // val 8 对齐(与 read_matrix_market 的 A 布局一致)
+        size_t totalA = ci_al + vv;
         CHECK_CUDA(cudaMalloc(&dA, totalA));
         CHECK_CUDA(cudaMemcpy(dA, A_buffer, totalA, cudaMemcpyHostToDevice));
         char *b = (char*)dA;
         csr_rp  = (int*)b;
         csr_ci  = (int*)(b + rp);
-        csr_val = (double*)(b + rp + ci);
+        csr_val = (double*)(b + ci_al);              // 8 对齐(修 double 访问 misaligned)
         build_csc(csr_rp, csr_ci, csr_val, rows, nnz, &csc_cp, &csc_ri, &csc_val);
         CHECK_CUDA(cudaMalloc(&row_ub, rows * sizeof(int)));
     }
@@ -783,4 +786,216 @@ void spgemm_att_inner(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
     ctx.free_all(); cudaFree(c_col); cudaFree(c_val); cudaFree(c_rp);
+}
+
+// ==========================================================================
+//  ATT hash SPA:C = A·Aᵀ 上三角(对称,只算 j≥i)+ 对称 mirror。
+// --------------------------------------------------------------------------
+//  仿 Gustavson att(axis=i):row i 的贡献来自 A 的【列 k】(CSC)——对每个 k∈A[i,:],
+//  列 k 给出 (j, A[j][k]);累加 A[i][k]·A[j][k] 到 C[i][j]。filter j≥i = 上三角。
+//  与 ESC att 的区别:不 expand+全局 sort,而用【SMEM hash 累加器】(atomicCAS 插 j + atomicAdd
+//  累值)O(1) 去重;行内并行(256 线程)。提取无序 → 全局 sort → 上三角 CSR → mirror 成全对称。
+//  长行 hash(本 kernel)/ 短行小表:host 按 flop_ub 分 bin,小行小表(高 occupancy)。
+// ==========================================================================
+#define ATT_HT_CAP 16384          // 单行 hash 表最大槽位(→ col+val = 196KB,需 opt-in)
+#define ATT_HASH_BLOCK 256
+
+// (row,bucket) 一块:SMEM hash 累加 j≥i 的 (A[i][k]·A[j][k])。提取无序 (i,j,val) 到 off[i] 区。
+__global__ void att_hash_spa_kernel(
+    const int *csr_rp, const int *csr_ci, const double *csr_v,
+    const int *csc_cp, const int *csc_ri, const double *csc_v,
+    int A_rows, const int *bucket_rows, int n_in_bucket, int ht_size,
+    const int *off, unsigned long long *key, double *val, int *act, int *overflow_flag)
+{
+    int idx = blockIdx.x;
+    if (idx >= n_in_bucket) return;
+    int i = bucket_rows[idx];
+    int tid = threadIdx.x;
+    int mask = ht_size - 1;
+
+    extern __shared__ __align__(8) int smem[];
+    int   *sh_col = smem;                         // [ht_size]
+    double *sh_val = (double*)(smem + ht_size);   // [ht_size]
+    for (int s = tid; s < ht_size; s += ATT_HASH_BLOCK) { sh_col[s] = -1; sh_val[s] = 0.0; }
+    __syncthreads();
+
+    int rs = csr_rp[i], re = csr_rp[i + 1];
+    for (int p = rs + tid; p < re; p += ATT_HASH_BLOCK) {     // 并行 k(每线程 own k)
+        int k = csr_ci[p];
+        double a_ik = csr_v[p];
+        int cs = csc_cp[k], ce = csc_cp[k + 1];               // 列 k 的 (j, A[j][k])
+        for (int q = cs; q < ce; q++) {                       // j 串行(MVP;可改 group 并行)
+            int j = csc_ri[q];
+            if (j < i) continue;                              // 上三角 filter
+            double v = a_ik * csc_v[q];
+            unsigned slot = ((unsigned)(j * 2654435761u)) & mask;   // Knuth 乘法 hash
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&sh_col[slot], -1, j);
+                if (old == -1 || old == j) { atomicAdd(&sh_val[slot], v); break; }
+                slot = (slot + 1) & mask;
+                if (++probes >= ht_size) { atomicExch(overflow_flag, 1); break; }   // 溢出
+            }
+        }
+    }
+    __syncthreads();
+
+    // extract 无序项 → key/val(off[i] 起,act[i] 计数)
+    __shared__ int cnt;
+    if (tid == 0) cnt = 0;
+    __syncthreads();
+    int base = off[i];
+    for (int s = tid; s < ht_size; s += ATT_HASH_BLOCK) {
+        int j = sh_col[s];
+        if (j >= 0) {
+            int pos = base + atomicAdd(&cnt, 1);
+            key[pos] = ((unsigned long long)i << 32) | (unsigned int)j;
+            val[pos] = sh_val[s];
+        }
+    }
+    __syncthreads();
+    if (tid == 0) act[i] = cnt;
+}
+
+// 上三角 CSR → 全对称 COO:每条 (i,j) i<j 复制成 (i,j)+(j,i);对角 (i,i) 一份。fcount 计实际。
+__global__ void att_mirror_coo_kernel(const int *u_rp, const int *u_ci, const double *u_v,
+    int n, unsigned long long *fkey, double *fval, int *fcount)
+{
+    int i = blockIdx.x;
+    if (i >= n) return;
+    for (int p = u_rp[i] + threadIdx.x; p < u_rp[i + 1]; p += blockDim.x) {
+        int j = u_ci[p]; double v = u_v[p];
+        int pos = atomicAdd(fcount, 1);
+        fkey[pos] = ((unsigned long long)i << 32) | (unsigned int)j;
+        fval[pos] = v;
+        if (i != j) {                                          // 非对角:补 (j,i)
+            int pos2 = atomicAdd(fcount, 1);
+            fkey[pos2] = ((unsigned long long)j << 32) | (unsigned int)i;
+            fval[pos2] = v;
+        }
+    }
+}
+
+// 从排序后的 key(row<<32|col)建 CSR row_ptr:每 entry atomicAdd 到其 row 的计数,后 scan。
+__global__ void att_build_rowptr_count_kernel(const unsigned long long *key, int total, int n, int *row_cnt)
+{
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= total) return;
+    int r = (int)(key[k] >> 32);
+    atomicAdd(&row_cnt[r], 1);
+}
+
+// 拆 key 低 32 位 → col(thrust::transform 的 device-lambda 替代,免 --extended-lambda)
+__global__ void att_unpack_col_kernel(const unsigned long long *key, int *col, int n)
+{
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= n) return;
+    col[k] = (int)(unsigned int)key[k];
+}
+
+// ---- ATT hash host ----
+void spgemm_att_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
+{
+    g_tag = "atth"; dbg("[atth] start\n");
+    AttCtx ctx;
+    ctx.init(A_buffer, A_rows, A_nnz);                 // H2D + CSC
+    dbg("[atth] h2d\n");
+
+    // ① 每行 flop_ub(= Σ_k nnz(列k),上界 distinct j≥i)
+    att_gust_count<<<(A_rows + 255) / 256, 256>>>(ctx.csr_rp, ctx.csr_ci, ctx.csc_cp, A_rows, ctx.row_ub);
+    CHECK_CUDA(cudaDeviceSynchronize()); dbg("[atth] count\n");
+    int total_ub = ctx.prepare_coo();                  // scan row_ub → off + total_ub;申请 key/val/act
+    dbg("[atth] scan (total_ub=%d)\n", total_ub);
+
+    // ② host 端按 ht 分 bin:每行 ht = next_pow2(row_ub) clamp [16, ATT_HT_CAP];>CAP → CAP(可能溢出)
+    std::vector<int> h_row_ub(A_rows);
+    CHECK_CUDA(cudaMemcpy(h_row_ub.data(), ctx.row_ub, A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+    int *d_overflow; CHECK_CUDA(cudaMalloc(&d_overflow, sizeof(int)));
+    CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
+    CHECK_CUDA(cudaFuncSetAttribute(att_hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                    ATT_HT_CAP * (int)(sizeof(int) + sizeof(double))));
+    auto row_ht = [&](int ub) -> int {                       // next_pow2(ub) clamp [16, ATT_HT_CAP]
+        if (ub <= 16) return 16;
+        if (ub > ATT_HT_CAP) return ATT_HT_CAP;
+        int p = ub - 1; p |= p >> 1; p |= p >> 2; p |= p >> 4; p |= p >> 8; p |= p >> 16;
+        int np = p + 1; return np < 16 ? 16 : np;
+    };
+    // 11 个 ht 档(16..16384);每档收集行号,H2D,launch
+    for (int bi = 0; bi < 11; bi++) {
+        int ht = 16 << bi;
+        std::vector<int> rows;
+        for (int i = 0; i < A_rows; i++)
+            if (h_row_ub[i] > 0 && row_ht(h_row_ub[i]) == ht) rows.push_back(i);
+        if (rows.empty()) continue;
+        int *d_rows; CHECK_CUDA(cudaMalloc(&d_rows, rows.size() * sizeof(int)));
+        CHECK_CUDA(cudaMemcpy(d_rows, rows.data(), rows.size() * sizeof(int), cudaMemcpyHostToDevice));
+        size_t smem = (size_t)ht * (sizeof(int) + sizeof(double));
+        att_hash_spa_kernel<<<(int)rows.size(), ATT_HASH_BLOCK, smem>>>(
+            ctx.csr_rp, ctx.csr_ci, ctx.csr_val, ctx.csc_cp, ctx.csc_ri, ctx.csc_val,
+            A_rows, d_rows, (int)rows.size(), ht, ctx.off, ctx.key, ctx.val, ctx.act, d_overflow);
+        CHECK_CUDA(cudaGetLastError());
+        cudaFree(d_rows);
+    }
+    CHECK_CUDA(cudaDeviceSynchronize()); dbg("[atth] accumulate\n");
+    int overflow; CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));
+
+    // ③ compact(按 act 压紧)→ 连续无序 (i,j,val)→ 全局 sort → 上三角 CSR
+    int total_upper = ctx.compact(); dbg("[atth] compact (upper=%d)\n", total_upper);
+    thrust::sort_by_key(thrust::device_ptr<unsigned long long>(ctx.key),
+                        thrust::device_ptr<unsigned long long>(ctx.key + total_upper),
+                        thrust::device_ptr<double>(ctx.val));
+    dbg("[atth] sort\n");
+    // 上三角 row_ptr(独立 count 数组 → exclusive scan,免 in-place 错位)
+    int *u_rp; CHECK_CUDA(cudaMalloc(&u_rp, (A_rows + 1) * sizeof(int)));
+    int *u_cnt; CHECK_CUDA(cudaMalloc(&u_cnt, A_rows * sizeof(int)));
+    CHECK_CUDA(cudaMemset(u_cnt, 0, A_rows * sizeof(int)));
+    att_build_rowptr_count_kernel<<<(total_upper + 255) / 256, 256>>>(ctx.key, total_upper, A_rows, u_cnt);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemset(u_rp, 0, sizeof(int)));                 // u_rp[0]=0
+    thrust::inclusive_scan(thrust::device_ptr<int>(u_cnt), thrust::device_ptr<int>(u_cnt + A_rows),
+                           thrust::device_ptr<int>(u_rp + 1));    // exclusive scan → u_rp[1..A_rows]
+    // 上三角 col/val(key 低 32 = j)
+    int *u_col; double *u_val;
+    CHECK_CUDA(cudaMalloc(&u_col, total_upper * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&u_val, total_upper * sizeof(double)));
+    att_unpack_col_kernel<<<(total_upper + 255) / 256, 256>>>(ctx.key, u_col, total_upper);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemcpy(u_val, ctx.val, total_upper * sizeof(double), cudaMemcpyDeviceToDevice));
+
+    // ④ mirror 上三角 → 全对称 COO(2×−diag)→ sort → full CSR
+    int *d_fcount; CHECK_CUDA(cudaMalloc(&d_fcount, sizeof(int))); CHECK_CUDA(cudaMemset(d_fcount, 0, sizeof(int)));
+    unsigned long long *fkey; double *fval;
+    CHECK_CUDA(cudaMalloc(&fkey, (size_t)2 * total_upper * sizeof(unsigned long long)));
+    CHECK_CUDA(cudaMalloc(&fval, (size_t)2 * total_upper * sizeof(double)));
+    att_mirror_coo_kernel<<<A_rows, ATT_HASH_BLOCK>>>(u_rp, u_col, u_val, A_rows, fkey, fval, d_fcount);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    int Cnnz; CHECK_CUDA(cudaMemcpy(&Cnnz, d_fcount, sizeof(int), cudaMemcpyDeviceToHost));
+    dbg("[atth] mirror (full nnz=%d, overflow=%d)\n", Cnnz, overflow);
+    thrust::sort_by_key(thrust::device_ptr<unsigned long long>(fkey),
+                        thrust::device_ptr<unsigned long long>(fkey + Cnnz),
+                        thrust::device_ptr<double>(fval));
+    // full CSR row_ptr(独立 count → exclusive scan)
+    int *c_rp; CHECK_CUDA(cudaMalloc(&c_rp, (A_rows + 1) * sizeof(int)));
+    int *c_cnt; CHECK_CUDA(cudaMalloc(&c_cnt, A_rows * sizeof(int)));
+    CHECK_CUDA(cudaMemset(c_cnt, 0, A_rows * sizeof(int)));
+    att_build_rowptr_count_kernel<<<(Cnnz + 255) / 256, 256>>>(fkey, Cnnz, A_rows, c_cnt);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemset(c_rp, 0, sizeof(int)));
+    thrust::inclusive_scan(thrust::device_ptr<int>(c_cnt), thrust::device_ptr<int>(c_cnt + A_rows),
+                           thrust::device_ptr<int>(c_rp + 1));
+    CHECK_CUDA(cudaFree(c_cnt));
+    int *c_col; double *c_val;
+    CHECK_CUDA(cudaMalloc(&c_col, Cnnz * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&c_val, Cnnz * sizeof(double)));
+    att_unpack_col_kernel<<<(Cnnz + 255) / 256, 256>>>(fkey, c_col, Cnnz);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemcpy(c_val, fval, Cnnz * sizeof(double), cudaMemcpyDeviceToDevice));
+
+    *C_buffer_out = pack_and_download(c_rp, c_col, c_val, A_rows, Cnnz);
+    *C_rows = A_rows; *C_cols = A_cols; *C_nnz = Cnnz;
+    if (overflow) dbg("[atth] ⚠ overflow flag set (some heavy row distinct>ATT_HT_CAP)\n");
+
+    ctx.free_all(); cudaFree(d_overflow); cudaFree(u_rp); cudaFree(u_cnt); cudaFree(u_col); cudaFree(u_val);
+    cudaFree(d_fcount); cudaFree(fkey); cudaFree(fval); cudaFree(c_rp); cudaFree(c_col); cudaFree(c_val);
 }
