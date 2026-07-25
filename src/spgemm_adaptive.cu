@@ -98,3 +98,44 @@ void spgemm_self_product_adaptive(
                                    C_buffer_out, C_rows, C_cols, C_nnz);
     }
 }
+
+// ==========================================================================
+//  ATT 自适应 dispatcher:C = A·Aᵀ 上三角。同 AA Auto 的分流逻辑(score 公式),
+//  调 att_hash / att_merge3(两者均为 AA 的忠实拷贝,B=Aᵀ(CSC)+ j≥i)。
+//  hash 溢出(distinct>HASH_CAP)→ 自动回退 att_merge3。
+// ==========================================================================
+void spgemm_att_adaptive(
+    void *A_buffer, int A_rows, int A_cols, int A_nnz,
+    void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
+{
+    const int *row_ptr = (const int *)A_buffer;
+    int max_row_nnz = 0;
+    for (int i = 0; i < A_rows; i++) {
+        int rnz = row_ptr[i + 1] - row_ptr[i];
+        if (rnz > max_row_nnz) max_row_nnz = rnz;
+    }
+    double avg  = A_rows > 0 ? (double)A_nnz / A_rows : 0.0;
+    double skew = avg > 0.0 ? (double)max_row_nnz / avg : 0.0;
+    double flop_proxy = (double)A_nnz * A_nnz / std::max(A_rows, 1);
+    double lfp = log10(std::max(flop_proxy, 1.0));
+    double ln  = log10((double)A_rows);
+    double lmr = log10((double)std::max(max_row_nnz, 1));
+    double lsk = log10(std::max(skew, 1.0));
+    double score = -1.3085 * lfp + 1.2131 * ln + 1.9815 * lmr - 2.4331 * lsk + 1.2943;
+    const char *force = std::getenv("ADAPTIVE_FORCE");
+    int use_hash;
+    if (force && force[0]) use_hash = (force[0] == 'h' || force[0] == 'H') ? 1 : 0;
+    else use_hash = (score < 0.0) ? 1 : 0;
+    dbg("[att-adapt] n=%d maxrow=%d skew=%.1f → %s (score=%.2f fp=%.0f)\n",
+        A_rows, max_row_nnz, skew, use_hash ? "att_hash" : "att_merge3", score, flop_proxy);
+
+    if (use_hash) {
+        spgemm_att_hash(A_buffer, A_rows, A_cols, A_nnz, C_buffer_out, C_rows, C_cols, C_nnz);
+        if (*C_nnz < 0) {                                 // hash 溢出 → 回退 att_merge3
+            dbg("[att-adapt] att_hash overflow → fallback att_merge3\n");
+            spgemm_att_merge3(A_buffer, A_rows, A_cols, A_nnz, C_buffer_out, C_rows, C_cols, C_nnz);
+        }
+    } else {
+        spgemm_att_merge3(A_buffer, A_rows, A_cols, A_nnz, C_buffer_out, C_rows, C_cols, C_nnz);
+    }
+}

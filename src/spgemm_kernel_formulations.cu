@@ -4,6 +4,8 @@
 #include <thrust/sort.h>
 #include <thrust/reduce.h>
 #include <thrust/device_ptr.h>
+#include <thrust/tuple.h>
+#include <thrust/iterator/zip_iterator.h>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -38,7 +40,7 @@ __global__ void csc_count_kernel(const int *col_idx, int nnz, int *col_count)
     atomicAdd(&col_count[col_idx[t]], 1);
 }
 
-// 逐行把 (i, col_idx[p], val[p]) 散到 CSC:用 tmp_off[col] 作每列写指针
+// 逐行把 (i, col_idx[p], val[p]) 散到 CSC:用 tmp_off[col] 作每列写指针(并行散 → 列内无序)
 __global__ void csc_fill_kernel(
     const int *row_ptr, const int *col_idx, const double *val,
     int A_rows, int *tmp_off,
@@ -52,6 +54,16 @@ __global__ void csc_fill_kernel(
         csc_row_idx[pos] = i;
         csc_val[pos] = val[p];
     }
+}
+
+// 给每个元素打 composite key = (col<<32)|row,供列内排序(lower_bound-based kernel 如 ATT merge3 需要列内有序)
+__global__ void csc_make_sortkey_kernel(const int *col_ptr, int n, const int *csc_row,
+                                        unsigned long long *sortkey)
+{
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    for (int p = col_ptr[c]; p < col_ptr[c + 1]; p++)
+        sortkey[p] = ((unsigned long long)c << 32) | (unsigned int)csc_row[p];
 }
 
 void build_csc(const int *d_row_ptr, const int *d_col_idx, const double *d_val,
@@ -86,6 +98,19 @@ void build_csc(const int *d_row_ptr, const int *d_col_idx, const double *d_val,
                                        d_tmp, d_csc_row, d_csc_val);
     }
     CHECK_CUDA(cudaDeviceSynchronize());
+    // 列内排序(row_idx 升序):并行散导致列内无序,而 lower_bound-based kernel(ATT merge3)需列内有序。
+    //   ESC(AA outer/colwise)走全局 sort、hash 遍历全项,均不依赖列内序;排序对它们无害。
+    {
+        unsigned long long *d_sortkey;
+        CHECK_CUDA(cudaMalloc(&d_sortkey, (size_t)A_nnz * sizeof(unsigned long long)));
+        csc_make_sortkey_kernel<<<(A_rows + 255) / 256, 256>>>(d_col_ptr, A_rows, d_csc_row, d_sortkey);
+        thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_sortkey),
+                            thrust::device_ptr<unsigned long long>(d_sortkey + A_nnz),
+                            thrust::make_zip_iterator(thrust::make_tuple(
+                                thrust::device_ptr<int>(d_csc_row),
+                                thrust::device_ptr<double>(d_csc_val))));
+        cudaFree(d_sortkey);
+    }
     dbg("[%s] csc\n", g_tag);
     cudaFree(d_col_count);
     cudaFree(d_tmp);

@@ -642,8 +642,11 @@ __global__ void bucket_merge_kernel(
 
 // (C-1) 每 (row,bucket) 算 flop_ub = Σ_k (seg_end-seg_ptr)(lower_bound 定 [blo,bhi),无 merge 迭代)。
 //   这是该桶 distinct 的确定性上界(≥ distinct)。比 bucket_count 的 merge-iter count 快 ~30×。
+//   内层读 B 的行 k(AA=A;ATT=Aᵀ=CSC)。flop 是 sizing 上界,upper-tri 无需过滤(安全过估)。
 __global__ void bucket_flop_kernel(
-    const int *A_row_ptr, const int *A_col_idx, int A_rows, int A_cols,
+    const int *A_row_ptr, const int *A_col_idx,
+    const int *B_row_ptr, const int *B_col_idx,
+    int A_rows, int A_cols,
     int K, int *bucket_flop)   // [A_rows * K]
 {
     int i = blockIdx.x, b = blockIdx.y;
@@ -659,9 +662,9 @@ __global__ void bucket_flop_kernel(
     int *seg_end = smem + num_k;    // [num_k]
     for (int p = lane; p < num_k; p += 32) {
         int k = A_col_idx[rs + p];
-        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
-        seg_ptr[p] = dev_lower_bound(A_col_idx, ks, ke, blo);
-        seg_end[p] = dev_lower_bound(A_col_idx, ks, ke, bhi);
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];            // B 的行 k
+        seg_ptr[p] = dev_lower_bound(B_col_idx, ks, ke, blo);
+        seg_end[p] = dev_lower_bound(B_col_idx, ks, ke, bhi);
     }
     __syncwarp();
     int s = 0;
@@ -672,9 +675,11 @@ __global__ void bucket_flop_kernel(
 
 // (C-2) 每 (row,bucket) warp-merge 写 (col,val) 到【gapped flop 区】(base = row_off + bucket_flop_off),
 //   并记真实 distinct 数 bucket_real_nnz(= 该桶 merge 产出项数)。逻辑同 bucket_merge_kernel,
-//   仅 base 改 flop-off、末尾多写一个 real 计数。
+//   仅 base 改 flop-off、末尾多写一个 real 计数。内层读 B(AA=A;ATT=Aᵀ);upper_tri 时跳过 wmin<i。
 __global__ void bucket_merge_flop_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
     int A_rows, int A_cols, int K, const int *row_off, const int *bucket_flop_off,
     int *out_col, double *out_val, int *bucket_real_nnz)   // [A_rows*K]
 {
@@ -692,10 +697,10 @@ __global__ void bucket_merge_flop_kernel(
     double *weight  = (double*)(smem + 2 * num_k);
     for (int p = lane; p < num_k; p += 32) {
         int k = A_col_idx[rs + p];
-        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
-        seg_ptr[p] = dev_lower_bound(A_col_idx, ks, ke, blo);
-        seg_end[p] = dev_lower_bound(A_col_idx, ks, ke, bhi);
-        weight[p]  = A_val[rs + p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];            // B 的行 k
+        seg_ptr[p] = dev_lower_bound(B_col_idx, ks, ke, blo);
+        seg_end[p] = dev_lower_bound(B_col_idx, ks, ke, bhi);
+        weight[p]  = A_val[rs + p];                              // a_ik(外层 A)
     }
     __syncwarp();
     int base = row_off[i] + bucket_flop_off[i * K + b];
@@ -704,7 +709,7 @@ __global__ void bucket_merge_flop_kernel(
         int mymin = 0x7fffffff;
         for (int p = lane; p < num_k; p += 32) {
             int pos = seg_ptr[p];
-            if (pos < seg_end[p]) { int col = A_col_idx[pos]; if (col < mymin) mymin = col; }
+            if (pos < seg_end[p]) { int col = B_col_idx[pos]; if (col < mymin) mymin = col; }
         }
         int wmin = mymin;
         for (int off = 16; off > 0; off >>= 1) { int v = __shfl_xor_sync(0xffffffff, wmin, off); if (v < wmin) wmin = v; }
@@ -712,15 +717,20 @@ __global__ void bucket_merge_flop_kernel(
         double mysum = 0.0f;
         for (int p = lane; p < num_k; p += 32) {
             int pos = seg_ptr[p];
-            if (pos < seg_end[p] && A_col_idx[pos] == wmin) {
-                mysum += weight[p] * A_val[pos];
+            if (pos < seg_end[p] && B_col_idx[pos] == wmin) {
+                mysum += weight[p] * B_val[pos];
                 seg_ptr[p] = pos + 1;
             }
         }
         for (int off = 16; off > 0; off >>= 1)
             mysum += __shfl_xor_sync(0xffffffff, mysum, off);
-        if (lane == 0) { out_col[base + out_idx] = wmin; out_val[base + out_idx] = mysum; }
-        out_idx++;
+        if (lane == 0) {
+            if (!(upper_tri && wmin < i)) {                       // ATT 上三角:跳过 j<i(仍消费)
+                out_col[base + out_idx] = wmin;
+                out_val[base + out_idx] = mysum;
+                out_idx++;
+            }
+        }
     }
     if (lane == 0) bucket_real_nnz[i * K + b] = out_idx;
 }
@@ -744,13 +754,14 @@ __global__ void bucket_compact_kernel(
 }
 
 // ========== merge3 Host ==========
-void spgemm_self_product_merge3(
-    void *A_buffer, int A_rows, int A_cols, int A_nnz,
+static void merge3_product(
+    void *A_buffer, int A_rows, int A_cols, int A_nnz, bool att,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
     const int K = 5;   // 每行列域分桶数(可调;大→并行度高、开销大)
-    dbg("[mrg3] start (K=%d)\n", K);
-    HashProf prof("mrg3-prof");
+    const char *tag = att ? "attm" : "mrg3";
+    dbg("[%s] start (K=%d)\n", tag, K);
+    HashProf prof(att ? "attm-prof" : "mrg3-prof");
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
@@ -781,9 +792,22 @@ void spgemm_self_product_merge3(
 
     dim3 grid(A_rows, K), block32(32);
 
+    // 内层 j 来源 B:AA=A;ATT=Aᵀ(A 的 CSC)。ATT 强制走 flop path(count path 未泛化为 B)。
+    int *dB_row_ptr, *dB_col_idx; double *dB_val;
+    int *d_csc_cp = nullptr, *d_csc_ri = nullptr; double *d_csc_val = nullptr;
+    if (att) {
+        build_csc(dA_row_ptr, dA_col_idx, dA_val, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_val);
+        dB_row_ptr = d_csc_cp; dB_col_idx = d_csc_ri; dB_val = d_csc_val;
+        dbg("[attm] csc\n");
+    } else {
+        dB_row_ptr = dA_row_ptr; dB_col_idx = dA_col_idx; dB_val = dA_val;
+    }
+    const int upper_tri = att ? 1 : 0;
+
     // 门控:flop_ub sizing(省 count pass ~37%)vs 精确 count(原版)。默认 flop_ub(净赢 24-32%、无回归);MRG3_FLOP_UB=0 关回精确 count。
     static int g_flop = -1;
     if (g_flop < 0) { const char *e = getenv("MRG3_FLOP_UB"); g_flop = (e && *e) ? (atoi(e) > 0 ? 1 : 0) : 1; }
+    if (att) g_flop = 1;   // ATT 只走 flop path(bucket_count/merge 未泛化为 B)
     if (g_flop && smem_merge > 48 * 1024) {
         CHECK_CUDA(cudaFuncSetAttribute(bucket_flop_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_count));
         CHECK_CUDA(cudaFuncSetAttribute(bucket_merge_flop_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_merge));
@@ -803,7 +827,7 @@ void spgemm_self_product_merge3(
         CHECK_CUDA(cudaMalloc(&d_row_off, (A_rows + 1) * sizeof(int)));
         int total_flop;
         prof("flop", [&]{   // (C-1) 每 (row,bucket) flop_ub(lower_bound+sum,无 merge 迭代)
-            bucket_flop_kernel<<<grid, block32, smem_count>>>(dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bflop);
+            bucket_flop_kernel<<<grid, block32, smem_count>>>(dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, d_bflop);
             CHECK_CUDA(cudaGetLastError());
         });
         prof("fscan", [&]{  // 行内 scan(flop)→ bucket_flop_off + row_flop;全局 scan → row_off(gapped) + total_flop
@@ -820,8 +844,8 @@ void spgemm_self_product_merge3(
         CHECK_CUDA(cudaMalloc(&d_breal, (size_t)A_rows * K * sizeof(int)));
         prof("merge", [&]{   // (C-2) warp-merge 写 gapped 区 + 记真实数 bucket_real_nnz
             bucket_merge_flop_kernel<<<grid, block32, smem_merge>>>(
-                dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, d_row_off, d_bflop_off,
-                d_gcol, d_gval, d_breal);
+                dA_row_ptr, dA_col_idx, dA_val, dB_row_ptr, dB_col_idx, dB_val, upper_tri,
+                A_rows, A_cols, K, d_row_off, d_bflop_off, d_gcol, d_gval, d_breal);
             CHECK_CUDA(cudaGetLastError());
         });
         int *d_boff_ex, *d_row_nnz;
@@ -902,4 +926,16 @@ void spgemm_self_product_merge3(
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = C_nnz_result;
 
     cudaFree(dA_buffer); cudaFree(dC_row_ptr); cudaFree(dC_buffer);   // 各 path 的临时数组已在分支内 free;dC_ci/dC_val 是 dC_buffer 别名
+    cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_val);      // ATT 的 Aᵀ(AA 时 null,no-op)
+}
+
+void spgemm_self_product_merge3(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                                void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
+    merge3_product(A_buffer, A_rows, A_cols, A_nnz, /*att=*/false, C_buffer_out, C_rows, C_cols, C_nnz);
+}
+
+// C = A·Aᵀ 上三角(j≥i):AA merge3(列域分桶)的忠实拷贝,B=Aᵀ(CSC)+ j≥i 过滤。返回上三角 CSR。
+void spgemm_att_merge3(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                       void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
+    merge3_product(A_buffer, A_rows, A_cols, A_nnz, /*att=*/true, C_buffer_out, C_rows, C_cols, C_nnz);
 }

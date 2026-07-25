@@ -62,6 +62,13 @@ void spgemm_transpose_product(void *A_buffer, int A_rows, int A_cols, int A_nnz,
 //   返回上三角 CSR(下三角由对称性可得,不展开)。
 void spgemm_att_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+// C = A·Aᵀ 上三角(j≥i),【merge3 列域分桶】版:AA merge3 的忠实拷贝(B=Aᵀ/CSC + j≥i)。
+void spgemm_att_merge3(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                       void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
+// C = A·Aᵀ 上三角(j≥i),【自适应】版:同 AA Auto 分流(score 公式)→ att_hash / att_merge3。
+//   hash 溢出自动回退 att_merge3。
+void spgemm_att_adaptive(void *A_buffer, int A_rows, int A_cols, int A_nnz,
+                         void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);
 
 void spgemm_transpose_product_manual(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz);

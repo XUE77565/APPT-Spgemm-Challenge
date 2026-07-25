@@ -110,6 +110,12 @@ int main(int argc, char **argv) {
             wc = nullptr;
             spgemm_att_hash(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
             if (wc) pinned_free(wc);
+            wc = nullptr;
+            spgemm_att_merge3(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) pinned_free(wc);
+            wc = nullptr;
+            spgemm_att_adaptive(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn);
+            if (wc) pinned_free(wc);
         }
         auto att_run = [&](const char *label, const char *kind, auto fn) {
             LOG_BOTH("\n=== Computing %s ===\n", label);
@@ -124,6 +130,8 @@ int main(int argc, char **argv) {
         };
         att_run("C = A x A^T (cuSPARSE)", "A·Aᵀ 全量", spgemm_transpose_product);
         att_run("C = A x A^T upper (hash)", "A·Aᵀ 上三角", spgemm_att_hash);
+        att_run("C = A x A^T upper (merge3)", "A·Aᵀ 上三角", spgemm_att_merge3);
+        att_run("C = A x A^T upper (adaptive)", "A·Aᵀ 上三角", spgemm_att_adaptive);
         LOG_BOTH("\n=== All att tests completed ===\n");
         fclose(log_file);
         host_free(A_buffer);
