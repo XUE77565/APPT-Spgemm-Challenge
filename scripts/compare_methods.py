@@ -18,13 +18,8 @@ HSMU_CSV = "/tmp/NHC_4080S_result.csv"
 # spECK (Parger PPoPP'20, hash+dense hybrid SOTA, cuda11 分支) — 自乘 C=A·A,double(与 Ocean/HSMU 同精度;spgemm_test 已统一 double)
 SPECK_RUN = os.path.join(REPO, "spECK/build/runspECK")
 SPECK_CFG = os.path.join(REPO, "spECK/config.ini")
-# nsparse (Nagasaka ICPP'17, 纯 shared-mem hash) — 自乘 C=A·A(double,_d target)。
-#   Pascal 烤死表参数 → 大阵重行溢出到 global hash → 病态慢(DNF)。弱基线。
-NSPARSE_RUN = os.path.join(REPO, "nsparse/cuda-c/bin/spgemm_hash_d")
 # opSparse (Liu 2022, shared-mem hash HASH_SINGLE) — 自乘 C=A·A(double)。2022 强基线(H100 上大阵 ≈ 我们)。
 OPSPARSE_RUN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/other_spgemm_code/OpSparse/opsparse")
-# nsparse 在 H100 上对部分矩阵(小或结构特殊)会 hang(Pascal 参数退化)→ 短超时,挂即 DNF(30s 而非全局 200s)
-NSPARSE_TIMEOUT = int(os.environ.get("NSPARSE_TIMEOUT", "30"))
 # dense baseline(-O0 朴素 dense matmul,cudaEvent kernel time,同口径)缓存:由 scripts/run_dense_baseline.py 生成
 DENSE_CACHE = os.path.join(REPO, "compare/dense_baseline.csv")
 
@@ -191,22 +186,6 @@ def run_speck(mtx, timeout=CALL_TIMEOUT):
         return (float(t.group(1)), int(nz.group(1)) if nz else None)
     return None
 
-def run_nsparse(mtx, timeout=NSPARSE_TIMEOUT):
-    """nsparse(Nagasaka ICPP'17,纯 shared-mem hash)自乘 C=A·A(double)。返回 (compute_ms, C_nnz) 或 None。
-    cudaEvent 包 spgemm_kernel_hash(H2D/D2H 在外),10 次均值,与我们同口径。
-    H100 Pascal 参数退化 → 部分矩阵 hang 或大阵重行溢出 global hash → 超时即 DNF(默认 30s)。"""
-    try:
-        r = subprocess.run([NSPARSE_RUN, os.path.abspath(mtx)],
-                           capture_output=True, text=True, timeout=timeout)
-    except Exception:
-        return None
-    out = r.stdout + r.stderr
-    t = re.search(r",\s*([0-9.]+)\[ms\]", out)          # "1.992893[GFLOPS], 0.635661[ms]"
-    nz = re.search(r"nsparse_hash C_nnz=(\d+)", out)
-    if t:
-        return (float(t.group(1)), int(nz.group(1)) if nz else None)
-    return None
-
 def run_opsparse(mtx, timeout=CALL_TIMEOUT):
     """opSparse(Liu 2022,shared-mem hash HASH_SINGLE)自乘 C=A·A(double)。返回 (compute_ms, C_nnz) 或 None。
     解析 '    total  Xms'(setup..cleanup 各 phase 之和,H2D 在外)与 'opsparse C.nnz=Y'。"""
@@ -230,7 +209,6 @@ def main():
     ap.add_argument("--no-ocean", action="store_true")
     ap.add_argument("--no-hsmu", action="store_true")
     ap.add_argument("--no-speck", action="store_true", help="不比较 spECK(hash+dense hybrid SOTA)")
-    ap.add_argument("--no-nsparse", action="store_true", help="不比较 nsparse(2017 纯 hash 弱基线)")
     ap.add_argument("--no-opsparse", action="store_true", help="不比较 opSparse(2022 hash 基线)")
     ap.add_argument("--no-dense", action="store_true", help="不比较 dense baseline(dense 未跑完时用)")
     ap.add_argument("--limit", type=int, default=0, help="只跑前 N 个(调试)")
@@ -251,7 +229,7 @@ def main():
         for r in csv.DictReader(open(args.out)):
             done.add(r["matrix"])
     fieldnames = ["matrix", "n", "sym", "density_pct", "merge3", "Auto",
-                  "Auto_choice", "Ocean", "HSMU", "spECK", "nsparse", "opSparse", "cnnz"]
+                  "Auto_choice", "Ocean", "HSMU", "spECK", "opSparse", "cnnz"]
     if not args.no_dense:
         fieldnames.insert(4, "baseline")   # dense baseline 列(在 density_pct 后)
     fout = open(args.out, "a", newline="")
@@ -291,11 +269,7 @@ def main():
         row["spECK"] = round(sk[0], 3) if sk else ""
         if sk and sk[1] and row.get("cnnz") and str(sk[1]) != str(row["cnnz"]):
             print(f"  ⚠ spECK C_nnz={sk[1]} ≠ Auto cnnz={row['cnnz']}", flush=True)
-        # nsparse(2017 纯 hash 弱基线;大阵可能 DNF)
-        ns = run_nsparse(p) if not args.no_nsparse else None
-        row["nsparse"] = round(ns[0], 3) if ns else ("" if args.no_nsparse else "DNF")
-        if ns and ns[1] and row.get("cnnz") and str(ns[1]) != str(row["cnnz"]):
-            print(f"  ⚠ nsparse C_nnz={ns[1]} ≠ Auto cnnz={row['cnnz']}", flush=True)
+        # nsparse 已移除(2017 纯 hash 弱基线,H100 上大阵 DNF / 小阵 hang,ROI 低)
         # opSparse(2022 hash 基线)
         op = run_opsparse(p) if not args.no_opsparse else None
         row["opSparse"] = round(op[0], 3) if op else ("" if args.no_opsparse else "DNF")
@@ -312,7 +286,7 @@ def main():
         print(f"Auto→{row.get('Auto_choice','?'):<6}{dense_str} "
               f"m3={row['merge3']!s:>7} Auto={row['Auto']!s:>7} Ocean={row['Ocean']!s:>7} "
               f"HSMU={row['HSMU']!s:>7} spECK={row['spECK']!s:>7} "
-              f"nsp={row['nsparse']!s:>7} opSp={row['opSparse']!s:>7} ({dt:.1f}s)", flush=True)
+              f"opSp={row['opSparse']!s:>7} ({dt:.1f}s)", flush=True)
     fout.close()
     print(f"\n完成 → {args.out}")
     # 汇总:各方法几何均值(相对 Auto)
@@ -331,8 +305,6 @@ def main():
     cols = ([["baseline"]] if not args.no_dense else []) + [m[0] for m in SPGEMM_METHODS] + ["Ocean", "HSMU"]
     if not args.no_speck:
         cols += ["spECK"]
-    if not args.no_nsparse:
-        cols += ["nsparse"]
     if not args.no_opsparse:
         cols += ["opSparse"]
     for col in cols:
