@@ -1,6 +1,6 @@
 NVCC = nvcc
 # DBG=1 开启 [dbg ms][tag] phase 时间戳(供 compute-only 解析,排除 h2d/d2h,对标 full_compare)
-NVCC_FLAGS = -O3 -arch=sm_90 -std=c++14 $(if $(DBG),-DDBG=1)
+NVCC_FLAGS = -O3 -arch=sm_90 -std=c++14 $(if $(DBG),-DDBG=1) $(if $(WRITE_MTX),-DWRITE_MTX=1)
 INCLUDES = -Iinclude -I/usr/local/cuda/include
 LIBS = -lcusparse -lcublas
 

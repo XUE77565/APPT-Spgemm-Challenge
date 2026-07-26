@@ -66,7 +66,7 @@ __global__ void count_intermediates_par_kernel(
 // 原理详见 worklog/hll_estimation_explained.md
 #define HLL_P 7                       // precision bits → m=128 寄存器(对齐 Ocean HLL_CONSTANT 表上限),误差~9.2%
 #define HLL_M (1 << HLL_P)
-#define HLL_EXPAND 2.0                // expansion(覆盖 HLL 低估;×2 → 安全;溢出 → 回退 merge3 兜底)
+#define HLL_EXPAND 1.5                // expansion(覆盖估计低估;原 2.0 过保守→over-alloc 3.14×;1.5 是安全下限,1.3 在 bcsstk30 溢出。溢出→回退 merge3 兜底)
 #define HLL_ULTRA_THR 16              // bin-snap:est≤此值 → ultrasparse(线性 kernel,CAP=32 留 2× 余量)
 #define STREAMLINE_NNZ 100000         // 小阵 pipeline 精简:A_nnz<此值 → flop_ub(1 count kernel)替 HLL 两阶段
 #define WARP_SIZE 32

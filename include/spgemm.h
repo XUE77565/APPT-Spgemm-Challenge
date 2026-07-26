@@ -9,7 +9,9 @@
 
 #define TEST_READ 0
 #define DBG 1
+#ifndef WRITE_MTX
 #define WRITE_MTX 0
+#endif
 
 // 8 字节对齐:CSR buffer [row_ptr|col_idx|val] 的 val(double)偏移须 8 对齐。
 #define ALIGN8(x) (((size_t)(x) + 7) & ~(size_t)7)
