@@ -22,14 +22,14 @@ bool should_run_method(const char *key) {
 // ==========================================================================
 //  自适应 dispatcher(集成进 src):C = A·A 的完整数据流。
 //
-//  多变量调度公式(100 阵实测拟合,R²=0.824,准确率 93%):
-//    score = -1.31×log10(flop_proxy) + 1.21×log10(n) + 1.98×log10(max_row_nnz)
-//            - 2.43×log10(skew) + 1.29
+//  多变量调度公式(first100 实测拟合,MinHash-hash + flop_ub-merge3,准确率 95%,阈值调优):
+//    score = -0.4259×log10(flop_proxy) - 0.4215×log10(n) - 0.6441×log10(max_row_nnz)
+//            - 0.6420×log10(skew) + 5.4297
 //    hash iff score < 0
 //  其中 flop_proxy = A_nnz²/n, skew = max_row_nnz / (A_nnz/n)
 //
-//  公式含义:flop 高(中间积多,hash dedup 省)+ 重行(SMEM hash 并行) -> hash;
-//           大 n(行多但每行轻)+ 高 skew(straggler) -> merge3。
+//  公式含义:flop 高 / n 大 / 重行 / 高 skew(大阵 + 重 + 不均) -> hash;
+//           反之(小阵 + 轻 + 均匀) -> merge3。
 //  hash 溢出(distinct>HASH_CAP) -> 自动回退 merge3。
 // ==========================================================================
 
@@ -69,7 +69,7 @@ void spgemm_self_product_adaptive(
     double ln  = log10((double)A_rows);
     double lmr = log10((double)std::max(max_row_nnz, 1));
     double lsk = log10(std::max(skew, 1.0));
-    double score = -1.3085 * lfp + 1.2131 * ln + 1.9815 * lmr - 2.4331 * lsk + 1.2943;
+    double score = -0.4259 * lfp - 0.4215 * ln - 0.6441 * lmr - 0.6420 * lsk + 5.4297;
     // score < 0 → hash(flop 高 / 重行 / 均匀);score ≥ 0 → merge3(小阵 / 不均匀 straggler)
     const char *force = std::getenv("ADAPTIVE_FORCE");
     int use_hash;
@@ -121,7 +121,7 @@ void spgemm_att_adaptive(
     double ln  = log10((double)A_rows);
     double lmr = log10((double)std::max(max_row_nnz, 1));
     double lsk = log10(std::max(skew, 1.0));
-    double score = -1.3085 * lfp + 1.2131 * ln + 1.9815 * lmr - 2.4331 * lsk + 1.2943;
+    double score = -0.4259 * lfp - 0.4215 * ln - 0.6441 * lmr - 0.6420 * lsk + 5.4297;
     const char *force = std::getenv("ADAPTIVE_FORCE");
     int use_hash;
     if (force && force[0]) use_hash = (force[0] == 'h' || force[0] == 'H') ? 1 : 0;

@@ -142,8 +142,8 @@ int main(int argc, char **argv) {
 
     // ---- 预热:正式计时前各方法空跑 3 轮,摊掉 thrust 工作区 / cuSPARSE handle /
     //   CUDA allocator 的一次性冷启动开销 + cache/TLB 预热,使 T1–T4 测的是稳态性能 ----
-    printf("===============WARMING UP (3 rounds)===============");
-    for (int warmup = 0; warmup < 3; warmup++) {
+    printf("===============WARMINGUP (5 rounds)===============");
+    for (int warmup = 0; warmup < 5; warmup++) {
         void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;
         if (should_run_method("cu"))      { spgemm_self_product(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn); if (wc) pinned_free(wc); wc = nullptr; }
         if (should_run_method("manual"))  { spgemm_self_product_manual(A_buffer, A_rows, A_cols, A_nnz, &wc, &wr, &wcol, &wn); if (wc) pinned_free(wc); wc = nullptr; }

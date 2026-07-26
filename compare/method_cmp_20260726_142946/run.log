@@ -1,0 +1,140 @@
+对比 100 阵 × ['merge3', 'Auto'] + Ocean + HSMU → compare/method_cmp_20260726_142946/methods_cmp.csv
+
+[1/100] 1138_bus       n=1138     Auto→merge3 m3=  0.144 Auto=  0.136 Ocean=  0.215 HSMU=  0.304 opSp=  0.542 (4.0s)
+[2/100] 494_bus        n=494      Auto→merge3 m3=  0.122 Auto=  0.115 Ocean=  0.205 HSMU=  0.291 opSp=  0.768 (3.9s)
+[3/100] 662_bus        n=662      Auto→merge3 m3=  0.143 Auto=  0.142 Ocean=  0.222 HSMU=  0.303 opSp=  0.584 (3.9s)
+[4/100] 685_bus        n=685      Auto→merge3 m3=  0.138 Auto=   0.13 Ocean=  0.223 HSMU=  0.293 opSp=  1.106 (3.9s)
+[5/100] arc130         n=130      Auto→merge3 m3=   0.15 Auto=  0.235 Ocean=   0.38 HSMU=  0.473 opSp=  0.927 (3.9s)
+[6/100] ash292         n=292      Auto→merge3 m3=  0.123 Auto=  0.129 Ocean=  0.179 HSMU=   0.29 opSp=   0.62 (3.8s)
+[7/100] ash85          n=85       Auto→merge3 m3=  0.133 Auto=  0.121 Ocean=   0.21 HSMU=  0.284 opSp=  0.872 (3.9s)
+[8/100] bcspwr01       n=39       Auto→merge3 m3=  0.107 Auto=  0.104 Ocean=  0.183 HSMU=  0.308 opSp=  0.523 (3.9s)
+[9/100] bcspwr02       n=49       Auto→merge3 m3=  0.154 Auto=  0.128 Ocean=  0.187 HSMU=  0.267 opSp=  0.723 (3.9s)
+[10/100] bcspwr03       n=118      Auto→merge3 m3=  0.124 Auto=  0.131 Ocean=   0.21 HSMU=  0.299 opSp=  0.581 (3.8s)
+[11/100] bcspwr04       n=274      Auto→merge3 m3=  0.129 Auto=  0.134 Ocean=  0.224 HSMU=  0.305 opSp=  0.776 (3.8s)
+[12/100] bcspwr05       n=443      Auto→merge3 m3=  0.149 Auto=  0.118 Ocean=  0.207 HSMU=  0.232 opSp=  0.707 (3.9s)
+[13/100] bcspwr06       n=1454     Auto→merge3 m3=  0.147 Auto=  0.155 Ocean=   0.22 HSMU=  0.314 opSp=  0.768 (3.9s)
+[14/100] bcspwr07       n=1612     Auto→merge3 m3=  0.144 Auto=  0.145 Ocean=   0.23 HSMU=  0.324 opSp=   0.57 (3.8s)
+[15/100] bcspwr08       n=1624     Auto→merge3 m3=  0.158 Auto=  0.165 Ocean=  0.206 HSMU=   0.24 opSp=  0.579 (3.9s)
+[16/100] bcspwr09       n=1723     Auto→merge3 m3=  0.133 Auto=  0.132 Ocean=  0.213 HSMU=  0.288 opSp=  0.713 (3.8s)
+[17/100] bcspwr10       n=5300     Auto→merge3 m3=  0.178 Auto=  0.185 Ocean=  0.223 HSMU=   0.89 opSp=  0.771 (3.8s)
+[18/100] bcsstk01       n=48       Auto→merge3 m3=  0.117 Auto=  0.121 Ocean=  0.295 HSMU=  0.301 opSp=  1.439 (3.9s)
+[19/100] bcsstk02       n=66       Auto→merge3 m3=  0.141 Auto=  0.138 Ocean=  0.697 HSMU=  0.673 opSp=  0.982 (6.5s)
+[20/100] bcsstk03       n=112      Auto→merge3 m3=  0.122 Auto=  0.122 Ocean=  0.146 HSMU=  0.283 opSp=  0.583 (3.7s)
+[21/100] bcsstk04       n=132      Auto→merge3 m3=  0.185 Auto=  0.153 Ocean=  0.515 HSMU=  0.372 opSp=  0.775 (3.9s)
+[22/100] bcsstk05       n=153      Auto→merge3 m3=  0.133 Auto=   0.15 Ocean=  0.351 HSMU=  0.339 opSp=  0.581 (3.9s)
+[23/100] bcsstk06       n=420      Auto→merge3 m3=  0.155 Auto=  0.157 Ocean=  0.347 HSMU=  0.339 opSp=  0.881 (3.9s)
+[24/100] bcsstk07       n=420      Auto→merge3 m3=  0.154 Auto=   0.18 Ocean=  0.347 HSMU=  0.337 opSp=  0.582 (3.8s)
+[25/100] bcsstk08       n=1074     Auto→hash   m3=  0.855 Auto=  0.563 Ocean=  0.428 HSMU=  0.809 opSp=  0.746 (3.8s)
+[26/100] bcsstk09       n=1083     Auto→merge3 m3=  0.167 Auto=  0.199 Ocean=   0.34 HSMU=  0.335 opSp=  0.581 (3.9s)
+[27/100] bcsstk10       n=1086     Auto→merge3 m3=  0.195 Auto=  0.185 Ocean=  0.495 HSMU=  0.359 opSp=  1.361 (3.9s)
+[28/100] bcsstk11       n=1473     Auto→merge3 m3=  0.236 Auto=  0.209 Ocean=   0.54 HSMU=  0.536 opSp=  0.601 (3.9s)
+[29/100] bcsstk12       n=1473     Auto→merge3 m3=  0.228 Auto=  0.193 Ocean=  0.494 HSMU=  0.515 opSp=  0.587 (3.9s)
+[30/100] bcsstk13       n=2003     Auto→hash   m3=  0.626 Auto=  0.828 Ocean=  0.709 HSMU=  0.913 opSp=  0.811 (4.0s)
+[31/100] bcsstk14       n=1806     Auto→merge3 m3=  0.319 Auto=  0.309 Ocean=  0.546 HSMU=  0.534 opSp=  1.085 (4.0s)
+[32/100] bcsstk15       n=3948     Auto→hash   m3=  0.431 Auto=   0.27 Ocean=   0.41 HSMU=  0.688 opSp=  0.809 (4.1s)
+[33/100] bcsstk16       n=4884     Auto→hash   m3=  1.176 Auto=  0.483 Ocean=  0.703 HSMU=  1.403 opSp=  1.389 (4.3s)
+[34/100] bcsstk17       n=10974    Auto→hash   m3=  1.185 Auto=  0.606 Ocean=  0.759 HSMU=  1.716 opSp=  1.246 (4.6s)
+[35/100] bcsstk18       n=11948    Auto→hash   m3=  0.514 Auto=  0.369 Ocean=  0.418 HSMU=  1.216 opSp=   1.02 (4.1s)
+[36/100] bcsstk19       n=817      Auto→merge3 m3=   0.14 Auto=  0.112 Ocean=  0.317 HSMU=  0.321 opSp=  0.588 (3.8s)
+[37/100] bcsstk20       n=485      Auto→merge3 m3=  0.132 Auto=  0.132 Ocean=  0.251 HSMU=  0.258 opSp=  0.626 (3.8s)
+[38/100] bcsstk21       n=3600     Auto→merge3 m3=  0.205 Auto=  0.184 Ocean=  0.217 HSMU=   0.43 opSp=  0.735 (3.9s)
+[39/100] bcsstk22       n=138      Auto→merge3 m3=  0.116 Auto=  0.119 Ocean=  0.202 HSMU=  0.285 opSp=  0.755 (3.9s)
+[40/100] bcsstk23       n=3134     Auto→merge3 m3=  0.248 Auto=  0.247 Ocean=  0.375 HSMU=   0.54 opSp=  0.726 (4.0s)
+[41/100] bcsstk24       n=3562     Auto→hash   m3=  0.451 Auto=  0.357 Ocean=  0.596 HSMU=  0.932 opSp=  1.028 (4.1s)
+[42/100] bcsstk25       n=15439    Auto→hash   m3=  0.781 Auto=  0.477 Ocean=  0.482 HSMU=  1.461 opSp=  1.689 (4.3s)
+[43/100] bcsstk26       n=1922     Auto→merge3 m3=  0.195 Auto=  0.195 Ocean=  0.354 HSMU=  0.515 opSp=  0.657 (3.9s)
+[44/100] bcsstk27       n=1224     Auto→merge3 m3=  0.301 Auto=  0.315 Ocean=  0.501 HSMU=  0.651 opSp=  0.904 (4.0s)
+[45/100] bcsstk28       n=4410     Auto→hash   m3=  0.629 Auto=  0.438 Ocean=  0.678 HSMU=  1.356 opSp=  1.135 (4.2s)
+[46/100] bcsstk29       n=13992    Auto→hash   m3=  1.422 Auto=  0.767 Ocean=  0.928 HSMU=  1.538 opSp=    1.3 (4.5s)
+[47/100] bcsstk30       n=28924    Auto→hash   m3= 11.265 Auto=  3.301 Ocean=  2.412 HSMU=  4.777 opSp=  3.173 (6.1s)
+[48/100] bcsstk31       n=35588    Auto→hash   m3=  3.095 Auto=  1.301 Ocean=  1.286 HSMU=  2.722 opSp=  2.383 (5.2s)
+[49/100] bcsstk32       n=44609    Auto→hash   m3=  5.673 Auto=  2.094 Ocean=  1.802 HSMU=  3.707 opSp=  2.782 (6.0s)
+[50/100] bcsstk33       n=8738     Auto→hash   m3=  2.742 Auto=   1.08 Ocean=  1.569 HSMU=  1.943 opSp=  1.766 (4.6s)
+[51/100] bcsstm01       n=48       Auto→merge3 m3=  0.111 Auto=   0.11 Ocean=  0.168 HSMU=  0.278 opSp=   0.79 (3.9s)
+[52/100] bcsstm02       n=66       Auto→merge3 m3=  0.106 Auto=  0.107 Ocean=  0.167 HSMU=  0.278 opSp=  1.322 (3.9s)
+[53/100] bcsstm03       n=112      Auto→merge3 m3=  0.104 Auto=  0.106 Ocean=  0.173 HSMU=  0.272 opSp=  1.311 (3.8s)
+[54/100] bcsstm04       n=132      Auto→merge3 m3=  0.107 Auto=  0.107 Ocean=   0.17 HSMU=  0.276 opSp=  1.705 (3.9s)
+[55/100] bcsstm05       n=153      Auto→merge3 m3=  0.118 Auto=  0.111 Ocean=  0.194 HSMU=  0.282 opSp=  1.534 (3.9s)
+[56/100] bcsstm06       n=420      Auto→merge3 m3=  0.113 Auto=  0.128 Ocean=  0.173 HSMU=  0.286 opSp=  1.391 (3.9s)
+[57/100] bcsstm07       n=420      Auto→merge3 m3=  0.147 Auto=  0.152 Ocean=  0.337 HSMU=  0.355 opSp=  1.618 (3.9s)
+[58/100] bcsstm08       n=1074     Auto→merge3 m3=  0.118 Auto=  0.118 Ocean=  0.171 HSMU=  0.304 opSp=  1.575 (3.9s)
+[59/100] bcsstm09       n=1083     Auto→merge3 m3=  0.122 Auto=  0.115 Ocean=  0.172 HSMU=  0.299 opSp=  0.559 (3.9s)
+[60/100] bcsstm10       n=1086     Auto→merge3 m3=  0.208 Auto=  0.194 Ocean=  0.502 HSMU=   0.37 opSp=  0.607 (3.9s)
+[61/100] bcsstm11       n=1473     Auto→merge3 m3=  0.121 Auto=  0.124 Ocean=   0.17 HSMU=  0.292 opSp=  0.621 (3.9s)
+[62/100] bcsstm12       n=1473     Auto→merge3 m3=  0.185 Auto=  0.175 Ocean=  0.366 HSMU=  0.344 opSp=  0.766 (3.9s)
+[63/100] bcsstm13       n=2003     Auto→merge3 m3=  0.304 Auto=  0.304 Ocean=  0.448 HSMU=  0.568 opSp=  1.059 (3.9s)
+[64/100] bcsstm19       n=817      Auto→merge3 m3=  0.116 Auto=  0.118 Ocean=  0.172 HSMU=  0.281 opSp=    0.7 (3.9s)
+[65/100] bcsstm20       n=485      Auto→merge3 m3=  0.151 Auto=  0.109 Ocean=  0.172 HSMU=  0.289 opSp=  0.847 (3.9s)
+[66/100] bcsstm21       n=3600     Auto→merge3 m3=  0.152 Auto=  0.148 Ocean=  0.173 HSMU=  0.489 opSp=  0.544 (3.9s)
+[67/100] bcsstm22       n=138      Auto→merge3 m3=  0.107 Auto=  0.108 Ocean=  0.173 HSMU=  0.286 opSp=  0.509 (3.9s)
+[68/100] bcsstm23       n=3134     Auto→merge3 m3=  0.142 Auto=  0.141 Ocean=  0.176 HSMU=  0.481 opSp=  1.499 (3.9s)
+[69/100] bcsstm24       n=3562     Auto→merge3 m3=  0.146 Auto=  0.143 Ocean=  0.176 HSMU=  0.477 opSp=  0.806 (3.9s)
+[70/100] bcsstm25       n=15439    Auto→merge3 m3=  0.266 Auto=  0.265 Ocean=  0.188 HSMU=  0.482 opSp=  1.152 (4.0s)
+[71/100] bcsstm26       n=1922     Auto→merge3 m3=  0.128 Auto=  0.126 Ocean=  0.176 HSMU=  0.318 opSp=  1.366 (3.9s)
+[72/100] bcsstm27       n=1224     Auto→merge3 m3=   0.32 Auto=  0.309 Ocean=  0.545 HSMU=  0.659 opSp=  1.198 (4.0s)
+[73/100] blckhole       n=2132     Auto→merge3 m3=  0.196 Auto=  0.194 Ocean=  0.259 HSMU=  0.491 opSp=  1.282 (3.9s)
+[74/100] bp_0           n=822      Auto→hash   m3=    0.4 Auto=  0.328 Ocean=  0.244 HSMU=  0.447 opSp=  0.891 (3.9s)
+[75/100] bp_1000        n=822      Auto→hash   m3=  0.461 Auto=  0.386 Ocean=  0.256 HSMU=  0.481 opSp=  0.647 (3.9s)
+[76/100] bp_1200        n=822      Auto→hash   m3=  0.442 Auto=  0.397 Ocean=  0.259 HSMU=  0.476 opSp=  1.414 (3.9s)
+[77/100] bp_1400        n=822      Auto→hash   m3=  0.469 Auto=  0.388 Ocean=  0.261 HSMU=  0.476 opSp=  0.957 (3.9s)
+[78/100] bp_1600        n=822      Auto→hash   m3=   0.45 Auto=  0.391 Ocean=  0.265 HSMU=  0.481 opSp=  1.017 (3.9s)
+[79/100] bp_200         n=822      Auto→hash   m3=   0.41 Auto=  0.349 Ocean=  0.253 HSMU=  0.453 opSp=  1.328 (3.9s)
+[80/100] bp_400         n=822      Auto→hash   m3=  0.446 Auto=  0.359 Ocean=  0.261 HSMU=  0.483 opSp=  0.805 (3.9s)
+[81/100] bp_600         n=822      Auto→hash   m3=  0.442 Auto=  0.364 Ocean=  0.257 HSMU=  0.475 opSp=  1.498 (3.9s)
+[82/100] bp_800         n=822      Auto→hash   m3=  0.448 Auto=  0.376 Ocean=  0.256 HSMU=  0.469 opSp=  0.828 (3.9s)
+[83/100] can_1054       n=1054     Auto→merge3 m3=  0.179 Auto=  0.172 Ocean=  0.365 HSMU=  0.352 opSp=  1.736 (3.9s)
+[84/100] can_1072       n=1072     Auto→merge3 m3=  0.178 Auto=  0.197 Ocean=  0.361 HSMU=  0.345 opSp=  1.249 (3.9s)
+[85/100] can_144        n=144      Auto→merge3 m3=  0.135 Auto=   0.13 Ocean=  0.392 HSMU=   0.31 opSp=  1.158 (3.9s)
+[86/100] can_161        n=161      Auto→merge3 m3=  0.145 Auto=  0.143 Ocean=  0.328 HSMU=  0.314 opSp=  1.186 (3.9s)
+[87/100] can_187        n=187      Auto→merge3 m3=  0.119 Auto=  0.121 Ocean=  0.323 HSMU=  0.322 opSp=  1.037 (3.9s)
+[88/100] can_229        n=229      Auto→merge3 m3=   0.16 Auto=  0.144 Ocean=  0.324 HSMU=   0.31 opSp=  1.791 (3.9s)
+[89/100] can_24         n=24       Auto→merge3 m3=  0.129 Auto=  0.112 Ocean=  0.198 HSMU=  0.281 opSp=  0.972 (3.9s)
+[90/100] can_256        n=256      Auto→merge3 m3=  0.176 Auto=  0.174 Ocean=  0.323 HSMU=  0.354 opSp=  1.237 (3.9s)
+[91/100] can_268        n=268      Auto→merge3 m3=  0.147 Auto=  0.154 Ocean=  0.341 HSMU=  0.355 opSp=  0.927 (4.0s)
+[92/100] can_292        n=292      Auto→merge3 m3=  0.131 Auto=   0.13 Ocean=   0.34 HSMU=   0.32 opSp=  1.265 (4.0s)
+[93/100] can_445        n=445      Auto→merge3 m3=  0.144 Auto=   0.14 Ocean=  0.328 HSMU=  0.304 opSp=  1.105 (3.9s)
+[94/100] can_61         n=61       Auto→merge3 m3=  0.126 Auto=  0.139 Ocean=  0.323 HSMU=  0.302 opSp=  1.293 (3.9s)
+[95/100] can_62         n=62       Auto→merge3 m3=  0.119 Auto=  0.114 Ocean=  0.199 HSMU=  0.281 opSp=  0.719 (3.9s)
+[96/100] can_634        n=634      Auto→merge3 m3=  0.146 Auto=  0.146 Ocean=   0.36 HSMU=  0.324 opSp=  1.572 (3.9s)
+[97/100] can_715        n=715      Auto→merge3 m3=   0.28 Auto=  0.278 Ocean=  0.381 HSMU=  0.378 opSp=  1.117 (3.9s)
+[98/100] can_73         n=73       Auto→merge3 m3=  0.129 Auto=  0.126 Ocean=  0.205 HSMU=  0.305 opSp=  0.688 (3.9s)
+[99/100] can_838        n=838      Auto→merge3 m3=  0.173 Auto=  0.153 Ocean=  0.356 HSMU=  0.342 opSp=  1.414 (3.9s)
+[100/100] can_96         n=96       Auto→merge3 m3=  0.126 Auto=  0.132 Ocean=   0.32 HSMU=  0.296 opSp=  1.014 (3.9s)
+
+完成 → compare/method_cmp_20260726_142946/methods_cmp.csv
+
+=== 几何均值(ms) ===
+  merge3      0.225
+  Auto        0.202
+  Ocean       0.311
+  HSMU        0.440
+  opSparse    0.958
+
+=== Auto 选择(共 100 阵)===  hash 23 / merge3 77
+  选 hash 的:bcsstk08, bcsstk13, bcsstk15, bcsstk16, bcsstk17, bcsstk18, bcsstk24, bcsstk25, bcsstk28, bcsstk29, bcsstk30, bcsstk31, bcsstk32, bcsstk33, bp_0, bp_1000, bp_1200, bp_1400, bp_1600, bp_200, bp_400, bp_600, bp_800
+
+=== Auto vs Ocean:赢 85 / 输 15,几何均值(Auto/Ocean) 0.649× ===
+  name                   n       C_nnz     Ocean      Auto    ratio
+  bp_1200              822       22313     0.259     0.397    1.53×
+  bp_1000              822       21373     0.256     0.386    1.51×
+  bp_1400              822       23154     0.261     0.388    1.49×
+  bp_1600              822       23625     0.265     0.391    1.48×
+  bp_800               822       20224     0.256     0.376    1.47×
+  bp_600               822       16464     0.257     0.364    1.42×
+  bcsstm25           15439       15439     0.188     0.265    1.41×
+  bp_200               822       13197     0.253     0.349    1.38×
+  bp_400               822       15238     0.261     0.359    1.38×
+  bcsstk30           28924     8946070     2.412     3.301    1.37×
+  bp_0                 822        9384     0.244     0.328    1.34×
+  bcsstk08            1074      305612     0.428     0.563    1.32×
+  bcsstk13            2003      396773     0.709     0.828    1.17×
+  bcsstk32           44609     6819653     1.802     2.094    1.16×
+  bcsstk31           35588     4713580     1.286     1.301    1.01×
+
+=== Auto vs opSparse:赢 98 / 输 2,几何均值(Auto/opSparse) 0.211× ===
+  name                   n       C_nnz  opSparse      Auto    ratio
+  bcsstk30           28924     8946070     3.173     3.301    1.04×
+  bcsstk13            2003      396773     0.811     0.828    1.02×
+
+=== Auto vs HSMU:赢 100 / 输 0,几何均值(Auto/HSMU) 0.459× ===
+  name                   n       C_nnz      HSMU      Auto    ratio

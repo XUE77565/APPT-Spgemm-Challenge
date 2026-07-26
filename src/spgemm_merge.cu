@@ -373,6 +373,7 @@ void spgemm_self_product_merge2(
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
     dbg("[mrg2] start\n");
+    HashProf prof("mrg2-prof");
 
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
@@ -381,7 +382,7 @@ void spgemm_self_product_merge2(
 
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
-    CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+    prof("h2d", [&]{ CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice)); });
     dbg("[mrg2] h2d\n");
 
     char *dA_base = (char*)dA_buffer;
@@ -391,66 +392,67 @@ void spgemm_self_product_merge2(
 
     const int block = 256;
 
-    // host 扫 pinned A_row_ptr 得 max_row_nnz → merge_warp shared(seg_ptr+seg_end+weight)
     const int *h_row_ptr = (const int*)A_buffer;
     int max_row_nnz = 0;
     for (int i = 0; i < A_rows; i++) {
         int nn = h_row_ptr[i + 1] - h_row_ptr[i];
         if (nn > max_row_nnz) max_row_nnz = nn;
     }
-    size_t merge_smem = (size_t)max_row_nnz * 3 * sizeof(int);
+    size_t merge_smem = (size_t)max_row_nnz * (2 * sizeof(int) + sizeof(double));   // seg_ptr+seg_end[int]+weight[double]
     if (merge_smem > 48 * 1024) {
         CHECK_CUDA(cudaFuncSetAttribute(merge_warp_kernel,
             cudaFuncAttributeMaxDynamicSharedMemorySize, (int)merge_smem));
     }
 
     // ---- Stage 1: 每行中间项数(复用 count kernel)----
-    dbg("merge2: count begin\n");
     int *d_ub;
     CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
-    {
+    prof("count", [&]{
         int grid = (A_rows + block - 1) / block;
         count_intermediates_kernel<<<grid, block>>>(
             dA_row_ptr, dA_col_idx, A_rows, d_ub);
-    }
-    CHECK_CUDA(cudaDeviceSynchronize());
+    });
     dbg("[mrg2] count\n");
 
     // ---- Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数(=输出上界)----
     int *d_off;
     CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
-    thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
-                           thrust::device_ptr<int>(d_ub + A_rows),
-                           thrust::device_ptr<int>(d_off + 1));
     int total_ub;
-    CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    prof("scan", [&]{
+        thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
+                               thrust::device_ptr<int>(d_ub + A_rows),
+                               thrust::device_ptr<int>(d_off + 1));
+        CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+    });
     dbg("[mrg2] scan\n");
 
-    // ---- Stage 2: 并行 k-way merge(直接读 A)→ out_col/out_val + row_nnz ----
+    // ---- Stage 2: 并行 k-way merge(1 warp/row)→ out_col/out_val + row_nnz ----
     int *d_out_col;
     double *d_out_val;
     int *d_row_nnz;
     CHECK_CUDA(cudaMalloc(&d_out_col, (size_t)total_ub * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_out_val, (size_t)total_ub * sizeof(double)));
     CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
-    dbg("merge2: merge_warp begin (%d intermediates)\n", total_ub);
-    merge_warp_kernel<<<A_rows, 32, merge_smem>>>(
-        dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off,
-        d_out_col, d_out_val, d_row_nnz);
-    CHECK_CUDA(cudaDeviceSynchronize());
+    prof("merge", [&]{
+        merge_warp_kernel<<<A_rows, 32, merge_smem>>>(
+            dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off,
+            d_out_col, d_out_val, d_row_nnz);
+    });
     dbg("[mrg2] merge\n");
 
     // ---- Stage 2b: scan row_nnz → C_row_ptr; 读 C_nnz ----
     int *dC_row_ptr;
     CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
-    thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
-                           thrust::device_ptr<int>(d_row_nnz + A_rows),
-                           thrust::device_ptr<int>(dC_row_ptr + 1));
     int C_nnz_result;
-    CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
-                         sizeof(int), cudaMemcpyDeviceToHost));
+    prof("final", [&]{
+        thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
+                               thrust::device_ptr<int>(d_row_nnz + A_rows),
+                               thrust::device_ptr<int>(dC_row_ptr + 1));
+        CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_row_ptr + A_rows,
+                             sizeof(int), cudaMemcpyDeviceToHost));
+    });
     dbg("[mrg2] final\n");
 
     // ---- Stage 2c: compact 到连续 CSR(复用 compact_kernel)----
@@ -458,15 +460,16 @@ void spgemm_self_product_merge2(
     double *dC_val;
     CHECK_CUDA(cudaMalloc(&dC_col_idx, (size_t)C_nnz_result * sizeof(int)));
     CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(double)));
-    compact_kernel<<<A_rows, block>>>(
-        d_off, d_row_nnz, dC_row_ptr, d_out_col, d_out_val, dC_col_idx, dC_val, A_rows);
-    CHECK_CUDA(cudaDeviceSynchronize());
+    prof("compact", [&]{
+        compact_kernel<<<A_rows, block>>>(
+            d_off, d_row_nnz, dC_row_ptr, d_out_col, d_out_val, dC_col_idx, dC_val, A_rows);
+    });
     cudaFree(d_out_col);
     cudaFree(d_out_val);
     cudaFree(d_row_nnz);
     dbg("[mrg2] compact\n");
 
-    // ---- 打包成单块 + D2H ----
+    // ---- 打包成单块 + D2H(pack D2D 归入 d2h,不计 compute)----
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
     size_t C_val_size = (size_t)C_nnz_result * sizeof(double);
@@ -477,16 +480,16 @@ void spgemm_self_product_merge2(
     void *dC_buffer;
     CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
     char *dC_base = (char*)dC_buffer;
-    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
-                          C_col_idx_size, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
-                          dC_val, C_val_size, cudaMemcpyDeviceToDevice));
-    dbg("[mrg2] pack\n");
-
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
-    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+    prof("d2h", [&]{
+        CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
+                              C_col_idx_size, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
+                              dC_val, C_val_size, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+    });
     dbg("[mrg2] d2h\n");
 
     *C_buffer_out = C_buffer;

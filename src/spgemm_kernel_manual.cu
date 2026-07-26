@@ -1,4 +1,5 @@
 #include "spgemm.h"
+#include "hash_prof.h"
 #include <cuda_runtime.h>
 #include <thrust/scan.h>
 #include <thrust/sort.h>
@@ -279,11 +280,14 @@ void spgemm_self_product_manual(
     size_t A_val_size = A_nnz * sizeof(double);
     size_t A_total_size = ALIGN8(A_row_ptr_size + A_col_idx_size) + A_val_size;
 
+    HashProf prof("esc-prof");
     // 把整个A拷贝,gustavson
     void *dA_buffer;
     CHECK_CUDA(cudaMalloc(&dA_buffer, A_total_size));
-    CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
-    dbg("[gust] h2d\n");
+    prof("h2d", [&] {
+        CHECK_CUDA(cudaMemcpy(dA_buffer, A_buffer, A_total_size, cudaMemcpyHostToDevice));
+        dbg("[gust] h2d\n");
+    });
 
     char *dA_base = (char*)dA_buffer;
     int *dA_row_ptr = (int*)dA_base;
@@ -296,63 +300,72 @@ void spgemm_self_product_manual(
     dbg("ESC: count intermediates begin\n");
     int *d_ub; //d_ub是每一行的upper_bound
     CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
-    {
+    prof("count", [&] {
         int grid = (A_rows + block - 1) / block;
         // 利用每一行的nnz来粗略计算C的nnz的上界
         count_intermediates_kernel<<<grid, block>>>(
             dA_row_ptr, dA_col_idx, A_rows, d_ub);
-    }
-    CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[gust] count\n");
+        CHECK_CUDA(cudaDeviceSynchronize());
+        dbg("[gust] count\n");
+    });
 
     // ---- Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数 ----
     int *d_off;
     CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));                 // off[0] = 0
-    // inclusive_scan 写到 off+1:得 off=[0, ub0, ub0+ub1, …, total],行偏移正确
-    thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
-                           thrust::device_ptr<int>(d_ub + A_rows),
-                           thrust::device_ptr<int>(d_off + 1));
     int total_ub;
-    CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
-    dbg("[gust] scan\n");
+    prof("scan", [&] {
+        // inclusive_scan 写到 off+1:得 off=[0, ub0, ub0+ub1, …, total],行偏移正确
+        thrust::inclusive_scan(thrust::device_ptr<int>(d_ub),
+                               thrust::device_ptr<int>(d_ub + A_rows),
+                               thrust::device_ptr<int>(d_off + 1));
+        CHECK_CUDA(cudaMemcpy(&total_ub, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+        dbg("[gust] scan\n");
+    });
 
     // ---- Stage 2: 展开(唯一的重计算)写全局 COO(key, val)----
     unsigned long long *d_key;
     double *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_ub * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_val, (size_t)total_ub * sizeof(double)));
-    dbg("ESC: expand begin (%d intermediates)\n", total_ub);
-    expand_intermediates_kernel<<<A_rows, block>>>(
-        dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off, d_key, d_val);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[gust] expand\n");
+    prof("expand", [&] {
+        dbg("ESC: expand begin (%d intermediates)\n", total_ub);
+        expand_intermediates_kernel<<<A_rows, block>>>(
+            dA_row_ptr, dA_col_idx, dA_val, A_rows, d_off, d_key, d_val);
+        CHECK_CUDA(cudaDeviceSynchronize());
+        dbg("[gust] expand\n");
+    });
 
     // ---- Stage 3: 按 key=(row<<32|col) 全局排序 ----
-    dbg("ESC: sort_by_key begin\n");
-    thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
-                        thrust::device_ptr<unsigned long long>(d_key + total_ub),
-                        thrust::device_ptr<double>(d_val));
-    CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[gust] sort\n");
+    prof("sort", [&] {
+        dbg("ESC: sort_by_key begin\n");
+        thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
+                            thrust::device_ptr<unsigned long long>(d_key + total_ub),
+                            thrust::device_ptr<double>(d_val));
+        CHECK_CUDA(cudaDeviceSynchronize());
+        dbg("[gust] sort\n");
+    });
 
     // ---- Stage 3b: 相邻同 key 求和去重 → (red_key, red_val) ----
     unsigned long long *d_rk;
     double *d_rv;
     CHECK_CUDA(cudaMalloc(&d_rk, (size_t)total_ub * sizeof(unsigned long long)));
     CHECK_CUDA(cudaMalloc(&d_rv, (size_t)total_ub * sizeof(double)));
-    dbg("ESC: reduce_by_key begin\n");
-    thrust::pair<thrust::device_ptr<unsigned long long>,
-                 thrust::device_ptr<double> > red_end =
-        thrust::reduce_by_key(
-            thrust::device_ptr<unsigned long long>(d_key),
-            thrust::device_ptr<unsigned long long>(d_key + total_ub),
-            thrust::device_ptr<double>(d_val),
-            thrust::device_ptr<unsigned long long>(d_rk),
-            thrust::device_ptr<double>(d_rv));
-    int C_nnz_result = (int)(red_end.first - thrust::device_ptr<unsigned long long>(d_rk));
-    CHECK_CUDA(cudaDeviceSynchronize());
-    dbg("[gust] reduce\n");
+    int C_nnz_result;
+    prof("reduce", [&] {
+        dbg("ESC: reduce_by_key begin\n");
+        thrust::pair<thrust::device_ptr<unsigned long long>,
+                     thrust::device_ptr<double> > red_end =
+            thrust::reduce_by_key(
+                thrust::device_ptr<unsigned long long>(d_key),
+                thrust::device_ptr<unsigned long long>(d_key + total_ub),
+                thrust::device_ptr<double>(d_val),
+                thrust::device_ptr<unsigned long long>(d_rk),
+                thrust::device_ptr<double>(d_rv));
+        C_nnz_result = (int)(red_end.first - thrust::device_ptr<unsigned long long>(d_rk));
+        CHECK_CUDA(cudaDeviceSynchronize());
+        dbg("[gust] reduce\n");
+    });
     cudaFree(d_key);          // COO 不再需要
     cudaFree(d_val);
 
@@ -364,23 +377,22 @@ void spgemm_self_product_manual(
     CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(double)));
     CHECK_CUDA(cudaMalloc(&dC_row_nnz, A_rows * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_nnz, 0, A_rows * sizeof(int)));
-    {
-        int grid = (C_nnz_result + block - 1) / block;
-        finalize_csr_kernel<<<grid, block>>>(
-            d_rk, d_rv, C_nnz_result, A_rows, dC_col_idx, dC_val, dC_row_nnz);
-    }
-    CHECK_CUDA(cudaDeviceSynchronize());
-    cudaFree(d_rk);
-    cudaFree(d_rv);
-
     // ---- Stage 4b: 每行 nnz → C_row_ptr ----
     int *dC_row_ptr;
     CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
-    thrust::inclusive_scan(thrust::device_ptr<int>(dC_row_nnz),
-                           thrust::device_ptr<int>(dC_row_nnz + A_rows),
-                           thrust::device_ptr<int>(dC_row_ptr + 1));
-    dbg("[gust] final\n");
+    prof("final", [&] {
+        int grid = (C_nnz_result + block - 1) / block;
+        finalize_csr_kernel<<<grid, block>>>(
+            d_rk, d_rv, C_nnz_result, A_rows, dC_col_idx, dC_val, dC_row_nnz);
+        CHECK_CUDA(cudaDeviceSynchronize());
+        thrust::inclusive_scan(thrust::device_ptr<int>(dC_row_nnz),
+                               thrust::device_ptr<int>(dC_row_nnz + A_rows),
+                               thrust::device_ptr<int>(dC_row_ptr + 1));
+        dbg("[gust] final\n");
+    });
+    cudaFree(d_rk);
+    cudaFree(d_rv);
 
     // ---- 打包成单块 + D2H(与旧版相同)----
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
@@ -393,17 +405,21 @@ void spgemm_self_product_manual(
     void *dC_buffer;
     CHECK_CUDA(cudaMalloc(&dC_buffer, C_total_size));
     char *dC_base = (char*)dC_buffer;
-    CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
-                          C_col_idx_size, cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
-                          dC_val, C_val_size, cudaMemcpyDeviceToDevice));
-    dbg("[gust] pack\n");
+    prof("pack", [&] {
+        CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned, dC_col_idx,
+                              C_col_idx_size, cudaMemcpyDeviceToDevice));
+        CHECK_CUDA(cudaMemcpy(dC_base + C_row_ptr_aligned + C_col_idx_aligned,
+                              dC_val, C_val_size, cudaMemcpyDeviceToDevice));
+        dbg("[gust] pack\n");
+    });
 
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total_size));
-    CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
-    dbg("[gust] d2h\n");
+    prof("d2h", [&] {
+        CHECK_CUDA(cudaMemcpy(C_buffer, dC_buffer, C_total_size, cudaMemcpyDeviceToHost));
+        dbg("[gust] d2h\n");
+    });
 
     *C_buffer_out = C_buffer;
     *C_rows = A_rows;

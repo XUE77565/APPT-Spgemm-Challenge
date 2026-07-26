@@ -841,11 +841,11 @@ static void hash_product(
             CHECK_CUDA(cudaGetLastError());
         });
     } else {
-        // 估计方法门控:EST_METHOD={hll(默认)|minhash|kmv}。HLL 对齐 Ocean;MinHash 为自研非-HLL 上界估计。
+        // 估计方法门控:默认 MinHash(自研,与 Ocean HLL 区分);EST_METHOD=hll → HLL;minhash/kmv/unset → MinHash。
         static int g_est = -1;
         if (g_est < 0) {
             const char *e = getenv("EST_METHOD");
-            g_est = (e && (!strcmp(e, "minhash") || !strcmp(e, "kmv"))) ? 1 : 0;
+            g_est = (e && !strcmp(e, "hll")) ? 0 : 1;   // HLL iff EST_METHOD=hll; else MinHash
             dbg("[hash] EST_METHOD=%s → %s\n", e ? e : "(unset)", g_est ? "MinHash" : "HLL");
         }
         if (g_est) {
