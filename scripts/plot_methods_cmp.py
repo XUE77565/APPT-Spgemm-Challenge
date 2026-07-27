@@ -37,14 +37,9 @@ def main():
     for r in rows:
         r["_class"] = classify(r.get("density_pct", ""))
 
-    has_dense = bool(rows) and "baseline" in rows[0]
-    methods = [("Ocean", "#4a3aa7"), ("HSMU", "#1baf7a")]
-    if has_dense:
-        methods.append(("dense", "#898781"))
-    methods += [("merge3", "#e0533d"), ("Auto", "#2a78d6")]
-    colmap = {"Ocean": "Ocean", "HSMU": "HSMU", "merge3": "merge3", "Auto": "Auto"}
-    if has_dense:
-        colmap["dense"] = "baseline"
+    methods = [("cu", "#2a78d6"), ("opSparse", "#eb6834"), ("HSMU", "#1baf7a"),
+               ("dense", "#eda100"), ("Auto", "#1485A4")]
+    colmap = {"cu": "cu", "opSparse": "opSparse", "HSMU": "HSMU", "dense": "dense", "Auto": "Auto"}
 
     classes = [c for c in CLASS_ORDER if any(r["_class"] == c for r in rows)]
 
@@ -87,16 +82,17 @@ def main():
 
     x = np.arange(len(classes))
     nm = len(methods)
-    w = 0.13
+    w = 0.15
     fig, ax = plt.subplots(figsize=(11, 5.2))
     for i, (lab, color) in enumerate(methods):
         vals = np.array([v if not np.isnan(v) else 1e-3 for v in means[lab]])
-        ax.bar(x + (i - (nm - 1) / 2) * w, vals, width=w, color=color, label=lab, zorder=3)
+        ax.bar(x + (i - (nm - 1) / 2) * w, vals, width=w, color=color, label=lab, zorder=3,
+               edgecolor="white", linewidth=0.4)
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n({sum(1 for r in rows if r['_class']==c)})" for c in classes])
     ax.set_ylabel("耗时 (ms, 对数, 几何均值)")
-    ax.set_title("6 方法对照(按 A 密度类别):Ocean / HSMU / cuSPARSE / merge(serial) / merge3 / Auto")
+    ax.set_title("5 方法对照(按 A 密度类别):cuSPARSE / opSparse / HSMU / dense / Auto(ours)")
     ax.legend(frameon=False, fontsize=8.5, ncol=6, loc="upper center", bbox_to_anchor=(0.5, 1.00))
     ax.grid(axis="y", which="both", color="#e1e0d9", linewidth=0.6)
     fig.tight_layout()

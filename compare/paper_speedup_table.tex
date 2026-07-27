@@ -1,0 +1,13 @@
+% Geomean speedup of Auto (ours) over each baseline (baseline time $/$ Auto time; $>1\times$ = Auto faster). `All' = all four baselines beaten on that matrix.
+\begin{tabular}{l|rrrr|c}
+\toprule
+Category (\#mat) & cuSPARSE & dense & opSparse & HSMU & Auto best on \\
+\midrule
+Dense (3) & 2.52$\times$ & 5.25$\times$ & 3.27$\times$ & 1.57$\times$ & 3/3 \\
+Mildly sparse (32) & 2.21$\times$ & 4.56$\times$ & 2.21$\times$ & 2.20$\times$ & 30/32 \\
+Highly sparse (52) & 1.64$\times$ & 2.63$\times$ & 1.65$\times$ & 13.57$\times$ & 40/52 \\
+Extremely sparse (13) & 2.13$\times$ & 2.70$\times$ & 2.32$\times$ & 707.10$\times$ & 11/13 \\
+\midrule
+All (100) & 1.89$\times$ & 3.22$\times$ & 1.93$\times$ & 11.89$\times$ & 84/100 \\
+\bottomrule
+\end{tabular}

@@ -92,6 +92,43 @@ preserved + compute down); reverted otherwise. ATT optimization comes later.
   at this scale the sync/launch overhead dominates algorithmic complexity. **count-sort is the
   floor** for the small-row extract; ~0.47 ms is irreducible with known techniques.
 
+### #5 — `HASH_PRIV` warp-private SPA (Phase A plain `+=`, no atomicAdd)  · REVERTED
+- **What**: the dormant `hash_spa_priv_kernel` (gated `HASH_PRIV=1`, never benchmarked in
+  #1–#4). Each warp owns a private SMEM hash table; k-loop partitioned across warps so
+  intra-warp accesses to a column are temporally non-concurrent → Phase A accumulate uses
+  plain `+=` (no atomicAdd), only Phase B fan-in (≤W warps) uses atomicAdd. Directly tests the
+  "accumulate is atomicAdd-throughput-bound" claim.
+- **Result** (bench_aa_hash -n 3): accumulate got **slower** — bcsstk30 2.39→**4.28 ms**,
+  geomean 1.36→**1.71**. Applies only to bins with W·ht·12 ≤ 196 KB (ht≤2048, bins 0–6);
+  heavy bin-9 rows (ht=16384) still flat.
+- **Why**: W=8 private tables = 8× SMEM → **1 block/SM occupancy collapse** (heavy bins are
+  already SMEM-limited: ht=16384 → 192 KB → 1 block/SM at 256 threads). Removing the
+  atomicAdd instruction did NOT help because the bottleneck is latency/occupancy, not
+  atomic-instruction throughput — and the added Phase-B fan-in + 8× table init cost more than
+  the saved atomics. ncu could not confirm (dynamic-SMEM opt-in breaks kernel replay;
+  `--replay-mode app` unsupported in this 2023 build).
+- **Verdict**: **REVERTED**. Re-confirms the accumulate floor is **occupancy+latency**, not raw
+  atomic count — so any "reduce atomic count" lever that costs SMEM is doomed on heavy bins.
+
+### #6 — device buffer pool (dev_alloc arena, replaces ~13 cudaMalloc/Free per call)  · KEPT
+- **What**: a device bump-arena (`dev_alloc`/`dev_free`/`dev_pool_reset` in mempool.cu),
+  same bump-reset model as the host pinned pool. `hash_product` entry calls `dev_pool_reset()`;
+  all ~13 device temporaries (dA/d_off/d_est/d_mh/d_row_nnz/d_tmp_key/val/d_bkid…/dC/dC_rp)
+  are carved from the 16 GB arena via pointer bump (0 driver calls); `dev_free` is a no-op
+  (arena reclaimed by next reset). Same-binary A/B via `USE_MEMPOOL`. (Wired by
+  `scripts/devpool_wire.py`.)
+- **Result**: correctness PASS (bcsstk17/30 vs cuSPARSE, ~1e-18). **Wall-clock** (USE_MEMPOOL
+  0→1): bcsstk30 58.7→**9.2 ms**, bcsstk17 9.4→**1.9 ms**, bcsstk11 1.84→**0.91 ms**. Most of
+  the gain is the *existing host pinned pool* (avoids per-d2h `cudaMallocHost` page-locking);
+  the device arena adds the ~0.66 ms/call from eliminating ~13 `cudaMalloc`+`cudaFree` driver
+  round-trips.
+- **Compute-only neutral**: accumulate 2.42→2.42 ms (identical) — these allocs sit *outside*
+  the cudaEvent prof tags, so `TOTAL−h2d−d2h` is unchanged. The pool helps **wall-clock / small-
+  matrix competitiveness only**, NOT the compute-only comparison metric.
+- **Verdict**: **KEPT** — real wall-clock win, zero correctness cost, the one remaining lever
+  flagged in §35. Honest caveat: invisible to compute-only (report wall-clock separately if
+  citing the small-matrix advantage).
+
 ## Where the time really goes → what's left
 - accumulate 2.4 ms (bcsstk30) = **structural floor** (atomic-bound, proven). No known lever.
 - Remaining compute (compact+sort 0.39 + sizing 0.31) is small → diminishing returns.

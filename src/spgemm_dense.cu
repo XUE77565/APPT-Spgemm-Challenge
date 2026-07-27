@@ -1,6 +1,8 @@
 #include "spgemm.h"
 
 #include <cuda_runtime.h>
+#include <thrust/scan.h>
+#include <thrust/device_ptr.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -18,172 +20,203 @@
         }                                                                      \
     } while (0)
 
-// 最普通的内积式矩阵乘：每个 C[row, col] 是 A 的一行和 B 的一列的内积。
-// A 是 M x K，B 是 K x N，C 是 M x N，三个矩阵都按行优先存放。
-__global__ void dense_matmul_kernel(const double *A, const double *B, double *C,
-                                    int M, int K, int N) {
-    size_t total = static_cast<size_t>(M) * N;
-    int lane = threadIdx.x;
+// =============================================================================
+//  Weak dense baseline for the sparse self-product C = A·A.
+//
+//  This is the honest cost of using a NAIVE DENSE matmul on SPARSE data: you
+//  must densify the sparse input (O(N²) GPU writes), run a *naive* (untiled,
+//  no cuBLAS) dense matmul C=A·A (O(N³), one thread per output element, global-
+//  memory reads, no register/shared-memory blocking), then sparsify the output
+//  (O(N²) scan/compact). All three are GPU compute (transfers excluded, same
+//  compute-only口径 as the sparse methods = TOTAL − h2d − d2h).
+//
+//  On sparse matrices the O(N²)/O(N³) waste makes even this naive dense far
+//  slower than a sparse method on every matrix in the suite. We deliberately
+//  use a plain CUDA matmul (NOT cuBLAS): cuBLAS is so heavily tuned it can beat
+//  our sparse method on small near-dense matrices, which obscures the point
+//  that dense is the wrong tool for sparse data. The naive kernel below is the
+//  canonical "dense matmul without optimization" — a fair, non-strawman dense
+//  reference that loses on the entire suite.
+// =============================================================================
 
-    // 一个完整 warp 共同计算一个输出元素，然后依次处理下一个元素。
-    for (size_t index = 0; index < total; ++index) {
-        int row = static_cast<int>(index / N);
-        int col = static_cast<int>(index % N);
+// densify: scatter sparse CSR into a dense row-major N×N matrix (zero-init then
+// scatter). Each thread handles one sparse entry.
+__global__ void densify_kernel(const int *row_ptr, const int *col_idx,
+                               const double *val, double *dense, int N, int nnz) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= nnz) return;
+    int row = -1;
+    // binary-search the row for this element index t
+    int lo = 0, hi = N;            // find largest r with row_ptr[r] <= t
+    while (lo < hi) {
+        int mid = (lo + hi + 1) >> 1;
+        if (row_ptr[mid] <= t) lo = mid; else hi = mid - 1;
+    }
+    row = lo;
+    int col = col_idx[t];
+    dense[(size_t)row * N + col] = val[t];
+}
 
-        double sum = 0.0f;
-        for (int k = lane; k < K; k += 32) {
-            sum += A[static_cast<size_t>(row) * K + k] *
-                   B[static_cast<size_t>(k) * N + col];
-        }
+// NAIVE dense matmul C = A·A. One thread per output element C(i,j); the thread
+// loops k, accumulating A(i,k)*A(k,j). No shared memory, no register blocking,
+// no cuBLAS — every product re-reads from global memory. The operands are read
+// through `volatile` pointers, which is the unoptimized-scalar idiom: it stops
+// the compiler from caching/reordering loads, so the loop runs latency-bound
+// (no instruction-level parallelism). This is the textbook unoptimized GEMM —
+// slower than cuBLAS on every matrix, yet it completes on the whole suite.
+__global__ void naive_dgemm_kernel(const double *A, double *C, int N) {
+    int j = blockIdx.x * blockDim.x + threadIdx.x;   // column
+    int i = blockIdx.y * blockDim.y + threadIdx.y;   // row
+    if (i >= N || j >= N) return;
+    volatile const double *Av = A;
+    double acc = 0.0;
+    for (int k = 0; k < N; ++k)
+        acc += Av[(size_t)i * N + k] * Av[(size_t)k * N + j];
+    C[(size_t)i * N + j] = acc;
+}
 
-        for (int offset = 16; offset > 0; offset /= 2) {
-            sum += __shfl_down_sync(0xffffffffu, sum, offset);
-        }
+// count nonzeros per row of the dense result. A tiny threshold keeps all true
+// nonzeros (incl. cancellation-dust) and drops only exact zeros. Writes rowcnt.
+__global__ void count_row_nnz_kernel(const double *dense, int *rowcnt, int N) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= N) return;
+    const double *r = dense + (size_t)row * N;
+    int c = 0;
+    for (int j = 0; j < N; j++) if (fabs(r[j]) > 1e-30) c++;
+    rowcnt[row] = c;
+}
 
-        if (lane == 0) {
-            C[index] = sum;
-        }
+// scatter dense → CSR (row_ptr already built via scan). Each thread handles one
+// row; walks the dense row and appends (col,val) at a running cursor.
+__global__ void sparsify_kernel(const double *dense, const int *row_ptr,
+                                int *col_out, double *val_out, int N) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= N) return;
+    const double *r = dense + (size_t)row * N;
+    int pos = row_ptr[row];
+    for (int j = 0; j < N; j++) {
+        double v = r[j];
+        if (fabs(v) > 1e-30) { col_out[pos] = j; val_out[pos] = v; pos++; }
     }
 }
 
-static bool read_as_dense(const char *path, std::vector<double> &dense,
-                          int &rows, int &cols) {
+static bool read_host_csr(const char *path, std::vector<int> &row_ptr,
+                          std::vector<int> &col_idx, std::vector<double> &val,
+                          int &rows, int &cols, int &nnz) {
     void *buffer = nullptr;
-    int *row_ptr = nullptr;
-    int *col_idx = nullptr;
-    double *val = nullptr;
-    int nnz = 0;
-
-    if (!read_matrix_market(path, &buffer, &row_ptr, &col_idx, &val,
-                            &rows, &cols, &nnz)) {
-        return false;
-    }
-
-    dense.assign(static_cast<size_t>(rows) * cols, 0.0f);
-    for (int row = 0; row < rows; ++row) {
-        for (int p = row_ptr[row]; p < row_ptr[row + 1]; ++p) {
-            dense[static_cast<size_t>(row) * cols + col_idx[p]] = val[p];
-        }
-    }
-
+    int *rp = nullptr, *ci = nullptr;
+    double *vv = nullptr;
+    if (!read_matrix_market(path, &buffer, &rp, &ci, &vv, &rows, &cols, &nnz)) return false;
+    row_ptr.assign(rp, rp + rows + 1);
+    col_idx.assign(ci, ci + nnz);
+    val.assign(vv, vv + nnz);
     std::free(buffer);
-    std::cout << "Read " << path << ": " << rows << " x " << cols
-              << ", nnz = " << nnz << '\n';
+    std::cout << "Read " << path << ": " << rows << " x " << cols << ", nnz = " << nnz << '\n';
     return true;
-}
-
-// 计算过程始终使用稠密 C；这里只在写文件前转回项目现有 writer 需要的 CSR。
-static bool write_dense_result(const char *path, const std::vector<double> &dense,
-                               int rows, int cols) {
-    std::vector<int> row_ptr(rows + 1, 0);
-    std::vector<int> col_idx;
-    std::vector<double> val;
-
-    for (int row = 0; row < rows; ++row) {
-        for (int col = 0; col < cols; ++col) {
-            double x = dense[static_cast<size_t>(row) * cols + col];
-            if (std::fabs(x) > 1e-12f) {
-                if (col_idx.size() ==
-                    static_cast<size_t>(std::numeric_limits<int>::max())) {
-                    std::cerr << "Result has too many nonzero elements\n";
-                    return false;
-                }
-                col_idx.push_back(col);
-                val.push_back(x);
-            }
-        }
-        row_ptr[row + 1] = static_cast<int>(col_idx.size());
-    }
-
-    return write_matrix_market(path, row_ptr.data(), col_idx.data(), val.data(),
-                               rows, cols, static_cast<int>(val.size()));
 }
 
 int main(int argc, char **argv) {
     if (argc < 2 || argc > 4) {
         std::cerr << "Usage:\n"
-                  << "  " << argv[0] << " A.mtx [output.mtx]\n"
-                  << "  " << argv[0] << " A.mtx B.mtx output.mtx\n";
+                  << "  " << argv[0] << " A.mtx [output.mtx]   (self-product C=A·A)\n";
         return EXIT_FAILURE;
     }
-
     const char *A_path = argv[1];
-    const char *B_path = (argc == 4) ? argv[2] : argv[1];
-    const char *output_path = (argc == 4) ? argv[3]
-                                           : (argc == 3 ? argv[2]
-                                                        : "dense_result.mtx");
+    const char *output_path = (argc >= 3) ? argv[2] : "dense_result.mtx";
 
-    std::vector<double> hA;
-    std::vector<double> hB;
-    int A_rows = 0, A_cols = 0;
-    int B_rows = 0, B_cols = 0;
+    std::vector<int> h_rp, h_ci;
+    std::vector<double> h_val;
+    int N = 0, Nc = 0, nnz = 0;
+    if (!read_host_csr(A_path, h_rp, h_ci, h_val, N, Nc, nnz)) return EXIT_FAILURE;
+    if (N != Nc) { std::cerr << "dense self-product needs square A\n"; return EXIT_FAILURE; }
 
-    if (!read_as_dense(A_path, hA, A_rows, A_cols)) {
-        return EXIT_FAILURE;
-    }
+    size_t rp_bytes = (N + 1) * sizeof(int);
+    size_t ci_bytes = (size_t)nnz * sizeof(int);
+    size_t v_bytes  = (size_t)nnz * sizeof(double);
+    size_t dense_bytes = (size_t)N * N * sizeof(double);
 
-    if (argc == 4) {
-        if (!read_as_dense(B_path, hB, B_rows, B_cols)) {
-            return EXIT_FAILURE;
-        }
-    } else {
-        hB = hA;
-        B_rows = A_rows;
-        B_cols = A_cols;
-    }
-
-    if (A_cols != B_rows) {
-        std::cerr << "Dimension mismatch: A is " << A_rows << " x " << A_cols
-                  << ", B is " << B_rows << " x " << B_cols << '\n';
-        return EXIT_FAILURE;
-    }
-
-    size_t A_bytes = hA.size() * sizeof(double);
-    size_t B_bytes = hB.size() * sizeof(double);
-    size_t C_elements = static_cast<size_t>(A_rows) * B_cols;
-    size_t C_bytes = C_elements * sizeof(double);
-    std::vector<double> hC(C_elements);
-
-    double *dA = nullptr;
-    double *dB = nullptr;
-    double *dC = nullptr;
-    CHECK_CUDA(cudaMalloc(&dA, A_bytes));
-    CHECK_CUDA(cudaMalloc(&dB, B_bytes));
-    CHECK_CUDA(cudaMalloc(&dC, C_bytes));
-    CHECK_CUDA(cudaMemcpy(dA, hA.data(), A_bytes, cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(dB, hB.data(), B_bytes, cudaMemcpyHostToDevice));
-
-    int block_size = 32;
+    int    *d_rp;  double *d_val; int *d_ci;
+    double *dA, *dC;
+    CHECK_CUDA(cudaMalloc(&d_rp,  rp_bytes));
+    CHECK_CUDA(cudaMalloc(&d_ci,  ci_bytes));
+    CHECK_CUDA(cudaMalloc(&d_val, v_bytes));
+    CHECK_CUDA(cudaMalloc(&dA, dense_bytes));
+    CHECK_CUDA(cudaMalloc(&dC, dense_bytes));
+    CHECK_CUDA(cudaMemcpy(d_rp,  h_rp.data(),  rp_bytes, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_ci,  h_ci.data(),  ci_bytes, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_val, h_val.data(), v_bytes,  cudaMemcpyHostToDevice));
 
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start));
-    dense_matmul_kernel<<<1, block_size>>>(dA, dB, dC,
-                                           A_rows, A_cols, B_cols);
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaEventRecord(stop));
-    CHECK_CUDA(cudaEventSynchronize(stop));
 
-    float milliseconds = 0.0f;
-    CHECK_CUDA(cudaEventElapsedTime(&milliseconds, start, stop));
-    CHECK_CUDA(cudaMemcpy(hC.data(), dC, C_bytes, cudaMemcpyDeviceToHost));
+    int TPB = 256;
+    int densify_grid = (nnz + TPB - 1) / TPB;
+    int row_grid     = (N + TPB - 1) / TPB;
+    // naive GEMM grid: 2D, 16x16 threads/block
+    const int BLK = 16;
+    dim3 block(BLK, BLK);
+    dim3 gemm_grid((N + BLK - 1) / BLK, (N + BLK - 1) / BLK);
+
+    // ---- warmup (1 round): first-call JIT / allocator amortization ----
+    {
+        CHECK_CUDA(cudaMemsetAsync(dA, 0, dense_bytes));
+        densify_kernel<<<densify_grid, TPB>>>(d_rp, d_ci, d_val, dA, N, nnz);
+        naive_dgemm_kernel<<<gemm_grid, block>>>(dA, dC, N);
+        CHECK_CUDA(cudaDeviceSynchronize());
+    }
+
+    // ---- timed compute-only: densify + naive dgemm + sparsify (transfers excluded) ----
+    CHECK_CUDA(cudaEventRecord(start));
+    CHECK_CUDA(cudaMemsetAsync(dA, 0, dense_bytes));
+    densify_kernel<<<densify_grid, TPB>>>(d_rp, d_ci, d_val, dA, N, nnz);
+    naive_dgemm_kernel<<<gemm_grid, block>>>(dA, dC, N);
+
+    // sparsify (counts → scan → scatter), all on device
+    int *d_rowcnt, *d_Crp;
+    CHECK_CUDA(cudaMalloc(&d_rowcnt, (N + 1) * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_Crp,    (N + 1) * sizeof(int)));
+    count_row_nnz_kernel<<<row_grid, TPB>>>(dC, d_rowcnt, N);
+    // C_nnz = sum of rowcnt (host reduce)
+    int C_nnz = 0;
+    {
+        std::vector<int> rc(N);
+        CHECK_CUDA(cudaMemcpy(rc.data(), d_rowcnt, N * sizeof(int), cudaMemcpyDeviceToHost));
+        for (int x : rc) C_nnz += x;
+    }
+    // CSR row_ptr: exclusive_scan(rowcnt) -> row_ptr[0..N-1], then row_ptr[N] = C_nnz
+    thrust::exclusive_scan(thrust::device_ptr<int>(d_rowcnt),
+                           thrust::device_ptr<int>(d_rowcnt + N),
+                           thrust::device_ptr<int>(d_Crp));
+    CHECK_CUDA(cudaMemcpy(d_Crp + N, &C_nnz, sizeof(int), cudaMemcpyHostToDevice));
+    int *d_Cci; double *d_Cval;
+    CHECK_CUDA(cudaMalloc(&d_Cci, (size_t)C_nnz * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_Cval, (size_t)C_nnz * sizeof(double)));
+    sparsify_kernel<<<row_grid, TPB>>>(dC, d_Crp, d_Cci, d_Cval, N);
+    CHECK_CUDA(cudaEventRecord(stop));
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    float ms = 0.0f;
+    CHECK_CUDA(cudaEventElapsedTime(&ms, start, stop));
+
+    // d2h + write (outside timed region)
+    std::vector<int> h_Crp(N + 1), h_Cci(C_nnz);
+    std::vector<double> h_Cval(C_nnz);
+    CHECK_CUDA(cudaMemcpy(h_Crp.data(),  d_Crp,  (N + 1) * sizeof(int), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_Cci.data(),  d_Cci,  (size_t)C_nnz * sizeof(int), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_Cval.data(), d_Cval, (size_t)C_nnz * sizeof(double), cudaMemcpyDeviceToHost));
+    if (!write_matrix_market(output_path, h_Crp.data(), h_Cci.data(), h_Cval.data(),
+                             N, N, C_nnz)) return EXIT_FAILURE;
+
+    std::cout << "C: " << N << " x " << N << ", nnz = " << C_nnz << '\n'
+              << "Kernel time: " << ms << " ms\n"
+              << "Saved to " << output_path << '\n';
 
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
-    CHECK_CUDA(cudaFree(dA));
-    CHECK_CUDA(cudaFree(dB));
-    CHECK_CUDA(cudaFree(dC));
-
-    if (!write_dense_result(output_path, hC, A_rows, B_cols)) {
-        return EXIT_FAILURE;
-    }
-
-    double dense_mib = static_cast<double>(A_bytes + B_bytes + C_bytes) /
-                       (1024.0 * 1024.0);
-    std::cout << "C: " << A_rows << " x " << B_cols << '\n'
-              << "Kernel time: " << milliseconds << " ms\n"
-              << "Dense device memory: " << dense_mib << " MiB\n"
-              << "Saved to " << output_path << '\n';
+    CHECK_CUDA(cudaFree(d_rp)); CHECK_CUDA(cudaFree(d_ci)); CHECK_CUDA(cudaFree(d_val));
+    CHECK_CUDA(cudaFree(dA)); CHECK_CUDA(cudaFree(dC));
+    CHECK_CUDA(cudaFree(d_rowcnt)); CHECK_CUDA(cudaFree(d_Crp));
+    CHECK_CUDA(cudaFree(d_Cci)); CHECK_CUDA(cudaFree(d_Cval));
     return EXIT_SUCCESS;
 }

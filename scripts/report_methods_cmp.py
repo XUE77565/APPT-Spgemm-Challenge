@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""读 methods_cmp.csv → 仿 full_compare_K=5.txt 格式的报告:
-  1) 每矩阵表(class/name/n + 各法 compute-only + 比值),按类别排序
-  2) 按类别聚合(均值 + 比值均值)
-  3) Auto / m3 vs Ocean + vs HSMU 的赢/输(ratio>1 降序,赢/输计数 + 几何均值)
-所有 spgemm 法时间 = compute-only(排除 h2d/d2h,由 compare_methods.py 解析);Ocean=GPU 阶段求和;HSMU=time2。
+"""读 methods_cmp.csv → 仿 full_compare 格式的报告(基线 = cuSPARSE / opSparse / HSMU / dense):
+  1) 每矩阵表(class/name/n + 各法 compute-only + Auto 对各法比值),按类别排序
+  2) 按类别聚合(几何均值 + Auto 对各法比值均值)
+  3) Auto vs cuSPARSE / opSparse / HSMU / dense 的赢/输(ratio>1 降序,赢/输计数 + 几何均值 + 输的清单)
+所有 spgemm 法时间 = compute-only(排除 h2d/d2h);dense=naive scalar GEMM kernel time;HSMU=time2;opSparse=total。
 用法:report_methods_cmp.py <methods_cmp.csv> [out.txt]
 """
 import os, sys, csv, math
@@ -28,12 +28,15 @@ def gmean(xs):
     xs = [x for x in xs if x and x > 0]
     return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else float("nan")
 
-def mean(xs):
-    xs = [x for x in xs if x is not None]
-    return sum(xs) / len(xs) if xs else float("nan")
-
 def fmt(v, w=7, p=2):
     return f"{v:>{w}.{p}f}" if v is not None and v == v else f"{'-':>{w}}"
+
+def ratio_gmean(rows, col, ref):
+    xs = []
+    for r in rows:
+        a, b = fnum(r, col), fnum(r, ref)
+        if a and b and b > 0: xs.append(a / b)
+    return gmean(xs)
 
 def main():
     csv_path = sys.argv[1] if len(sys.argv) > 1 else "compare/methods_cmp.csv"
@@ -42,87 +45,67 @@ def main():
     for r in rows:
         r["_class"] = classify(r.get("density_pct", ""))
         r["_n"] = int(r["n"]) if r.get("n", "").isdigit() else 0
-    # 按 (class_order, n) 排序
     rows.sort(key=lambda r: (CLASS_ORDER.index(r["_class"]) if r["_class"] in CLASS_ORDER else 99, r["_n"]))
-    has_dense = bool(rows) and "baseline" in rows[0]   # CSV 是否有 dense baseline 列(--no-dense 时无)
 
+    REFS = [("cu", "cu"), ("opSparse", "opSp"), ("HSMU", "HSMU"), ("dense", "dense")]
     out = []
-    tag = "[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h,同 Ocean 口径)" + ("; dense=dense baseline(-O0) cudaEvent kernel" if has_dense else "; 无 dense(--no-dense)") + "]  ms"
-    out.append(tag)
-    if has_dense:
-        out.append("class name                        n  dense   Ocean    HSMU     m3    Auto Auto/Oce Auto/base  m3/Oce")
-    else:
-        out.append("class name                        n  Ocean    HSMU     m3    Auto Auto/Oce  m3/Oce")
-    out.append("-" * 116)
+    out.append("[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h);dense=naive scalar GEMM kernel;HSMU=time2;opSparse=total]  ms")
+    out.append(f"{'cls':>4} {'name':<24}{'n':>7}{'cu':>9}{'opSp':>9}{'HSMU':>9}{'dense':>10}{'Auto':>9}"
+               + "".join(f"{'A/'+short:>8}" for _, short in REFS))
+    out.append("-" * 110)
     for r in rows:
-        oc, hs, m3, au = (fnum(r, k) for k in ("Ocean", "HSMU", "merge3", "Auto"))
-        base = fnum(r, "baseline") if has_dense else None
-        n_str = f"{r['_n']:,}"
-        def ratio(a, b): return a / b if (a and b and b > 0) else None
-        if has_dense:
-            out.append(f"{CLASS_TAG.get(r['_class'],'?'):>5} {r['matrix']:<24}{n_str:>7}"
-                       f"{fmt(base)}{fmt(oc)}{fmt(hs)}{fmt(m3)}{fmt(au)}"
-                       f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(au, base), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
-        else:
-            out.append(f"{CLASS_TAG.get(r['_class'],'?'):>5} {r['matrix']:<24}{n_str:>7}"
-                       f"{fmt(oc)}{fmt(hs)}{fmt(m3)}{fmt(au)}"
-                       f"{fmt(ratio(au, oc), 7, 2)}{fmt(ratio(m3, oc), 7, 2)}")
+        vals = {k: fnum(r, k) for k in ("cu", "opSparse", "HSMU", "dense", "Auto")}
+        au = vals["Auto"]
+        out.append(f"{CLASS_TAG.get(r['_class'],'?'):>4} {r['matrix']:<24}{r['_n']:>7}"
+                   f"{fmt(vals['cu'],9,2)}{fmt(vals['opSparse'],9,2)}{fmt(vals['HSMU'],9,2)}"
+                   f"{fmt(vals['dense'],10,2)}{fmt(au,9,2)}"
+                   + "".join(fmt(au / vals[k] if (au and vals[k] and vals[k] > 0) else None, 8, 2) for k, _ in REFS))
 
     # ---- 按类别聚合 ----
-    out.append("")
-    out.append("=" * 116)
-    out.append("按类别聚合(compute-only 均值,毫秒;比值为该类各阵比值的均值)")
-    out.append("-" * 116)
-    if has_dense:
-        out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'dense':>10}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'Auto/base':>9}{'m3/Oce':>9}")
-    else:
-        out.append(f"{'class':<20}{'#':>4}{'Ocean':>9}{'HSMU':>9}{'m3':>8}{'Auto':>8}{'Auto/Oce':>10}{'m3/Oce':>9}")
+    out.append(""); out.append("=" * 110)
+    out.append("按类别聚合(几何均值 ms;A/X = Auto 对该法比值均值,<1 = Auto 快)")
+    out.append("-" * 110)
+    out.append(f"{'class':<20}{'#':>4}{'cu':>9}{'opSp':>9}{'HSMU':>9}{'dense':>10}{'Auto':>9}"
+               + "".join(f"{'A/'+short:>8}" for _, short in REFS))
     for c in CLASS_ORDER:
         sub = [r for r in rows if r["_class"] == c]
         if not sub: continue
-        oc = mean([fnum(r, "Ocean") for r in sub]); hs = mean([fnum(r, "HSMU") for r in sub])
-        base = mean([fnum(r, "baseline") for r in sub]) if has_dense else None
-        m3 = mean([fnum(r, "merge3") for r in sub]); au = mean([fnum(r, "Auto") for r in sub])
-        ra = mean([fnum(r, "Auto") / fnum(r, "Ocean") for r in sub
-                   if fnum(r, "Auto") and fnum(r, "Ocean")])
-        rmo = mean([fnum(r, "merge3") / fnum(r, "Ocean") for r in sub
-                    if fnum(r, "merge3") and fnum(r, "Ocean")])
-        if has_dense:
-            rab = mean([fnum(r, "Auto") / fnum(r, "baseline") for r in sub
-                        if fnum(r, "Auto") and fnum(r, "baseline")])
-            out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}{fmt(base,10,2)}"
-                       f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rab,9,2)}{fmt(rmo,9,2)}")
-        else:
-            out.append(f"{c:<20}{len(sub):>4}{fmt(oc,9,2)}{fmt(hs,9,2)}"
-                       f"{fmt(m3,8,2)}{fmt(au,8,2)}{fmt(ra,10,2)}{fmt(rmo,9,2)}")
+        gm = {k: gmean([fnum(r, k) for r in sub if fnum(r, k)]) for k in ("cu", "opSparse", "HSMU", "dense", "Auto")}
+        out.append(f"{c:<20}{len(sub):>4}{fmt(gm['cu'],9,2)}{fmt(gm['opSparse'],9,2)}{fmt(gm['HSMU'],9,2)}"
+                   f"{fmt(gm['dense'],10,2)}{fmt(gm['Auto'],9,2)}"
+                   + "".join(fmt(gm['Auto'] / gm[k] if (gm['Auto'] == gm['Auto'] and gm[k] == gm[k] and gm[k] > 0) else None, 8, 2)
+                             for k, _ in REFS))
+    # 总体
+    gm = {k: gmean([fnum(r, k) for r in rows if fnum(r, k)]) for k in ("cu", "opSparse", "HSMU", "dense", "Auto")}
+    out.append(f"{'ALL('+str(len(rows))+')':<20}{len(rows):>4}{fmt(gm['cu'],9,2)}{fmt(gm['opSparse'],9,2)}{fmt(gm['HSMU'],9,2)}"
+               f"{fmt(gm['dense'],10,2)}{fmt(gm['Auto'],9,2)}"
+               + "".join(fmt(gm['Auto'] / gm[k] if (gm['Auto'] == gm['Auto'] and gm[k] == gm[k] and gm[k] > 0) else None, 8, 2)
+                         for k, _ in REFS))
 
-    # ---- vs 参照法(Ocean / HSMU)的赢/输 ----
-    def vs_section(label, col, ref_col, ref_name):
+    # ---- Auto vs 各基线 赢/输 ----
+    def vs_section(ref_col, ref_name):
         pairs = []
         for r in rows:
-            t = fnum(r, col); ref = fnum(r, ref_col)
+            t, ref = fnum(r, "Auto"), fnum(r, ref_col)
             if t and ref and ref > 0:
                 pairs.append((r, t / ref))
         if not pairs:
             return
-        win = [p for p in pairs if p[1] <= 1.0]      # 我方 ≤ 参照 = 赢
-        lose = [p for p in pairs if p[1] > 1.0]       # 我方 > 参照 = 输
-        lose.sort(key=lambda p: -p[1])
-        out.append("")
-        out.append("=" * 100)
-        out.append(f"{label} vs {ref_name}:赢 {len(win)} / 输 {len(lose)},几何均值 {gmean([p[1] for p in pairs]):.3f}×")
+        win = [p for p in pairs if p[1] <= 1.0]
+        lose = sorted([p for p in pairs if p[1] > 1.0], key=lambda p: -p[1])
+        out.append(""); out.append("=" * 100)
+        out.append(f"Auto vs {ref_name}:赢 {len(win)} / 输 {len(lose)},几何均值(Auto/{ref_name}) {gmean([p[1] for p in pairs]):.3f}×")
         out.append("-" * 100)
-        out.append(f"{'name':<16}{'n':>8}{'C_nnz':>10}{ref_name:>10}{label:>14}{'ratio':>9}")
+        out.append(f"{'name':<16}{'n':>8}{'C_nnz':>12}{ref_name:>12}{'Auto':>12}{'ratio':>9}")
         for r, ratio in lose[:20]:
-            cnnz = r.get("cnnz", "")
-            out.append(f"{r['matrix']:<16}{r['_n']:>8}{cnnz:>10}{fmt(fnum(r,ref_col),10,3)}{fmt(fnum(r,col),14,3)}{ratio:>8.2f}×")
+            out.append(f"{r['matrix']:<16}{r['_n']:>8}{r.get('cnnz',''):>12}"
+                       f"{fmt(fnum(r, ref_col),12,3)}{fmt(fnum(r, 'Auto'),12,3)}{ratio:>8.2f}×")
         if len(lose) > 20:
             out.append(f"  ... 另有 {len(lose)-20} 个")
 
-    vs_section("Auto", "Auto", "Ocean", "Ocean")
-    vs_section("m3",   "merge3", "Ocean", "Ocean")
-    if has_dense:
-        vs_section("Auto", "Auto", "baseline", "baseline")
+    DISPLAY = {"cu": "cuSPARSE", "opSparse": "opSparse", "HSMU": "HSMU", "dense": "dense"}
+    for col, _ in REFS:
+        vs_section(col, DISPLAY[col])
 
     report = "\n".join(out) + "\n"
     open(out_path, "w").write(report)

@@ -1,0 +1,150 @@
+对比 100 阵 × ['cu', 'Auto', 'opSparse', 'HSMU', 'dense'] → compare/method_cmp_20260727_140713/methods_cmp.csv
+
+[1/100] 1138_bus       n=1138     cu=  0.287 Auto=   0.14(merge3) opSp=  0.704 HSMU=  0.299 (3.3s)
+[2/100] 494_bus        n=494      cu=  0.333 Auto=  0.113(merge3) opSp=  0.766 HSMU=  0.308 (3.3s)
+[3/100] 662_bus        n=662      cu=  0.296 Auto=  0.139(merge3) opSp=  0.579 HSMU=  0.301 (3.2s)
+[4/100] 685_bus        n=685      cu=  0.298 Auto=  0.169(merge3) opSp=  1.056 HSMU=  0.298 (3.3s)
+[5/100] arc130         n=130      cu=  0.314 Auto=  0.158(merge3) opSp=  0.814 HSMU=  0.418 (3.2s)
+[6/100] ash292         n=292      cu=  0.306 Auto=  0.155(merge3) opSp=  0.604 HSMU=  0.312 (3.3s)
+[7/100] ash85          n=85       cu=  0.284 Auto=  0.119(merge3) opSp=  0.584 HSMU=  0.302 (3.2s)
+[8/100] bcspwr01       n=39       cu=  0.269 Auto=   0.12(merge3) opSp=  0.536 HSMU=  0.276 (3.2s)
+[9/100] bcspwr02       n=49       cu=  0.273 Auto=  0.116(merge3) opSp=  0.566 HSMU=  0.285 (3.2s)
+[10/100] bcspwr03       n=118      cu=   0.32 Auto=  0.122(merge3) opSp=  0.592 HSMU=  0.288 (3.2s)
+[11/100] bcspwr04       n=274      cu=  0.293 Auto=   0.13(merge3) opSp=  0.589 HSMU=  0.337 (3.3s)
+[12/100] bcspwr05       n=443      cu=  0.409 Auto=  0.115(merge3) opSp=  0.596 HSMU=  0.232 (3.2s)
+[13/100] bcspwr06       n=1454     cu=  0.302 Auto=  0.142(merge3) opSp=  0.562 HSMU=  0.304 (3.2s)
+[14/100] bcspwr07       n=1612     cu=  0.293 Auto=  0.146(merge3) opSp=  0.597 HSMU=  0.314 (3.2s)
+[15/100] bcspwr08       n=1624     cu=  0.307 Auto=  0.154(merge3) opSp=  0.595 HSMU=  0.294 (3.2s)
+[16/100] bcspwr09       n=1723     cu=  0.299 Auto=  0.168(merge3) opSp=  0.583 HSMU=  0.315 (3.2s)
+[17/100] bcspwr10       n=5300     cu=  0.367 Auto=  0.187(merge3) opSp=  0.601 HSMU=  0.932 (3.2s)
+[18/100] bcsstk01       n=48       cu=  0.286 Auto=   0.12(merge3) opSp=  0.695 HSMU=  0.226 (3.2s)
+[19/100] bcsstk02       n=66       cu=  0.329 Auto=  0.165(merge3) opSp=  0.602 HSMU=  0.666 (3.3s)
+[20/100] bcsstk03       n=112      cu=  0.341 Auto=  0.119(merge3) opSp=  0.956 HSMU=  0.282 (3.2s)
+[21/100] bcsstk04       n=132      cu=  0.377 Auto=  0.156(merge3) opSp=  0.615 HSMU=  0.374 (3.3s)
+[22/100] bcsstk05       n=153      cu=    0.3 Auto=  0.134(merge3) opSp=  0.583 HSMU=  0.333 (3.3s)
+[23/100] bcsstk06       n=420      cu=  0.423 Auto=   0.15(merge3) opSp=  0.652 HSMU=   0.34 (3.2s)
+[24/100] bcsstk07       n=420      cu=  0.388 Auto=  0.166(merge3) opSp=  0.606 HSMU=  0.339 (3.3s)
+[25/100] bcsstk08       n=1074     cu=  0.606 Auto=  0.851(hash  ) opSp=  0.764 HSMU=  0.812 (3.4s)
+[26/100] bcsstk09       n=1083     cu=  0.456 Auto=   0.17(merge3) opSp=  0.624 HSMU=  0.334 (3.3s)
+[27/100] bcsstk10       n=1086     cu=  0.413 Auto=  0.181(merge3) opSp=  0.719 HSMU=  0.361 (3.3s)
+[28/100] bcsstk11       n=1473     cu=  0.636 Auto=  0.199(merge3) opSp=  0.597 HSMU=  0.436 (3.4s)
+[29/100] bcsstk12       n=1473     cu=  0.559 Auto=  0.198(merge3) opSp=  0.797 HSMU=  0.522 (3.3s)
+[30/100] bcsstk13       n=2003     cu=  0.875 Auto=   1.27(hash  ) opSp=  0.863 HSMU=  0.915 (3.6s)
+[31/100] bcsstk14       n=1806     cu=  0.788 Auto=  0.369(merge3) opSp=  0.983 HSMU=  0.531 (3.5s)
+[32/100] bcsstk15       n=3948     cu=  1.003 Auto=  0.637(hash  ) opSp=  0.816 HSMU=  0.707 (3.6s)
+[33/100] bcsstk16       n=4884     cu=  1.667 Auto=  0.891(hash  ) opSp=  1.396 HSMU=   1.41 (4.1s)
+[34/100] bcsstk17       n=10974    cu=  2.387 Auto=  0.992(hash  ) opSp=  1.101 HSMU=  1.526 (4.4s)
+[35/100] bcsstk18       n=11948    cu=  0.938 Auto=  0.945(hash  ) opSp=  0.829 HSMU=  1.233 (3.7s)
+[36/100] bcsstk19       n=817      cu=  0.368 Auto=  0.141(merge3) opSp=  0.585 HSMU=  0.315 (3.2s)
+[37/100] bcsstk20       n=485      cu=  0.301 Auto=  0.135(merge3) opSp=  0.603 HSMU=  0.329 (3.2s)
+[38/100] bcsstk21       n=3600     cu=  0.447 Auto=  0.194(merge3) opSp=  0.593 HSMU=  0.423 (3.3s)
+[39/100] bcsstk22       n=138      cu=  0.294 Auto=  0.126(merge3) opSp=  0.715 HSMU=  0.314 (3.2s)
+[40/100] bcsstk23       n=3134     cu=  0.586 Auto=   0.25(merge3) opSp=  0.721 HSMU=  0.538 (3.4s)
+[41/100] bcsstk24       n=3562     cu=  1.138 Auto=  0.625(hash  ) opSp=  0.852 HSMU=  0.781 (3.7s)
+[42/100] bcsstk25       n=15439    cu=  1.314 Auto=  0.756(hash  ) opSp=  1.012 HSMU=  1.497 (4.2s)
+[43/100] bcsstk26       n=1922     cu=  0.541 Auto=  0.196(merge3) opSp=  0.612 HSMU=  0.515 (3.3s)
+[44/100] bcsstk27       n=1224     cu=  0.691 Auto=  0.315(merge3) opSp=  1.089 HSMU=  0.741 (3.3s)
+[45/100] bcsstk28       n=4410     cu=  1.416 Auto=  0.777(hash  ) opSp=  0.966 HSMU=  1.391 (3.7s)
+[46/100] bcsstk29       n=13992    cu=  2.828 Auto=   1.14(hash  ) opSp=  1.277 HSMU=   1.72 (4.3s)
+[47/100] bcsstk30       n=28924    cu=  8.534 Auto=  3.495(hash  ) opSp=  3.188 HSMU=   4.65 (8.2s)
+[48/100] bcsstk31       n=35588    cu=   4.93 Auto=  1.667(hash  ) opSp=  1.637 HSMU=  2.755 (5.8s)
+[49/100] bcsstk32       n=44609    cu=  8.347 Auto=  2.456(hash  ) opSp=  3.077 HSMU=  3.775 (7.0s)
+[50/100] bcsstk33       n=8738     cu=  2.861 Auto=  1.335(hash  ) opSp=  1.983 HSMU=   1.93 (4.4s)
+[51/100] bcsstm01       n=48       cu=  0.271 Auto=  0.112(merge3) opSp=  1.256 HSMU=  0.296 (3.2s)
+[52/100] bcsstm02       n=66       cu=  0.275 Auto=  0.126(merge3) opSp=  1.485 HSMU=  0.279 (3.2s)
+[53/100] bcsstm03       n=112      cu=  0.275 Auto=  0.109(merge3) opSp=  1.552 HSMU=  0.691 (3.3s)
+[54/100] bcsstm04       n=132      cu=  0.282 Auto=  0.113(merge3) opSp=  1.599 HSMU=  0.276 (3.2s)
+[55/100] bcsstm05       n=153      cu=    0.4 Auto=  0.115(merge3) opSp=  1.226 HSMU=  0.274 (3.2s)
+[56/100] bcsstm06       n=420      cu=  0.307 Auto=  0.114(merge3) opSp=  0.995 HSMU=  0.293 (3.2s)
+[57/100] bcsstm07       n=420      cu=    0.4 Auto=  0.152(merge3) opSp=  0.961 HSMU=  0.337 (3.2s)
+[58/100] bcsstm08       n=1074     cu=   0.35 Auto=  0.121(merge3) opSp=  0.722 HSMU=  0.304 (3.2s)
+[59/100] bcsstm09       n=1083     cu=    0.3 Auto=  0.138(merge3) opSp=  1.131 HSMU=  0.294 (3.3s)
+[60/100] bcsstm10       n=1086     cu=  0.437 Auto=  0.195(merge3) opSp=  0.954 HSMU=  0.359 (3.3s)
+[61/100] bcsstm11       n=1473     cu=  0.302 Auto=  0.124(merge3) opSp=  0.732 HSMU=  0.309 (3.2s)
+[62/100] bcsstm12       n=1473     cu=  0.417 Auto=   0.18(merge3) opSp=  0.729 HSMU=  0.353 (3.3s)
+[63/100] bcsstm13       n=2003     cu=  0.563 Auto=  0.321(merge3) opSp=  0.763 HSMU=  0.583 (3.3s)
+[64/100] bcsstm19       n=817      cu=  0.285 Auto=   0.11(merge3) opSp=  0.562 HSMU=  0.296 (3.3s)
+[65/100] bcsstm20       n=485      cu=  0.328 Auto=  0.114(merge3) opSp=  1.099 HSMU=  0.293 (3.2s)
+[66/100] bcsstm21       n=3600     cu=  0.294 Auto=  0.161(merge3) opSp=  0.877 HSMU=   0.48 (3.3s)
+[67/100] bcsstm22       n=138      cu=  0.329 Auto=  0.116(merge3) opSp=  1.067 HSMU=  0.273 (3.2s)
+[68/100] bcsstm23       n=3134     cu=  0.345 Auto=  0.141(merge3) opSp=  1.417 HSMU=   0.49 (3.2s)
+[69/100] bcsstm24       n=3562     cu=  0.292 Auto=  0.147(merge3) opSp=  1.696 HSMU=  0.477 (3.2s)
+[70/100] bcsstm25       n=15439    cu=  0.307 Auto=  0.266(merge3) opSp=  0.946 HSMU=  0.508 (3.3s)
+[71/100] bcsstm26       n=1922     cu=  0.314 Auto=   0.13(merge3) opSp=  1.552 HSMU=   0.31 (3.2s)
+[72/100] bcsstm27       n=1224     cu=  0.698 Auto=  0.315(merge3) opSp=  1.194 HSMU=  0.678 (3.4s)
+[73/100] blckhole       n=2132     cu=  0.406 Auto=  0.191(merge3) opSp=  0.683 HSMU=  0.493 (3.2s)
+[74/100] bp_0           n=822      cu=  0.309 Auto=  0.755(hash  ) opSp=  1.299 HSMU=  0.443 (3.2s)
+[75/100] bp_1000        n=822      cu=  0.343 Auto=  0.826(hash  ) opSp=  0.765 HSMU=  0.495 (3.3s)
+[76/100] bp_1200        n=822      cu=  0.311 Auto=  0.842(hash  ) opSp=  1.163 HSMU=  0.475 (3.3s)
+[77/100] bp_1400        n=822      cu=  0.327 Auto=  0.843(hash  ) opSp=  1.088 HSMU=  0.491 (3.2s)
+[78/100] bp_1600        n=822      cu=  0.336 Auto=  0.816(hash  ) opSp=  1.521 HSMU=   0.47 (3.2s)
+[79/100] bp_200         n=822      cu=  0.323 Auto=  0.763(hash  ) opSp=  1.638 HSMU=  0.391 (3.2s)
+[80/100] bp_400         n=822      cu=  0.324 Auto=  0.872(hash  ) opSp=  1.195 HSMU=  0.484 (3.3s)
+[81/100] bp_600         n=822      cu=  0.319 Auto=  0.808(hash  ) opSp=  0.979 HSMU=  0.483 (3.2s)
+[82/100] bp_800         n=822      cu=   0.31 Auto=  0.825(hash  ) opSp=    1.5 HSMU=  0.479 (3.2s)
+[83/100] can_1054       n=1054     cu=  0.417 Auto=  0.176(merge3) opSp=  0.623 HSMU=  0.367 (3.3s)
+[84/100] can_1072       n=1072     cu=  0.447 Auto=  0.199(merge3) opSp=  1.097 HSMU=  0.361 (3.2s)
+[85/100] can_144        n=144      cu=  0.284 Auto=  0.136(merge3) opSp=  0.857 HSMU=  0.318 (3.2s)
+[86/100] can_161        n=161      cu=  0.297 Auto=  0.135(merge3) opSp=  1.123 HSMU=   0.31 (3.2s)
+[87/100] can_187        n=187      cu=  0.299 Auto=  0.138(merge3) opSp=   0.72 HSMU=  0.301 (3.2s)
+[88/100] can_229        n=229      cu=  0.302 Auto=  0.142(merge3) opSp=  0.783 HSMU=  0.306 (3.2s)
+[89/100] can_24         n=24       cu=  0.293 Auto=   0.12(merge3) opSp=  1.121 HSMU=  0.285 (3.2s)
+[90/100] can_256        n=256      cu=  0.314 Auto=  0.178(merge3) opSp=  0.809 HSMU=  0.358 (3.2s)
+[91/100] can_268        n=268      cu=  0.321 Auto=  0.154(merge3) opSp=  1.462 HSMU=   0.33 (3.2s)
+[92/100] can_292        n=292      cu=  0.334 Auto=  0.136(merge3) opSp=  1.242 HSMU=  0.322 (3.2s)
+[93/100] can_445        n=445      cu=  0.311 Auto=  0.139(merge3) opSp=  1.152 HSMU=  0.307 (3.2s)
+[94/100] can_61         n=61       cu=  0.285 Auto=   0.12(merge3) opSp=  1.073 HSMU=  0.312 (3.2s)
+[95/100] can_62         n=62       cu=  0.295 Auto=   0.12(merge3) opSp=   0.91 HSMU=  0.293 (3.2s)
+[96/100] can_634        n=634      cu=   0.37 Auto=  0.155(merge3) opSp=  1.512 HSMU=  0.331 (3.2s)
+[97/100] can_715        n=715      cu=  0.392 Auto=  0.302(merge3) opSp=  1.683 HSMU=  0.368 (3.2s)
+[98/100] can_73         n=73       cu=  0.278 Auto=  0.128(merge3) opSp=  1.176 HSMU=   0.29 (3.2s)
+[99/100] can_838        n=838      cu=  0.407 Auto=  0.154(merge3) opSp=  1.593 HSMU=  0.346 (3.3s)
+[100/100] can_96         n=96       cu=  0.297 Auto=  0.143(merge3) opSp=  0.644 HSMU=  0.224 (3.2s)
+
+完成 → compare/method_cmp_20260727_140713/methods_cmp.csv
+
+=== 几何均值(ms) ===
+  cu           0.442
+  Auto         0.234
+  opSparse     0.921
+  HSMU         0.444
+
+=== Auto 选择(共 100 阵)===  hash 23 / merge3 77
+
+=== Auto vs cuSPARSE:赢 88 / 输 12,几何均值(Auto/cuSPARSE) 0.530× ===
+  name                   n       C_nnz  cuSPARSE      Auto    ratio
+  bp_1200              822       22313     0.311     0.842    2.71×
+  bp_400               822       15238     0.324     0.872    2.69×
+  bp_800               822       20224     0.310     0.825    2.66×
+  bp_1400              822       23154     0.327     0.843    2.58×
+  bp_600               822       16464     0.319     0.808    2.53×
+  bp_0                 822        9384     0.309     0.755    2.44×
+  bp_1600              822       23625     0.336     0.816    2.43×
+  bp_1000              822       21373     0.343     0.826    2.41×
+  bp_200               822       13197     0.323     0.763    2.36×
+  bcsstk13            2003      396773     0.875     1.270    1.45×
+  bcsstk08            1074      305612     0.606     0.851    1.40×
+  bcsstk18           11948      713208     0.938     0.945    1.01×
+
+=== Auto vs opSparse:赢 94 / 输 6,几何均值(Auto/opSparse) 0.254× ===
+  name                   n       C_nnz  opSparse      Auto    ratio
+  bcsstk13            2003      396773     0.863     1.270    1.47×
+  bcsstk18           11948      713208     0.829     0.945    1.14×
+  bcsstk08            1074      305612     0.764     0.851    1.11×
+  bcsstk30           28924     8946070     3.188     3.495    1.10×
+  bp_1000              822       21373     0.765     0.826    1.08×
+  bcsstk31           35588     4713580     1.637     1.667    1.02×
+
+=== Auto vs HSMU:赢 89 / 输 11,几何均值(Auto/HSMU) 0.528× ===
+  name                   n       C_nnz      HSMU      Auto    ratio
+  bp_200               822       13197     0.391     0.763    1.95×
+  bp_400               822       15238     0.484     0.872    1.80×
+  bp_1200              822       22313     0.475     0.842    1.77×
+  bp_1600              822       23625     0.470     0.816    1.74×
+  bp_800               822       20224     0.479     0.825    1.72×
+  bp_1400              822       23154     0.491     0.843    1.72×
+  bp_0                 822        9384     0.443     0.755    1.70×
+  bp_600               822       16464     0.483     0.808    1.67×
+  bp_1000              822       21373     0.495     0.826    1.67×
+  bcsstk13            2003      396773     0.915     1.270    1.39×
+  bcsstk08            1074      305612     0.812     0.851    1.05×

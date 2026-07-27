@@ -46,8 +46,30 @@ void  pinned_free(void* p);
 //   池模式(A 经 cudaMallocHost 锁页)→ cudaFreeHost;legacy 模式(A 经 malloc)→ free。
 void  host_free(void* p);
 
+// ============================================================================
+// Device buffer pool —— 给 spgemm kernel 内部那 ~13 个 device 临时 buffer 复用。
+//
+// 背景(见 inno/engiOpti.md "wall-clock overhead"):每次 hash_product 调用做 ~13 次
+// cudaMalloc + ~13 次 cudaFree,驱动往返 ~0.66ms 固定开销(小阵上甚至 > compute)。
+// 这些 alloc 全是【调用局部】(一次 self-product 内分配、用完即弃),生命周期互不重叠
+// 于下一次调用。故用与 host pinned arena 同构的 bump-reset 模型:进程启动锁一大块
+// device arena,每次 hash_product 入口 reset(bump=0),内部 dev_alloc 仅做指针步进
+// (0 driver call),调用结束所有 buffer 随下一次 reset 统一回收。
+//
+// 口径说明:这些 alloc 本就在 cudaEvent prof tag【之外】(prof 只裹 kernel/memset/scan),
+// 故 compute-only 指标(TOTAL−h2d−d2h)本就不含它们 —— 池子【不改变 compute-only 数值】,
+// 只削 wall-clock/启动开销(小阵竞争力、suite geomean 的真实耗时)。
+//
+// 同 g_use_mempool 门控(USE_MEMPOOL=1 同时开 host+device arena)。arena 上限默认 8GB,
+// MP_DEV_MB 覆盖;溢出 → abort(把 MP_DEV_MB 调大)。
+// ============================================================================
+void  dev_pool_reset();                 // 新一次调用前 reset(bump=0)
+void* dev_alloc(size_t bytes);          // 池:bump 指针步进;legacy:cudaMalloc
+void  dev_free(void* p);                // 池:no-op(arena 由 reset 回收);legacy:cudaFree
+
 // 调试/观察用。
 size_t mempool_cap();
 size_t mempool_used();
+size_t dev_pool_used();
 
 #endif

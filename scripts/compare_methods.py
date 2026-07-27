@@ -1,45 +1,33 @@
 #!/usr/bin/env python3
-"""对比 Ocean / HSMU / cuSPARSE / merge(serial) / merge3 / Auto(自适应) 的 SpGEMM 自乘时间。
-Auto = 集成在 src 里的 spgemm_self_product_adaptive(flop>thr→hash 否则 merge3),非外部脚本。
-每矩阵:METHOD=<m> 跑 spgemm_test 取该方法时间;ocean 跑 ocean/spgemu;hsmu 跑 test binary。
-增量写 CSV(可断点续跑),末尾汇总。
-用法:compare_methods.py [--matrices a b c | --dir data/first100] [--out cmp.csv] [--ocean/--no-ocean] [--hsmu/--no-hsmu]
+"""对比 cuSPARSE / opSparse / HSMU / dense / Auto(自适应) 的 SpGEMM 自乘时间。
+Auto = src 里的 spgemm_self_product_adaptive(flop>thr→hash 否则 merge3)。
+每矩阵:
+  cu / Auto  → METHOD=<m> 跑 spgemm_test,compute-only(排除 h2d/d2h)
+  opSparse   → 外部 OpSparse binary,"total" ms
+  HSMU       → 外部 HSMU test binary,NHC CSV col6
+  dense      → spgemm_dense(naive scalar GEMM),"Kernel time" ms
+增量写 CSV(可断点续跑),末尾汇总 + Auto vs 各法赢/输(仿 report_methods_cmp)。
+用法:compare_methods.py [--dir data/first100] [--out cmp.csv] [--no-hsmu] [--no-opsparse] [--no-dense] [--limit N]
 """
-import os, sys, re, json, csv, subprocess, argparse, time
+import os, sys, re, csv, subprocess, argparse, time, math
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.path.join(REPO, "spgemm_test")
-OCEAN_CONV = os.path.join(REPO, "ocean/convert")
-OCEAN_RUN = os.path.join(REPO, "ocean/spgemm")
-OCEAN_CFG = "config/bench_detail.json"
-OCEAN_STATS = os.path.join(REPO, "ocean/stats.json")
+DENSE_BIN = os.path.join(REPO, "spgemm_dense")
 HSMU_BIN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/evaluation/script/test")
 HSMU_CSV = "/tmp/NHC_4080S_result.csv"
-# opSparse (Liu 2022, shared-mem hash HASH_SINGLE) — 自乘 C=A·A(double)。2022 强基线(H100 上大阵 ≈ 我们)。
 OPSPARSE_RUN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/other_spgemm_code/OpSparse/opsparse")
-# dense baseline(-O0 朴素 dense matmul,cudaEvent kernel time,同口径)缓存:由 scripts/run_dense_baseline.py 生成
-DENSE_CACHE = os.path.join(REPO, "compare/dense_baseline.csv")
 
-def load_dense_cache():
-    """读 compare/dense_baseline.csv → {matrix: dense_ms(float) 或 'timeout'/'fail'}。"""
-    d = {}
-    if os.path.exists(DENSE_CACHE):
-        for r in csv.DictReader(open(DENSE_CACHE)):
-            v = r.get("dense_ms", "")
-            try: v = float(v)
-            except: pass
-            d[r["matrix"]] = v
-    return d
-
-# 每次 spgemm_test/ocean/hsmu 调用的超时(秒),可被 env TIMEOUT 覆盖
 CALL_TIMEOUT = int(os.environ.get("TIMEOUT", "200"))
+DENSE_TIMEOUT = int(os.environ.get("DENSE_TIMEOUT", "600"))   # naive dense 大阵慢
 
-# METHOD → cudaEvent prof tag(HashProf 输出 [tag-prof];adaptive 由 choice 决定 hash/mrg3)
+# spgemm_test 方法 → cudaEvent prof tag(adaptive 由 choice 决定)
 METHOD_TAG = {"serial": "merge-prof", "merge3": "mrg3-prof", "hash": "hash-prof", "adaptive": None}
+# 无 HashProf 的方法(如 cuSPARSE)用 host [dbg][tag] phase 退回
+DBG_TAG = {"serial": "merge", "merge3": "mrg3", "cu": "cu"}
 
 def compute_only_from_prof(stderr, tag):
-    """从 [tag-prof] cudaEvent phase 求 compute-only = TOTAL(GPU) − h2d − d2h。
-    纯 GPU 时间(抗 CPU 争用),内部控制流 D2H 已在 phase 块内 → 与 Ocean 同口径。取最后一次(timed run)。"""
+    """[tag-prof] cudaEvent phase → TOTAL(GPU) − h2d − d2h。取最后一次(timed run)。"""
     if not tag:
         return None
     rx = re.compile(r"\[" + re.escape(tag) + r"\]\s+(\S+)\s+([0-9.]+)\s+ms")
@@ -47,7 +35,7 @@ def compute_only_from_prof(stderr, tag):
     for line in stderr.splitlines():
         m = rx.search(line)
         if m:
-            phases[m.group(1)] = float(m.group(2))    # 覆盖 → 保留最后一次
+            phases[m.group(1)] = float(m.group(2))
     if not phases:
         return None
     total = phases.get("TOTAL(GPU)")
@@ -55,9 +43,8 @@ def compute_only_from_prof(stderr, tag):
         return total - phases.get("h2d", 0.0) - phases.get("d2h", 0.0)
     return sum(v for k, v in phases.items() if k not in ("h2d", "d2h"))
 
-# fallback:host 时间戳(供无 HashProf 的方法,如 serial)。被 CPU 争用放大,仅次选。
-DBG_TAG = {"serial": "merge", "merge3": "mrg3"}
 def compute_only_from_dbg(stderr, tag):
+    """[dbg ms][tag] host 时间戳 → 区间和(排除 h2d/d2h)。cuSPARSE 用此口径。"""
     if not tag:
         return None
     phases = {}
@@ -71,13 +58,13 @@ def compute_only_from_dbg(stderr, tag):
     items = sorted(phases.items(), key=lambda kv: kv[1])
     total = 0.0
     for i in range(1, len(items)):
-        if items[i][0] in ("h2d", "d2h"):
+        if items[i][0] in ("h2d", "d2h", "h2dmalloc"):
             continue
         total += items[i][1] - items[i - 1][1]
     return total
 
-# spgemm_test 方法名 → METHOD 关键字(cuSPARSE→baseline dense;serial 已移除)
-SPGEMM_METHODS = [("merge3", "merge3"), ("Auto", "adaptive")]
+# 跑的 spgemm_test 方法:cuSPARSE + Auto
+SPGEMM_METHODS = [("cu", "cu"), ("Auto", "adaptive")]
 
 def find_mtx(name):
     for d in ("data/first100", "data/sota_27_final", "data/sota_27"):
@@ -87,7 +74,6 @@ def find_mtx(name):
     return None
 
 def mtx_header(path):
-    """返回 (n, sym, A_nnz_stored, density_pct)。density = stored_nnz/n²×100(与 profile_aa 同口径)。"""
     n = 0; sym = False; nnz = 0; sized = False
     with open(path) as f:
         first = f.readline(); sym = "symmetric" in first
@@ -97,15 +83,14 @@ def mtx_header(path):
             p = l.split()
             if not p:
                 continue
-            if not sized:                  # 首个非注释行 = size 行
+            if not sized:
                 n = int(p[0]); sized = True; continue
-            nnz += 1                       # entry(pattern 2列 / real 3列)
+            nnz += 1
     dens = (nnz / (n * n) * 100.0) if n > 0 else 0.0
     return n, sym, nnz, dens
 
 def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT):
-    """METHOD=method_key 跑 spgemm_test。返回 (compute_only_ms, wall_ms, cnnz, choice) 或 None。
-    compute_only 由 stderr 的 [dbg][tag] phase 解析(排除 h2d/d2h,对标 K=5);解析失败退回 wall。"""
+    """METHOD=method_key 跑 spgemm_test → (compute_only_ms, wall_ms, cnnz, choice) 或 None。"""
     env = dict(os.environ, USE_MEMPOOL="1", METHOD=method_key)
     try:
         r = subprocess.run([BIN, mtx], capture_output=True, text=True, env=env, timeout=timeout)
@@ -114,47 +99,24 @@ def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT):
     out = r.stdout
     wall = re.search(r"Time:\s*([0-9.]+)\s*ms", out)
     nz = re.search(r"Result C:.*?nnz\s*=\s*(\d+)", out)
-    # Auto 的方法选择(取 timed run 那次;溢出回退单独标)
     adapt = " ".join(l for l in out.splitlines() if "[adapt]" in l)
     if "overflow" in adapt:
         choice = "merge3(回退)"
     else:
         mm = re.findall(r"→\s*(hash|merge3)", adapt)
         choice = mm[-1] if mm else ""
-    # cudaEvent prof tag:adaptive 用 choice 决定 hash-prof/mrg3-prof
     tag = METHOD_TAG.get(method_key)
     if method_key == "adaptive":
         tag = "hash-prof" if choice.startswith("hash") else "mrg3-prof"
     comp = compute_only_from_prof(r.stderr, tag)
-    if comp is None:   # fallback:host 时间戳(serial 等无 HashProf 的方法,被争用放大,次选)
+    if comp is None:
         comp = compute_only_from_dbg(r.stderr, DBG_TAG.get(method_key))
     if wall:
         w = float(wall.group(1))
         return (comp if comp is not None else w, w, int(nz.group(1)) if nz else -1, choice)
     return None
 
-def run_ocean(mtx, timeout=CALL_TIMEOUT):
-    """ocean/convert + ocean/spgemm → stats.json 总时间(各 phase 求和)。"""
-    csr = "/tmp/cmp_ocean.csr"
-    try:
-        subprocess.run([OCEAN_CONV, mtx, csr], capture_output=True, timeout=CALL_TIMEOUT)
-        subprocess.run([OCEAN_RUN, csr, OCEAN_CFG], cwd=os.path.join(REPO, "ocean"),
-                       capture_output=True, timeout=timeout)
-        s = json.load(open(OCEAN_STATS))
-        t = s["timing"]
-        # 与 baseline_ocean.py(K=5)完全同口径:analysis 3 子项 + estimation 4 子项(不含 binning)
-        #   + numeric 全部 + epilogue 3 子项 + prologue。h2d/d2h 不在 timing 里(Ocean 另算),故为 compute-only。
-        an  = t["analysis"]["product_calc"] + t["analysis"]["reduce"] + t["analysis"]["mem_cpy"]
-        est = (t["estimation"]["hll_construct"] + t["estimation"]["hll_merge"]
-               + t["estimation"]["malloc"] + t["estimation"]["sampling"])
-        num = sum(t["numeric"].values())
-        epi = t["epilogue"]["sort"] + t["epilogue"]["copy"] + t["epilogue"]["scan"]
-        return an + est + num + epi + t.get("prologue", 0)
-    except Exception:
-        return None
-
 def run_hsmu(mtx, name, timeout=CALL_TIMEOUT):
-    """HSMU test binary → NHC CSV 里该矩阵最后出现的 total(col6)。"""
     try:
         subprocess.run([HSMU_BIN, mtx], capture_output=True, timeout=timeout)
     except Exception:
@@ -169,33 +131,44 @@ def run_hsmu(mtx, name, timeout=CALL_TIMEOUT):
     return last
 
 def run_opsparse(mtx, timeout=CALL_TIMEOUT):
-    """opSparse(Liu 2022,shared-mem hash HASH_SINGLE)自乘 C=A·A(double)。返回 (compute_ms, C_nnz) 或 None。
-    解析 '    total  Xms'(setup..cleanup 各 phase 之和,H2D 在外)与 'opsparse C.nnz=Y'。"""
     try:
         r = subprocess.run([OPSPARSE_RUN, os.path.abspath(mtx)],
                            capture_output=True, text=True, timeout=timeout)
     except Exception:
         return None
     out = r.stdout + r.stderr
-    t = re.search(r"(?m)^\s+total\s+([0-9.]+)ms", out)  # "    total  2.89545ms 100%" (非 sum_total)
+    t = re.search(r"(?m)^\s+total\s+([0-9.]+)ms", out)
     nz = re.search(r"C\.nnz=(\d+)", out)
     if t:
         return (float(t.group(1)), int(nz.group(1)) if nz else None)
     return None
 
+def run_dense(mtx, timeout=DENSE_TIMEOUT):
+    """spgemm_dense naive scalar GEMM → 'Kernel time' ms,或 'timeout'/'fail'。"""
+    try:
+        r = subprocess.run([DENSE_BIN, mtx, "/tmp/dense_cmp.mtx"],
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "timeout"
+    m = re.search(r"Kernel time:\s*([0-9.]+)\s*ms", r.stdout)
+    return float(m.group(1)) if m else "fail"
+
+def geomean(xs):
+    xs = [x for x in xs if x and x > 0]
+    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else float("nan")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--matrices", nargs="*", default=None)
-    ap.add_argument("--dir", default=None, help="矩阵目录(取目录下所有 .mtx)")
+    ap.add_argument("--dir", default=None)
     ap.add_argument("--out", default=os.path.join(REPO, "compare/methods_cmp.csv"))
-    ap.add_argument("--no-ocean", action="store_true")
     ap.add_argument("--no-hsmu", action="store_true")
-    ap.add_argument("--no-opsparse", action="store_true", help="不比较 opSparse(2022 hash 基线)")
-    ap.add_argument("--no-dense", action="store_true", help="不比较 dense baseline(dense 未跑完时用)")
-    ap.add_argument("--limit", type=int, default=0, help="只跑前 N 个(调试)")
+    ap.add_argument("--no-opsparse", action="store_true")
+    ap.add_argument("--no-dense", action="store_true")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--no-ocean", action="store_true", help="(兼容占位,Ocean 已移除)")
     args = ap.parse_args()
 
-    # 矩阵列表
     if args.matrices:
         names = args.matrices
     else:
@@ -209,19 +182,16 @@ def main():
     if os.path.exists(args.out):
         for r in csv.DictReader(open(args.out)):
             done.add(r["matrix"])
-    fieldnames = ["matrix", "n", "sym", "density_pct", "merge3", "Auto",
-                  "Auto_choice", "Ocean", "HSMU", "opSparse", "cnnz"]
-    if not args.no_dense:
-        fieldnames.insert(4, "baseline")   # dense baseline 列(在 density_pct 后)
+    fieldnames = ["matrix", "n", "sym", "density_pct", "cu", "Auto",
+                  "Auto_choice", "opSparse", "HSMU", "dense", "cnnz"]
     fout = open(args.out, "a", newline="")
     w = csv.DictWriter(fout, fieldnames=fieldnames)
     if not os.path.exists(args.out) or os.path.getsize(args.out) == 0:
         w.writeheader()
 
     N = len(names)
-    dense_cache = load_dense_cache() if not args.no_dense else {}
-    print(f"对比 {N} 阵 × {[m[0] for m in SPGEMM_METHODS]} + Ocean + HSMU"
-          + ("" if args.no_dense else " + dense-baseline(cache)") + f" → {args.out}\n", flush=True)
+    methods_desc = [m[0] for m in SPGEMM_METHODS] + ["opSparse", "HSMU", "dense"]
+    print(f"对比 {N} 阵 × {methods_desc} → {args.out}\n", flush=True)
     for i, name in enumerate(names):
         if name in done:
             continue
@@ -229,70 +199,45 @@ def main():
         if not p:
             print(f"[{i+1}/{N}] {name}: 未找到,跳过", flush=True); continue
         n, sym, annz, dens = mtx_header(p)
-        # 进度头:立即 flush(实时 1-100),后面接结果
         print(f"[{i+1}/{N}] {name:14} n={n:<6}", end="   ", flush=True)
         row = {"matrix": name, "n": n, "sym": "Y" if sym else "N", "density_pct": round(dens, 4)}
         t0 = time.time()
-        # spgemm 方法
         for label, key in SPGEMM_METHODS:
             r = run_spgemm_method(p, key)
-            row[label] = round(r[0], 3) if r else ""    # compute-only(排除 h2d/d2h)
+            row[label] = round(r[0], 3) if r else ""
             if label == "Auto" and r:
                 row["cnnz"] = r[2]
-                row["Auto_choice"] = r[3]          # hash / merge3 / merge3(回退)
-        # Ocean
-        row["Ocean"] = round(run_ocean(p), 3) if not args.no_ocean else ""
-        # HSMU
-        row["HSMU"] = round(run_hsmu(p, name), 3) if not args.no_hsmu else ""
-        # spECK 已移除(hash+dense hybrid;不再纳入 compare)
-        # nsparse 已移除(2017 纯 hash 弱基线,H100 上大阵 DNF / 小阵 hang,ROI 低)
-        # opSparse(2022 hash 基线)
+                row["Auto_choice"] = r[3]
         op = run_opsparse(p) if not args.no_opsparse else None
         row["opSparse"] = round(op[0], 3) if op else ("" if args.no_opsparse else "DNF")
         if op and op[1] and row.get("cnnz") and str(op[1]) != str(row["cnnz"]):
             print(f"  ⚠ opSparse C.nnz={op[1]} ≠ Auto cnnz={row['cnnz']}", flush=True)
-        # dense baseline(从 cache 读,不重跑;--no-dense 时跳过)
+        row["HSMU"] = round(run_hsmu(p, name), 3) if not args.no_hsmu else ""
         if not args.no_dense:
-            bv = dense_cache.get(name, "")
-            row["baseline"] = round(bv, 3) if isinstance(bv, float) else bv
+            d = run_dense(p)
+            row["dense"] = round(d, 3) if isinstance(d, float) else d
         w.writerow(row); fout.flush()
         dt = time.time() - t0
-        # 结果行
-        dense_str = f" dense={row['baseline']!s:>8}" if not args.no_dense else ""
-        print(f"Auto→{row.get('Auto_choice','?'):<6}{dense_str} "
-              f"m3={row['merge3']!s:>7} Auto={row['Auto']!s:>7} Ocean={row['Ocean']!s:>7} "
-              f"HSMU={row['HSMU']!s:>7} "
-              f"opSp={row['opSparse']!s:>7} ({dt:.1f}s)", flush=True)
+        dense_str = f" dense={row.get('dense','-')!s:>8}" if not args.no_dense else ""
+        print(f"cu={row['cu']!s:>7} Auto={row['Auto']!s:>7}({row.get('Auto_choice','?'):<6}) "
+              f"opSp={row['opSparse']!s:>7} HSMU={row['HSMU']!s:>7}{dense_str} ({dt:.1f}s)", flush=True)
     fout.close()
     print(f"\n完成 → {args.out}")
-    # 汇总:各方法几何均值(相对 Auto)
-    import math
+
     rows = list(csv.DictReader(open(args.out)))
-    def geomean(col):
+    print("\n=== 几何均值(ms) ===")
+    for col in ["cu", "Auto", "opSparse", "HSMU", "dense"]:
         xs = []
         for r in rows:
-            v = r.get(col)
-            if v in (None, "", "None"): continue
-            try: xs.append(float(v))
-            except ValueError: continue    # 跳过 'timeout' 等非数字
-        if not xs: return float("nan")
-        return math.exp(sum(math.log(x) for x in xs) / len(xs))
-    print("\n=== 几何均值(ms) ===")
-    cols = ([["baseline"]] if not args.no_dense else []) + [m[0] for m in SPGEMM_METHODS] + ["Ocean", "HSMU"]
-    if not args.no_opsparse:
-        cols += ["opSparse"]
-    for col in cols:
-        gm = geomean(col)
-        if gm == gm:
-            print(f"  {col:8} {gm:8.3f}")
-    # Auto 方法选择统计
+            try: xs.append(float(r.get(col)))
+            except (TypeError, ValueError): pass
+        if xs:
+            print(f"  {col:9} {geomean(xs):8.3f}")
     n_hash = sum(1 for r in rows if r.get("Auto_choice") == "hash")
-    n_m3   = sum(1 for r in rows if r.get("Auto_choice", "").startswith("merge3"))
+    n_m3 = sum(1 for r in rows if r.get("Auto_choice", "").startswith("merge3"))
     print(f"\n=== Auto 选择(共 {n_hash + n_m3} 阵)===  hash {n_hash} / merge3 {n_m3}")
-    if n_hash:
-        print("  选 hash 的:" + ", ".join(r["matrix"] for r in rows if r.get("Auto_choice") == "hash"))
 
-    # ---- Auto vs 参照法(Ocean/opSparse/HSMU)的赢/输(仿 report_methods_cmp vs_section;不 stat m3)----
+    # ---- Auto vs 各基线 赢/输(仿 report_methods_cmp vs_section)----
     def vs_section(ref_col, ref_name):
         pairs = []
         for r in rows:
@@ -301,9 +246,9 @@ def main():
             if t > 0 and ref > 0: pairs.append((r, t / ref))
         if not pairs:
             print(f"\n=== Auto vs {ref_name} === (无数据)"); return
-        win   = [p for p in pairs if p[1] <= 1.0]            # Auto ≤ 参照 = 赢
-        lose  = sorted([p for p in pairs if p[1] > 1.0], key=lambda p: -p[1])
-        gm    = math.exp(sum(math.log(p[1]) for p in pairs) / len(pairs))
+        win = [p for p in pairs if p[1] <= 1.0]
+        lose = sorted([p for p in pairs if p[1] > 1.0], key=lambda p: -p[1])
+        gm = math.exp(sum(math.log(p[1]) for p in pairs) / len(pairs))
         print(f"\n=== Auto vs {ref_name}:赢 {len(win)} / 输 {len(lose)},几何均值(Auto/{ref_name}) {gm:.3f}× ===")
         print(f"  {'name':<16}{'n':>8}{'C_nnz':>12}{ref_name:>10}{'Auto':>10}{'ratio':>9}")
         for r, ratio in lose[:15]:
@@ -312,9 +257,10 @@ def main():
             print(f"  {r['matrix']:<16}{r.get('n',''):>8}{r.get('cnnz',''):>12}{rf:>10.3f}{rt:>10.3f}{ratio:>8.2f}×")
         if len(lose) > 15:
             print(f"  ... 另有 {len(lose)-15} 个")
-    vs_section("Ocean", "Ocean")
+    vs_section("cu", "cuSPARSE")
     if not args.no_opsparse: vs_section("opSparse", "opSparse")
     if not args.no_hsmu:    vs_section("HSMU", "HSMU")
+    if not args.no_dense:   vs_section("dense", "dense")
 
 if __name__ == "__main__":
     main()

@@ -11,6 +11,13 @@ static char*  g_base = nullptr;
 static size_t g_cap  = 0;
 static size_t g_off  = 0;
 
+// device arena(给 spgemm kernel 的 device 临时 buffer 复用,见 mempool.h 注释)。
+//   同 bump-reset 模型:进程启动 cudaMalloc 一大块,dev_pool_reset 把 bump 归零,
+//   dev_alloc 仅步进指针(0 driver call)。所有 buffer 调用局部、随 reset 统一回收。
+static char*  g_dev     = nullptr;
+static size_t g_dev_cap = 0;
+static size_t g_dev_off = 0;
+
 // ---- 内部:从 arena bump 切一块(16 字节对齐)。调用前需保证已 reset 到合适起点 ----
 static void* arena_alloc(size_t bytes) {
     if (bytes == 0) bytes = 1;
@@ -46,6 +53,22 @@ bool mempool_init(size_t cap_bytes) {
     }
     fprintf(stderr, "[mempool] host pinned arena ready: %zu MB (USE_MEMPOOL=ON)\n",
             g_cap >> 20);
+
+    // device arena:给 spgemm kernel 的 device 临时 buffer 复用,省每调用 ~13 次
+    // cudaMalloc/cudaFree 的 driver 往返(~0.66ms 固定开销)。默认 8GB,MP_DEV_MB 覆盖。
+    const char* ed = std::getenv("MP_DEV_MB");
+    size_t dcap = ed ? (size_t)std::atol(ed) * 1024 * 1024
+                     : (size_t)16384 * 1024 * 1024;
+    cudaError_t errd = cudaMalloc((void**)&g_dev, dcap);
+    if (errd != cudaSuccess || !g_dev) {
+        fprintf(stderr, "[mempool] cudaMalloc dev arena (%zu MB) failed: %s — "
+                "fallback 到 per-call cudaMalloc(性能不变,仅失去 pool 收益)\n",
+                dcap >> 20, cudaGetErrorString(errd));
+        g_dev = nullptr; g_dev_cap = g_dev_off = 0;
+    } else {
+        g_dev_cap = dcap; g_dev_off = 0;
+        fprintf(stderr, "[mempool] device arena ready: %zu MB\n", g_dev_cap >> 20);
+    }
     return true;
 }
 
@@ -55,7 +78,46 @@ void mempool_destroy() {
         g_base = nullptr;
     }
     g_cap = g_off = 0;
+    if (g_dev) {
+        cudaFree(g_dev);
+        g_dev = nullptr;
+    }
+    g_dev_cap = g_dev_off = 0;
 }
+
+// ---- device arena API(见 mempool.h)----
+void dev_pool_reset() {
+    if (g_use_mempool) g_dev_off = 0;
+}
+
+void* dev_alloc(size_t bytes) {
+    if (bytes == 0) bytes = 1;
+    if (!g_use_mempool) {                  // legacy:原路径 cudaMalloc(A/B 同二进制)
+        void* p = nullptr;
+        cudaError_t err = cudaMalloc(&p, bytes);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "[mempool] cudaMalloc(%zu B) failed: %s\n",
+                    bytes, cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }
+        return p;
+    }
+    size_t aligned = (g_dev_off + 15) & ~((size_t)15);   // 16B 对齐(double/uint4 友好)
+    if (aligned + bytes > g_dev_cap) {
+        fprintf(stderr,
+                "[mempool] DEV arena overflow: need %zu B, cap %zu MB, used %zu MB "
+                "(bump MP_DEV_MB)\n", bytes, g_dev_cap >> 20, g_dev_off >> 20);
+        exit(EXIT_FAILURE);
+    }
+    g_dev_off = aligned + bytes;
+    return g_dev + aligned;
+}
+
+void dev_free(void* p) {
+    if (!g_use_mempool) cudaFree(p);       // 池模式:no-op,arena 由 dev_pool_reset 回收
+}
+
+size_t dev_pool_used() { return g_dev_off; }
 
 cudaError_t pinned_d2h_alloc(void** out, size_t bytes) {
     if (g_use_mempool) {
