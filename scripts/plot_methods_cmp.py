@@ -37,9 +37,11 @@ def main():
     for r in rows:
         r["_class"] = classify(r.get("density_pct", ""))
 
-    methods = [("cu", "#2a78d6"), ("opSparse", "#eb6834"), ("HSMU", "#1baf7a"),
-               ("dense", "#eda100"), ("Auto", "#1485A4")]
-    colmap = {"cu": "cu", "opSparse": "opSparse", "HSMU": "HSMU", "dense": "dense", "Auto": "Auto"}
+    methods = [("cu", "#2a78d6"), ("Ocean", "#8e44ad"), ("opSparse", "#eb6834"),
+               ("HSMU", "#1baf7a"), ("dense", "#eda100"), ("cublas", "#8c564b"),
+               ("Auto", "#1485A4")]
+    colmap = {"cu": "cu", "Ocean": "Ocean", "opSparse": "opSparse", "HSMU": "HSMU",
+              "dense": "dense", "cublas": "cublas", "Auto": "Auto"}
 
     classes = [c for c in CLASS_ORDER if any(r["_class"] == c for r in rows)]
 
@@ -92,7 +94,7 @@ def main():
     ax.set_xticks(x)
     ax.set_xticklabels([f"{c}\n({sum(1 for r in rows if r['_class']==c)})" for c in classes])
     ax.set_ylabel("耗时 (ms, 对数, 几何均值)")
-    ax.set_title("5 方法对照(按 A 密度类别):cuSPARSE / opSparse / HSMU / dense / Auto(ours)")
+    ax.set_title("6 方法对照(按 A 密度类别):cuSPARSE / Ocean / opSparse / HSMU / dense / Auto(ours)")
     ax.legend(frameon=False, fontsize=8.5, ncol=6, loc="upper center", bbox_to_anchor=(0.5, 1.00))
     ax.grid(axis="y", which="both", color="#e1e0d9", linewidth=0.6)
     fig.tight_layout()

@@ -25,6 +25,8 @@
 
 // 运行时开关:main 启动时按 USE_MEMPOOL 环境变量置位。
 extern bool g_use_mempool;
+// device arena 独立开关(USE_DEV_POOL,默认关):对 compute-only 是负优化(拖慢小阵 hash 扫描)。
+extern bool g_use_dev_pool;
 
 // 进程启动调一次。cap_bytes==0 → 默认 256MB,可被 MP_HOST_MB(单位 MB)覆盖。
 // 池模式关闭时跳过分配(零浪费)。成功返回 true。

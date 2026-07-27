@@ -720,27 +720,23 @@ __global__ void hll_estimate_kernel(
 }
 
 // ========== GPU 端分桶(Ocean 风格:无 host 往返)==========
-// 每行算 bucket_id:est≤HLL_ULTRA_THR → ultra(bin N_BINS-1);否则 est(已是 next_pow2)→ bin 0..9
-//   统一 sizing:bucket 直接由 HLL est 决定(不再依赖 flop_ub)
+// 每行算 bucket_id 并同时直方图计数(融合原 compute_bucket + bucket_count,省 1 launch):
+//   est≤HLL_ULTRA_THR → ultra(bin N_BINS-1);否则 est(已是 next_pow2)→ bin 0..9
 __global__ void compute_bucket_kernel(
-    const int *est, int A_rows, int ultra_thr, int *bucket_id)
+    const int *est, int A_rows, int ultra_thr, int *bucket_id, int *counts)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
     int e = est[i];
-    if (e <= ultra_thr) { bucket_id[i] = N_BINS - 1; return; }
-    int bi = 0, ht = 32;
-    while (ht < e && ht < HASH_CAP) { ht <<= 1; bi++; }
-    bucket_id[i] = (bi < N_BINS - 1) ? bi : (N_BINS - 2);
-}
-
-// 直方图:每 bin 的行数(atomicAdd 到 N_BINS 个计数器)
-__global__ void bucket_count_kernel(
-    const int *bucket_id, int A_rows, int *counts)
-{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= A_rows) return;
-    atomicAdd(&counts[bucket_id[i]], 1);
+    int bid;
+    if (e <= ultra_thr) bid = N_BINS - 1;
+    else {
+        int bi = 0, ht = 32;
+        while (ht < e && ht < HASH_CAP) { ht <<= 1; bi++; }
+        bid = (bi < N_BINS - 1) ? bi : (N_BINS - 2);
+    }
+    bucket_id[i] = bid;
+    atomicAdd(&counts[bid], 1);
 }
 
 // scatter:把行号按 bucket 写到预分配大 buffer 的对应位置
@@ -753,6 +749,24 @@ __global__ void scatter_rows_kernel(
     int bid = bucket_id[i];
     int slot = offsets[bid] + atomicAdd(&pos[bid], 1);
     sorted_rows[slot] = i;
+}
+
+// 单 block inclusive prefix-sum(Hillis-Steele)。小阵(A_rows ≤ 1024)专用,
+//   替 thrust::inclusive_scan(thrust 对几百元素也走多 kernel,launch 开销大)。
+//   blockDim = next_pow2(n)(≥ n),shared = blockDim×sizeof(int)。y[k]=Σx[0..k]。
+__global__ void scan_inclusive_kernel(const int *x, int *y, int n) {
+    extern __shared__ int ss[];
+    int tid = threadIdx.x;
+    int N = blockDim.x;
+    ss[tid] = (tid < n) ? x[tid] : 0;
+    __syncthreads();
+    for (int off = 1; off < N; off <<= 1) {
+        int v = (tid >= off) ? ss[tid - off] : 0;
+        __syncthreads();
+        ss[tid] += v;
+        __syncthreads();
+    }
+    if (tid < n) y[tid] = ss[tid];
 }
 
 // 小行专用:accumulate 已在 SMEM 内 count-sort 写有序,这里只把 tmp(gapped)→ CSR(packed) 纯 copy。
@@ -898,9 +912,14 @@ static void hash_product(
     int total_est;
     prof("est_scan", [&]{
         CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
-        thrust::inclusive_scan(thrust::device_ptr<int>(d_est),
-                               thrust::device_ptr<int>(d_est + A_rows),
-                               thrust::device_ptr<int>(d_off + 1));
+        if (A_rows <= 1024) {
+            int b = 1; while (b < A_rows) b <<= 1;                       // 小阵:单 block scan(1 launch)
+            scan_inclusive_kernel<<<1, b, b * sizeof(int)>>>(d_est, d_off + 1, A_rows);
+        } else {
+            thrust::inclusive_scan(thrust::device_ptr<int>(d_est),
+                                   thrust::device_ptr<int>(d_est + A_rows),
+                                   thrust::device_ptr<int>(d_off + 1));
+        }
         CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入计时(对齐 Ocean)
     });
     dbg("[hash] total_est=%d\n", total_est);
@@ -922,16 +941,17 @@ static void hash_product(
     int *d_sort; d_sort = decltype(d_sort)(dev_alloc(A_rows * sizeof(int)));   // 预分配:桶有序行号
     int h_cnt[N_BINS], h_off[N_BINS];
     prof("binning", [&]{
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, HLL_ULTRA_THR, d_bkid);
-        CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));
-        bucket_count_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_cnt);
+        CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));   // 先清零(fused kernel 内 atomicAdd 累加)
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, HLL_ULTRA_THR, d_bkid, d_cnt);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
         CHECK_CUDA(cudaMemset(d_pos, 0, N_BINS * sizeof(int)));   // scatter 计数器从 0 起(非 offsets)
         scatter_rows_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_offb, d_pos, d_sort);
-        CHECK_CUDA(cudaMemcpy(h_cnt,  d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入(对齐 Ocean)
-        CHECK_CUDA(cudaMemcpy(h_off,  d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
+        // 2 个 D2H 合并:async + 单 sync(省 1 同步点;小阵 launch 开销友好)
+        CHECK_CUDA(cudaMemcpyAsync(h_cnt, d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpyAsync(h_off, d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaStreamSynchronize(0));
     });
 
     // 2b: opt-in max SMEM
@@ -999,9 +1019,14 @@ static void hash_product(
     int C_nnz_result;
     prof("cnnz_scan", [&]{
         CHECK_CUDA(cudaMemset(dC_rp, 0, sizeof(int)));
-        thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
-                               thrust::device_ptr<int>(d_row_nnz + A_rows),
-                               thrust::device_ptr<int>(dC_rp + 1));
+        if (A_rows <= 1024) {
+            int b = 1; while (b < A_rows) b <<= 1;                       // 小阵:单 block scan(1 launch)
+            scan_inclusive_kernel<<<1, b, b * sizeof(int)>>>(d_row_nnz, dC_rp + 1, A_rows);
+        } else {
+            thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
+                                   thrust::device_ptr<int>(d_row_nnz + A_rows),
+                                   thrust::device_ptr<int>(dC_rp + 1));
+        }
         CHECK_CUDA(cudaMemcpy(&C_nnz_result, dC_rp + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入
     });
     dbg("[hash] C_nnz=%d (est=%d, %.2fx over-alloc)\n", C_nnz_result, total_est,

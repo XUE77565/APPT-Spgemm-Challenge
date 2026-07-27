@@ -1,0 +1,158 @@
+⚠ compare/methods_cmp.csv 是旧 schema(['matrix', 'n', 'sym', 'density_pct', 'cu', 'Auto', 'Auto_choice', 'Ocean', 'opSparse', 'HSMU', 'dense', 'cnnz']),备份 → compare/methods_cmp.csv.bak_staleschema_20260727_172703,重新建表(['matrix', 'n', 'sym', 'density_pct', 'cu', 'Auto', 'Auto_choice', 'Ocean', 'opSparse', 'HSMU', 'dense', 'cublas', 'cnnz'])
+对比 100 阵 × ['cu', 'Auto', 'Ocean', 'opSparse', 'HSMU', 'dense', 'cublas'] → compare/methods_cmp.csv
+
+[1/100] 1138_bus       n=1138     cu=  0.295 Auto=  0.135(merge3) Ocn=  0.222 opSp=  0.722 HSMU=  0.314 dense=   0.814 cublas=   0.583 (5.6s)
+[2/100] 494_bus        n=494      cu=  0.287 Auto=  0.115(merge3) Ocn=  0.206 opSp=  0.582 HSMU=  0.298 dense=   0.357 cublas=   0.313 (5.5s)
+[3/100] 662_bus        n=662      cu=  0.323 Auto=  0.124(merge3) Ocn=  0.208 opSp=  0.773 HSMU=   0.76 dense=   0.503 cublas=   0.415 (5.6s)
+[4/100] 685_bus        n=685      cu=  0.347 Auto=  0.135(merge3) Ocn=  0.221 opSp=  0.593 HSMU=  0.304 dense=   0.546 cublas=   0.456 (5.5s)
+[5/100] arc130         n=130      cu=  0.341 Auto=  0.173(merge3) Ocn=  0.377 opSp=  0.632 HSMU=  0.409 dense=   0.217 cublas=   0.338 (5.6s)
+[6/100] ash292         n=292      cu=  0.316 Auto=  0.138(merge3) Ocn=  0.203 opSp=  0.744 HSMU=  0.307 dense=    0.24 cublas=    0.27 (5.5s)
+[7/100] ash85          n=85       cu=  0.276 Auto=  0.122(merge3) Ocn=  0.199 opSp=   0.58 HSMU=  0.293 dense=   0.209 cublas=   0.301 (5.5s)
+[8/100] bcspwr01       n=39       cu=  0.269 Auto=  0.136(merge3) Ocn=  0.218 opSp=  0.557 HSMU=  0.356 dense=   0.208 cublas=   0.255 (5.5s)
+[9/100] bcspwr02       n=49       cu=  0.288 Auto=  0.117(merge3) Ocn=  0.189 opSp=  0.774 HSMU=  0.216 dense=   0.224 cublas=   0.252 (5.5s)
+[10/100] bcspwr03       n=118      cu=  0.278 Auto=  0.115(merge3) Ocn=  0.206 opSp=  0.571 HSMU=  0.303 dense=   0.208 cublas=   0.288 (5.6s)
+[11/100] bcspwr04       n=274      cu=   0.31 Auto=  0.154(merge3) Ocn=  0.212 opSp=  0.864 HSMU=  0.343 dense=   0.275 cublas=   0.326 (3.3s)
+[12/100] bcspwr05       n=443      cu=  0.293 Auto=   0.13(merge3) Ocn=  0.246 opSp=  0.699 HSMU=  0.239 dense=    0.37 cublas=   0.383 (5.0s)
+[13/100] bcspwr06       n=1454     cu=  0.305 Auto=  0.139(merge3) Ocn=   0.21 opSp=  0.787 HSMU=  0.335 dense=   1.317 cublas=   0.733 (5.6s)
+[14/100] bcspwr07       n=1612     cu=  0.285 Auto=  0.165(merge3) Ocn=  0.225 opSp=  0.623 HSMU=  0.249 dense=    1.57 cublas=   0.804 (4.1s)
+[15/100] bcspwr08       n=1624     cu=  0.306 Auto=   0.16(merge3) Ocn=  0.215 opSp=  0.626 HSMU=  0.303 dense=   1.642 cublas=   0.857 (3.1s)
+[16/100] bcspwr09       n=1723     cu=  0.279 Auto=  0.137(merge3) Ocn=   0.22 opSp=  0.723 HSMU=  0.312 dense=   2.044 cublas=    1.03 (5.6s)
+[17/100] bcspwr10       n=5300     cu=  0.348 Auto=  0.194(merge3) Ocn=  0.229 opSp=  0.882 HSMU=  0.956 dense=  36.455 cublas=  10.569 (5.8s)
+[18/100] bcsstk01       n=48       cu=  0.299 Auto=  0.113(merge3) Ocn=  0.432 opSp=  0.812 HSMU=  0.283 dense=   0.208 cublas=   0.304 (3.5s)
+[19/100] bcsstk02       n=66       cu=  0.322 Auto=  0.141(merge3) Ocn=  0.853 opSp=  0.797 HSMU=  0.666 dense=   0.241 cublas=   0.231 (4.2s)
+[20/100] bcsstk03       n=112      cu=  0.281 Auto=  0.104(merge3) Ocn=  0.165 opSp=  0.552 HSMU=  0.301 dense=   0.218 cublas=   0.298 (5.5s)
+[21/100] bcsstk04       n=132      cu=  0.363 Auto=  0.156(merge3) Ocn=  0.442 opSp=  0.611 HSMU=  0.403 dense=   0.224 cublas=   0.313 (5.6s)
+[22/100] bcsstk05       n=153      cu=   0.34 Auto=  0.129(merge3) Ocn=  0.322 opSp=  0.787 HSMU=  0.322 dense=   0.241 cublas=   0.327 (5.6s)
+[23/100] bcsstk06       n=420      cu=  0.419 Auto=  0.174(merge3) Ocn=  0.342 opSp=  0.591 HSMU=  0.347 dense=   0.355 cublas=   0.357 (5.6s)
+[24/100] bcsstk07       n=420      cu=  0.387 Auto=  0.156(merge3) Ocn=  0.271 opSp=  0.583 HSMU=  0.344 dense=   0.335 cublas=   0.356 (5.6s)
+[25/100] bcsstk08       n=1074     cu=  0.605 Auto=  0.571(hash  ) Ocn=  0.423 opSp=  0.744 HSMU=  0.802 dense=   1.016 cublas=   0.916 (5.9s)
+[26/100] bcsstk09       n=1083     cu=  0.538 Auto=  0.173(merge3) Ocn=  0.325 opSp=  0.483 HSMU=   0.33 dense=   0.826 cublas=   0.603 (5.6s)
+[27/100] bcsstk10       n=1086     cu=  0.396 Auto=  0.184(merge3) Ocn=  0.461 opSp=  0.769 HSMU=  0.358 dense=   0.732 cublas=   0.542 (5.6s)
+[28/100] bcsstk11       n=1473     cu=  0.582 Auto=  0.195(merge3) Ocn=  0.496 opSp=  0.623 HSMU=  0.426 dense=   1.566 cublas=   0.874 (5.7s)
+[29/100] bcsstk12       n=1473     cu=  0.633 Auto=  0.199(merge3) Ocn=  0.496 opSp=  0.509 HSMU=  0.526 dense=   1.568 cublas=   0.888 (5.7s)
+[30/100] bcsstk13       n=2003     cu=  0.907 Auto=  0.833(hash  ) Ocn=  0.704 opSp=  0.862 HSMU=  0.929 dense=   3.345 cublas=   1.938 (6.1s)
+[31/100] bcsstk14       n=1806     cu=  0.834 Auto=  0.307(merge3) Ocn=  0.602 opSp=   0.97 HSMU=  0.533 dense=   2.439 cublas=   1.244 (5.8s)
+[32/100] bcsstk15       n=3948     cu=  1.068 Auto=  0.334(hash  ) Ocn=  0.441 opSp=  1.106 HSMU=  0.781 dense=  16.037 cublas=   5.339 (6.3s)
+[33/100] bcsstk16       n=4884     cu=  1.782 Auto=  0.542(hash  ) Ocn=  0.827 opSp=  1.138 HSMU=  1.442 dense=  29.635 cublas=   9.022 (7.2s)
+[34/100] bcsstk17       n=10974    cu=  2.233 Auto=  0.702(hash  ) Ocn=  0.817 opSp=  1.414 HSMU=  1.745 dense=  308.03 cublas=  81.214 (8.4s)
+[35/100] bcsstk18       n=11948    cu=  0.915 Auto=  0.424(hash  ) Ocn=  0.453 opSp=    1.7 HSMU=  1.242 dense= 395.992 cublas= 102.174 (7.5s)
+[36/100] bcsstk19       n=817      cu=  0.369 Auto=  0.138(merge3) Ocn=   0.34 opSp=  0.686 HSMU=   0.31 dense=   0.602 cublas=   0.476 (5.5s)
+[37/100] bcsstk20       n=485      cu=  0.326 Auto=   0.14(merge3) Ocn=  0.217 opSp=  0.979 HSMU=  0.324 dense=    0.39 cublas=    0.39 (5.4s)
+[38/100] bcsstk21       n=3600     cu=  0.528 Auto=  0.191(merge3) Ocn=  0.225 opSp=  0.764 HSMU=  0.426 dense=  12.629 cublas=   4.218 (5.7s)
+[39/100] bcsstk22       n=138      cu=  0.295 Auto=  0.131(merge3) Ocn=  0.213 opSp=  0.683 HSMU=  0.288 dense=   0.225 cublas=   0.272 (5.4s)
+[40/100] bcsstk23       n=3134     cu=  0.613 Auto=  0.254(merge3) Ocn=  0.361 opSp=   1.52 HSMU=  0.532 dense=   8.935 cublas=   3.517 (5.8s)
+[41/100] bcsstk24       n=3562     cu=  1.135 Auto=  0.384(hash  ) Ocn=  0.636 opSp=   1.05 HSMU=  0.964 dense=  12.597 cublas=   4.662 (6.4s)
+[42/100] bcsstk25       n=15439    cu=  1.305 Auto=  0.468(hash  ) Ocn=  0.481 opSp=  0.986 HSMU=  1.542 dense= 856.818 cublas= 224.859 (9.4s)
+[43/100] bcsstk26       n=1922     cu=   0.54 Auto=  0.196(merge3) Ocn=  0.381 opSp=  0.995 HSMU=  0.532 dense=   2.682 cublas=   1.292 (5.6s)
+[44/100] bcsstk27       n=1224     cu=  0.686 Auto=  0.322(merge3) Ocn=  0.542 opSp=  0.963 HSMU=  0.671 dense=   1.215 cublas=   0.879 (5.7s)
+[45/100] bcsstk28       n=4410     cu=  1.465 Auto=  0.438(hash  ) Ocn=   0.75 opSp=  2.049 HSMU=  1.376 dense=  21.994 cublas=   7.493 (6.5s)
+[46/100] bcsstk29       n=13992    cu=  2.812 Auto=  0.805(hash  ) Ocn=  0.965 opSp=  1.501 HSMU=  1.778 dense= 630.856 cublas=  157.37 (9.2s)
+[47/100] bcsstk30       n=28924    cu=  8.568 Auto=  3.104(hash  ) Ocn=  2.417 opSp=   3.12 HSMU=  4.756 dense= 5512.62 cublas= 1412.51 (27.6s)
+[48/100] bcsstk31       n=35588    cu=  4.928 Auto=  1.367(hash  ) Ocn=  1.287 opSp=  2.161 HSMU=  2.435 dense= 10222.8 cublas= 2621.09 (35.5s)
+[49/100] bcsstk32       n=44609    cu=  8.064 Auto=  2.116(hash  ) Ocn=   1.66 opSp=  2.798 HSMU=  3.765 dense= 20229.9 cublas= 5280.69 (62.7s)
+[50/100] bcsstk33       n=8738     cu=  2.855 Auto=  1.025(hash  ) Ocn=  1.571 opSp=  1.841 HSMU=  2.306 dense= 157.596 cublas=  43.177 (8.3s)
+[51/100] bcsstm01       n=48       cu=  0.273 Auto=  0.116(merge3) Ocn=  0.166 opSp=  1.265 HSMU=  0.326 dense=   0.205 cublas=   0.282 (5.5s)
+[52/100] bcsstm02       n=66       cu=   0.28 Auto=  0.127(merge3) Ocn=  0.168 opSp=  1.524 HSMU=  0.279 dense=   0.215 cublas=   0.269 (5.5s)
+[53/100] bcsstm03       n=112      cu=   0.27 Auto=  0.121(merge3) Ocn=   0.17 opSp=  0.989 HSMU=  0.277 dense=   0.222 cublas=   0.286 (5.5s)
+[54/100] bcsstm04       n=132      cu=  0.258 Auto=  0.114(merge3) Ocn=  0.172 opSp=   0.72 HSMU=  0.275 dense=   0.221 cublas=   0.276 (5.4s)
+[55/100] bcsstm05       n=153      cu=  0.258 Auto=  0.103(merge3) Ocn=  0.172 opSp=  0.586 HSMU=  0.285 dense=   0.229 cublas=   0.298 (5.4s)
+[56/100] bcsstm06       n=420      cu=  0.272 Auto=  0.117(merge3) Ocn=  0.172 opSp=  0.535 HSMU=  0.292 dense=   0.317 cublas=   0.339 (5.4s)
+[57/100] bcsstm07       n=420      cu=  0.409 Auto=  0.158(merge3) Ocn=  0.347 opSp=   1.16 HSMU=  0.343 dense=   0.341 cublas=    0.34 (5.4s)
+[58/100] bcsstm08       n=1074     cu=  0.322 Auto=  0.116(merge3) Ocn=  0.172 opSp=  0.982 HSMU=  0.287 dense=    0.76 cublas=   0.534 (5.4s)
+[59/100] bcsstm09       n=1083     cu=  0.287 Auto=  0.115(merge3) Ocn=  0.174 opSp=  0.644 HSMU=  0.289 dense=    0.82 cublas=   0.586 (5.4s)
+[60/100] bcsstm10       n=1086     cu=  0.446 Auto=  0.191(merge3) Ocn=  0.501 opSp=  0.927 HSMU=  0.357 dense=   0.763 cublas=   0.549 (5.5s)
+[61/100] bcsstm11       n=1473     cu=  0.292 Auto=  0.121(merge3) Ocn=  0.173 opSp=   1.21 HSMU=  0.292 dense=   1.579 cublas=   0.871 (5.4s)
+[62/100] bcsstm12       n=1473     cu=  0.407 Auto=  0.173(merge3) Ocn=  0.359 opSp=  1.166 HSMU=  0.337 dense=   1.553 cublas=   0.852 (5.5s)
+[63/100] bcsstm13       n=2003     cu=  0.531 Auto=  0.295(merge3) Ocn=  0.449 opSp=  1.143 HSMU=  0.557 dense=   3.117 cublas=   1.599 (5.6s)
+[64/100] bcsstm19       n=817      cu=  0.292 Auto=  0.133(merge3) Ocn=  0.172 opSp=  0.449 HSMU=  0.299 dense=   0.596 cublas=   0.471 (5.4s)
+[65/100] bcsstm20       n=485      cu=  0.276 Auto=  0.108(merge3) Ocn=  0.173 opSp=  1.474 HSMU=  0.294 dense=   0.381 cublas=   0.389 (5.4s)
+[66/100] bcsstm21       n=3600     cu=  0.284 Auto=  0.145(merge3) Ocn=  0.173 opSp=  1.534 HSMU=  0.476 dense=  12.638 cublas=   4.228 (5.4s)
+[67/100] bcsstm22       n=138      cu=  0.286 Auto=  0.109(merge3) Ocn=  0.173 opSp=  0.849 HSMU=  0.282 dense=   0.215 cublas=   0.275 (5.4s)
+[68/100] bcsstm23       n=3134     cu=  0.288 Auto=  0.141(merge3) Ocn=  0.176 opSp=  0.948 HSMU=  0.475 dense=   8.834 cublas=   3.297 (5.5s)
+[69/100] bcsstm24       n=3562     cu=  0.305 Auto=  0.144(merge3) Ocn=  0.179 opSp=  1.117 HSMU=  0.462 dense=  12.382 cublas=   4.357 (5.5s)
+[70/100] bcsstm25       n=15439    cu=   0.29 Auto=  0.284(merge3) Ocn=  0.189 opSp=  0.581 HSMU=  0.563 dense= 856.411 cublas= 224.138 (7.7s)
+[71/100] bcsstm26       n=1922     cu=  0.289 Auto=   0.13(merge3) Ocn=  0.173 opSp=  1.343 HSMU=  0.296 dense=   2.656 cublas=   1.292 (5.4s)
+[72/100] bcsstm27       n=1224     cu=  0.693 Auto=  0.314(merge3) Ocn=  0.542 opSp=  1.648 HSMU=  0.665 dense=   1.216 cublas=   0.851 (5.7s)
+[73/100] blckhole       n=2132     cu=  0.422 Auto=  0.202(merge3) Ocn=  0.223 opSp=  1.781 HSMU=  0.484 dense=   3.289 cublas=    1.37 (5.5s)
+[74/100] bp_0           n=822      cu=  0.294 Auto=  0.304(hash  ) Ocn=  0.243 opSp=  1.419 HSMU=  0.438 dense=   0.547 cublas=   0.433 (5.4s)
+[75/100] bp_1000        n=822      cu=  0.314 Auto=  0.365(hash  ) Ocn=  0.258 opSp=  1.508 HSMU=   0.48 dense=   0.554 cublas=   0.437 (5.5s)
+[76/100] bp_1200        n=822      cu=  0.349 Auto=   0.38(hash  ) Ocn=  0.262 opSp=  1.195 HSMU=  0.476 dense=   0.554 cublas=   0.432 (5.5s)
+[77/100] bp_1400        n=822      cu=  0.314 Auto=   0.37(hash  ) Ocn=  0.265 opSp=  1.395 HSMU=  0.482 dense=   0.552 cublas=   0.436 (5.5s)
+[78/100] bp_1600        n=822      cu=  0.315 Auto=  0.369(hash  ) Ocn=  0.267 opSp=  0.644 HSMU=  0.482 dense=   0.558 cublas=   0.424 (5.4s)
+[79/100] bp_200         n=822      cu=  0.307 Auto=  0.311(hash  ) Ocn=  0.256 opSp=  1.399 HSMU=  0.468 dense=   0.566 cublas=   0.433 (5.4s)
+[80/100] bp_400         n=822      cu=  0.317 Auto=  0.325(hash  ) Ocn=  0.256 opSp=  1.264 HSMU=  0.473 dense=    0.56 cublas=   0.435 (5.4s)
+[81/100] bp_600         n=822      cu=  0.317 Auto=  0.335(hash  ) Ocn=  0.256 opSp=  1.369 HSMU=  0.471 dense=   0.548 cublas=    0.43 (5.4s)
+[82/100] bp_800         n=822      cu=   0.34 Auto=  0.342(hash  ) Ocn=  0.256 opSp=  1.647 HSMU=  0.467 dense=   0.554 cublas=   0.442 (5.4s)
+[83/100] can_1054       n=1054     cu=  0.403 Auto=  0.188(merge3) Ocn=  0.367 opSp=  0.703 HSMU=  0.344 dense=   0.772 cublas=    0.55 (5.5s)
+[84/100] can_1072       n=1072     cu=  0.394 Auto=  0.176(merge3) Ocn=   0.36 opSp=  1.497 HSMU=  0.341 dense=    0.89 cublas=   0.664 (5.5s)
+[85/100] can_144        n=144      cu=  0.286 Auto=  0.126(merge3) Ocn=  0.329 opSp=  1.456 HSMU=  0.311 dense=    0.23 cublas=   0.285 (5.4s)
+[86/100] can_161        n=161      cu=  0.273 Auto=  0.135(merge3) Ocn=  0.328 opSp=  0.732 HSMU=  0.305 dense=   0.243 cublas=   0.304 (5.4s)
+[87/100] can_187        n=187      cu=  0.291 Auto=  0.124(merge3) Ocn=  0.321 opSp=  1.134 HSMU=  0.296 dense=   0.262 cublas=   0.307 (5.5s)
+[88/100] can_229        n=229      cu=  0.289 Auto=  0.146(merge3) Ocn=  0.326 opSp=  0.933 HSMU=  0.303 dense=   0.266 cublas=   0.316 (5.5s)
+[89/100] can_24         n=24       cu=  0.267 Auto=  0.118(merge3) Ocn=    0.2 opSp=  1.219 HSMU=   0.28 dense=   0.206 cublas=   0.294 (5.4s)
+[90/100] can_256        n=256      cu=  0.304 Auto=  0.174(merge3) Ocn=  0.347 opSp=  1.196 HSMU=  0.359 dense=    0.32 cublas=   0.356 (5.4s)
+[91/100] can_268        n=268      cu=  0.305 Auto=  0.154(merge3) Ocn=  0.343 opSp=   1.73 HSMU=  0.321 dense=   0.284 cublas=   0.318 (5.4s)
+[92/100] can_292        n=292      cu=  0.315 Auto=  0.131(merge3) Ocn=  0.349 opSp=  0.761 HSMU=  0.325 dense=   0.285 cublas=   0.321 (5.4s)
+[93/100] can_445        n=445      cu=  0.315 Auto=  0.149(merge3) Ocn=  0.334 opSp=  0.893 HSMU=  0.321 dense=   0.373 cublas=   0.386 (5.5s)
+[94/100] can_61         n=61       cu=  0.295 Auto=  0.123(merge3) Ocn=  0.319 opSp=  0.854 HSMU=  0.312 dense=    0.21 cublas=   0.305 (5.4s)
+[95/100] can_62         n=62       cu=  0.292 Auto=  0.122(merge3) Ocn=  0.196 opSp=  0.875 HSMU=   0.29 dense=   0.205 cublas=   0.291 (5.4s)
+[96/100] can_634        n=634      cu=  0.389 Auto=  0.145(merge3) Ocn=  0.357 opSp=  0.753 HSMU=  0.332 dense=   0.449 cublas=   0.398 (5.5s)
+[97/100] can_715        n=715      cu=  0.381 Auto=  0.276(merge3) Ocn=   0.38 opSp=  1.138 HSMU=  0.378 dense=   0.559 cublas=   0.468 (5.5s)
+[98/100] can_73         n=73       cu=  0.282 Auto=  0.127(merge3) Ocn=  0.205 opSp=  1.022 HSMU=  0.286 dense=   0.208 cublas=   0.288 (5.5s)
+[99/100] can_838        n=838      cu=  0.387 Auto=  0.155(merge3) Ocn=  0.357 opSp=  0.734 HSMU=  0.351 dense=   0.584 cublas=   0.449 (5.4s)
+[100/100] can_96         n=96       cu=  0.284 Auto=   0.12(merge3) Ocn=  0.317 opSp=  0.953 HSMU=  0.292 dense=   0.205 cublas=   0.283 (5.4s)
+
+完成 → compare/methods_cmp.csv
+
+=== 几何均值(ms) ===
+  cu           0.434
+  Auto         0.202
+  Ocean        0.313
+  opSparse     0.955
+  HSMU         0.448
+  dense        1.435
+  cublas       1.049
+
+=== Auto 选择(共 100 阵)===  hash 23 / merge3 77
+
+=== Auto vs cuSPARSE:赢 91 / 输 9,几何均值(Auto/cuSPARSE) 0.467× ===
+  name                   n       C_nnz  cuSPARSE      Auto    ratio
+  bp_1400              822       23154     0.314     0.370    1.18×
+  bp_1600              822       23625     0.315     0.369    1.17×
+  bp_1000              822       21373     0.314     0.365    1.16×
+  bp_1200              822       22313     0.349     0.380    1.09×
+  bp_600               822       16464     0.317     0.335    1.06×
+  bp_0                 822        9384     0.294     0.304    1.03×
+  bp_400               822       15238     0.317     0.325    1.03×
+  bp_200               822       13197     0.307     0.311    1.01×
+  bp_800               822       20224     0.340     0.342    1.01×
+
+=== Auto vs Ocean:赢 85 / 输 15,几何均值(Auto/Ocean) 0.646× ===
+  name                   n       C_nnz     Ocean      Auto    ratio
+  bcsstm25           15439       15439     0.189     0.284    1.50×
+  bp_1200              822       22313     0.262     0.380    1.45×
+  bp_1000              822       21373     0.258     0.365    1.41×
+  bp_1400              822       23154     0.265     0.370    1.40×
+  bp_1600              822       23625     0.267     0.369    1.38×
+  bcsstk08            1074      305612     0.423     0.571    1.35×
+  bp_800               822       20224     0.256     0.342    1.34×
+  bp_600               822       16464     0.256     0.335    1.31×
+  bcsstk30           28924     8946070     2.417     3.104    1.28×
+  bcsstk32           44609     6819653     1.660     2.116    1.27×
+  bp_400               822       15238     0.256     0.325    1.27×
+  bp_0                 822        9384     0.243     0.304    1.25×
+  bp_200               822       13197     0.256     0.311    1.21×
+  bcsstk13            2003      396773     0.704     0.833    1.18×
+  bcsstk31           35588     4713580     1.287     1.367    1.06×
+
+=== Auto vs opSparse:赢 100 / 输 0,几何均值(Auto/opSparse) 0.212× ===
+  name                   n       C_nnz  opSparse      Auto    ratio
+
+=== Auto vs HSMU:赢 100 / 输 0,几何均值(Auto/HSMU) 0.452× ===
+  name                   n       C_nnz      HSMU      Auto    ratio
+
+=== Auto vs dense:赢 100 / 输 0,几何均值(Auto/dense) 0.141× ===
+  name                   n       C_nnz     dense      Auto    ratio
+
+=== Auto vs cuBLAS:赢 100 / 输 0,几何均值(Auto/cuBLAS) 0.193× ===
+  name                   n       C_nnz    cuBLAS      Auto    ratio

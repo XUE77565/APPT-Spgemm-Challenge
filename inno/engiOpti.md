@@ -125,9 +125,9 @@ preserved + compute down); reverted otherwise. ATT optimization comes later.
 - **Compute-only neutral**: accumulate 2.42→2.42 ms (identical) — these allocs sit *outside*
   the cudaEvent prof tags, so `TOTAL−h2d−d2h` is unchanged. The pool helps **wall-clock / small-
   matrix competitiveness only**, NOT the compute-only comparison metric.
-- **Verdict**: **KEPT** — real wall-clock win, zero correctness cost, the one remaining lever
-  flagged in §35. Honest caveat: invisible to compute-only (report wall-clock separately if
-  citing the small-matrix advantage).
+- **Verdict**: ~~KEPT~~ → **RE-REVISITED 2026-07-27, DEFAULT OFF**(见下 "device pool 复测")。
+  对 **compute-only 口径是负优化**(小阵 hash 扫描慢 1.5-3×);wall-clock 收益仍在,但被
+  `USE_DEV_POOL` 独立开关默认关掉。host pinned pool 保留(归 USE_MEMPOOL)。
 
 ## Where the time really goes → what's left
 - accumulate 2.4 ms (bcsstk30) = **structural floor** (atomic-bound, proven). No known lever.
@@ -170,11 +170,59 @@ block is **~0 ms** (gating it changed nothing) — not the cause.
   esp. for small-matrix / suite-geomean competitiveness — but needs wall-clock measurement and
   careful pooling (persistent device pool, alloc-once-reuse, outside tagged regions).
 
+## 2026-07-27 复测 — device pool = compute-only 负优化(默认关)+ ③ kernel 融合 + dispatcher 复核
+
+**起因**:对照 07-24 best(`compare/method_cmp_20260724_094758(best)`)发现 engiOpti 后 Auto 慢 1.42×
+(87/100 阵),bp_*/bcsstk08 等**输 HSMU/opSparse**(之前全胜)。逐阵对比定位根因。
+
+### device pool 复测 → DEFAULT OFF(独立开关 `USE_DEV_POOL`)
+- **根因**:#6 的 device arena(`dev_alloc` bump)让 hash **扫描 phase**(est_scan/binning/cnnz_scan)
+  在**小阵慢 1.5-3×**(accumulate 不变)。干净 A/B(`USE_MEMPOOL=1` vs `0`,compute-only):
+  bp_0 **2.06×**、bcsstk08 1.67×、bcsstk13 1.45×、bcsstk30 **1.08×**(大阵才中性)。
+  → #6 的"compute-only 中性"结论**只对大阵成立**,小阵被漏掉(first100 78% 是小阵 → suite 负)。
+- device pool 唯一收益是省 driver call(**wall-clock**),而 wall-clock 被 compute-only 口径排除 → 对论文
+  对比是**纯损失**。256B 对齐试过没用(更差)→ 根因是 arena 内存访存特性,非对齐。
+- **修复**:`mempool.cu/h` + `main.cu` 把 device pool 拆出独立开关 `g_use_dev_pool`(env `USE_DEV_POOL`,
+  默认 **OFF**);host pinned pool 仍归 `USE_MEMPOOL`。修后 bp_0 **0.813→0.318 ms**(= best 0.307)、
+  bcsstk08 1.050→0.546,原输 HSMU/opSparse 阵**全部反败为胜**。
+- **教训**:benchmark 须覆盖 size 谱;小阵 compute-only 上 arena 内存 ≠ 独立 cudaMalloc。
+
+### dispatcher 复核 → 公式正确,不用改
+- 怀疑过 dispatcher 选错,实测**没问题**。bp_0:`score=-0.28 → hash`(对!),因 bp_0 有密行
+  (max_row=266, skew=66.7)→ hash(0.328)确实 < merge3(0.394)。问题在 hash kernel 慢(device pool),
+  不在选择。07-27 夜"重拟合(95%)"的 7 个 hash→merge3 翻转基本有益(小阵 merge3 更快),保留。
+- 公式(多变量,100 阵拟合 R²=0.824):`score=-0.426·lfp -0.422·ln -0.644·lmr -0.642·lsk +5.43;<0→hash`。
+
+### #7 — ③ kernel 融合(小阵 launch 开销)· KEPT
+目标:削小阵 compute-only(bp_* 输 cu 0.03-0.08ms,launch 开销占大头)。两处融合:
+1. **binning 融合**:`compute_bucket` + `bucket_count` 合 1 个 kernel(写 bucket_id 同时 `atomicAdd`
+   直方图,N_BINS=11 计数器冲突低);2 个 D2H(h_cnt/h_off)用 `cudaMemcpyAsync` + 单 `cudaStreamSynchronize`
+   合并。省 1 kernel launch + 1 memset + 1 同步点。
+2. **单 block scan 融合**:`est_scan`/`cnnz_scan` 对 **A_rows≤1024** 用自写 `scan_inclusive_kernel`
+   (Hillis-Steele,1 launch)替 `thrust::inclusive_scan`(thrust 对几百元素也走多 kernel)。大阵 gated
+   (>1024 仍 thrust)→ 不回退。
+- **结果**:bp_* 输 cu 从 0.03-0.08ms → **0.008-0.05ms**(bp_0/bp_200 贴到噪声级平手)。正确性 PASS
+  (bp_0=9384, bcsstk30=8946070 nnz 不变)。大阵不回退(bcsstk30 3.24→3.11)。**净赚,全小阵(~72/100)受益**。
+- **未能赢 bp_***:cu 核心单 kernel compute 仅 0.19ms < 我们 hash accumulate(0.135)+ 整条流水线开销。
+  剩下的钱全在 accumulate(47%),是 ① 结构性地板,ROI 低(Auto 整体已赢 cu 89/100、geomean 1.89×)。
+
+### compute-only 时间分布(修后,定下一步优化方向)
+| 尺寸 | 代表 | 分布 |
+|---|---|---|
+| 大 | bcsstk30 (3.11ms) | **accumulate 77%**(结构性地板)+ compact+sort 12% |
+| 中 | bcsstk13 (0.84ms) | **compact+sort 59%** + accumulate 23% |
+| 小 | bp_0 (0.29ms) | accumulate 47% + compact 18% + binning 17% + scans 17%(融合后) |
+
+**下一步杠杆(若继续)**:① accumulate size-adaptive SMEM(小行用小表提 occupancy,大行才用大表;
+  预计大阵 accumulate −20-40%,有溢出风险,工作量高)。② compact+sort 阈值/配置(中阵,中等)。
+  ③ 已做。bp_* vs cu 属 cu 强项,接受平手/微输。
+
 ## Campaign conclusion
 Explored: EXPAND sizing (#1), read-check (#2), count-sort→csort (#3), count-sort→bitonic (#4),
-merge3 merge (profiled), d2h (PCIe), wall-clock malloc/launch overhead. **Net KEPT = #1
-(EXPAND 1.5) only.** AA **compute** is at its hardware/algorithmic floors — accumulate
-(atomic), count-sort (sync-free), merge3 merge (work/bandwidth), d2h (PCIe Gen4). The only
-remaining lever is the **wall-clock cudaMalloc/launch overhead** (~0.66 ms fixed), which is
-real and strategically important (small-matrix competitiveness) but measurement-hostile and
-refactor-risky.
+merge3 merge (profiled), d2h (PCIe), wall-clock malloc/launch overhead, device pool (#6 复测),
+kernel 融合 (#7), dispatcher 复核. **Net KEPT = #1 (EXPAND 1.5) + #7 (binning/scan 融合).**
+**#6 device pool DEFAULT OFF**(对 compute-only 负优化;`USE_DEV_POOL=1` 可为 wall-clock 重开).
+AA **compute** is at its hardware/algorithmic floors — accumulate (atomic, 大阵 77%),
+compact+sort (中阵 59%), count-sort (sync-free), merge3 merge, d2h (PCIe Gen4). 剩余杠杆:
+① accumulate size-adaptive SMEM(高工作量、有溢出风险、大阵 −20-40%);② compact+sort 调参(中阵).
+小阵 bp_* vs cu 属 cu 强项(单 kernel 0.19ms),Auto 整体仍赢 cu 89/100 (geomean 1.89×)。

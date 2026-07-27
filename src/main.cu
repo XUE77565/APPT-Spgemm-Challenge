@@ -35,6 +35,9 @@ int main(int argc, char **argv) {
     {   // 默认由 spgemm.h 的 USE_MEMPOOL 宏决定;环境变量 USE_MEMPOOL=0/1 可覆盖(便于 A/B)
         const char* e = std::getenv("USE_MEMPOOL");
         g_use_mempool = e ? (std::atoi(e) > 0) : USE_MEMPOOL;
+        // device arena 独立开关:默认关(对 compute-only 负优化);USE_DEV_POOL=1 开(wall-clock 实验)
+        const char* ed = std::getenv("USE_DEV_POOL");
+        g_use_dev_pool = ed ? (std::atoi(ed) > 0) : false;
     }
     dbg("main entry, initializing CUDA context...\n");
     cudaFree(0);

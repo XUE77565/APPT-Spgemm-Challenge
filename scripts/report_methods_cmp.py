@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""读 methods_cmp.csv → 仿 full_compare 格式的报告(基线 = cuSPARSE / opSparse / HSMU / dense):
+"""读 methods_cmp.csv → 仿 full_compare 格式的报告(基线 = cuSPARSE / Ocean / opSparse / HSMU / dense):
   1) 每矩阵表(class/name/n + 各法 compute-only + Auto 对各法比值),按类别排序
   2) 按类别聚合(几何均值 + Auto 对各法比值均值)
-  3) Auto vs cuSPARSE / opSparse / HSMU / dense 的赢/输(ratio>1 降序,赢/输计数 + 几何均值 + 输的清单)
-所有 spgemm 法时间 = compute-only(排除 h2d/d2h);dense=naive scalar GEMM kernel time;HSMU=time2;opSparse=total。
+  3) Auto vs 各基线的赢/输(ratio>1 降序,赢/输计数 + 几何均值 + 输的清单)
+所有 spgemm 法时间 = compute-only(排除 h2d/d2h);dense=tiled FP64 GEMM kernel;Ocean=各 phase 求和;
+HSMU=time2;opSparse=total。基线列由 BASES 单点定义,增删只改一处。
 用法:report_methods_cmp.py <methods_cmp.csv> [out.txt]
 """
 import os, sys, csv, math
 
 CLASS_ORDER = ["Dense", "Mildly sparse", "Highly sparse", "Extremely sparse"]
 CLASS_TAG = {"Dense": "Dens", "Mildly sparse": "Mild", "Highly sparse": "High", "Extremely sparse": "Extr"}
+
+# baseline columns (single source of truth): (csv_key, header_label, width)
+BASES = [("cu", "cu", 9), ("Ocean", "Ocean", 9), ("opSparse", "opSp", 9),
+         ("HSMU", "HSMU", 9), ("dense", "dense", 10), ("cublas", "cuBLAS", 10)]
+DISPLAY = {"cu": "cuSPARSE", "Ocean": "Ocean", "opSparse": "opSparse",
+           "HSMU": "HSMU", "dense": "dense", "cublas": "cuBLAS"}
 
 def classify(d):
     try: d = float(d)
@@ -31,12 +38,25 @@ def gmean(xs):
 def fmt(v, w=7, p=2):
     return f"{v:>{w}.{p}f}" if v is not None and v == v else f"{'-':>{w}}"
 
-def ratio_gmean(rows, col, ref):
-    xs = []
-    for r in rows:
-        a, b = fnum(r, col), fnum(r, ref)
-        if a and b and b > 0: xs.append(a / b)
-    return gmean(xs)
+def method_header():
+    h = ""
+    for _, lbl, w in BASES: h += f"{lbl:>{w}}"
+    h += f"{'Auto':>9}"
+    for _, lbl, _ in BASES: h += f"{'A/'+lbl:>8}"
+    return h
+
+def header():
+    return f"{'cls':>4} {'name':<24}{'n':>7}" + method_header()
+
+def method_cells(vals, au):
+    """vals: dict key->value; au: Auto value. Renders baseline + Auto + A/X ratio cells."""
+    s = ""
+    for k, _, w in BASES: s += fmt(vals.get(k), w, 2)
+    s += fmt(au, 9, 2)
+    for k, _, _ in BASES:
+        v = vals.get(k)
+        s += fmt((au / v) if (au and v and v > 0) else None, 8, 2)
+    return s
 
 def main():
     csv_path = sys.argv[1] if len(sys.argv) > 1 else "compare/methods_cmp.csv"
@@ -47,40 +67,28 @@ def main():
         r["_n"] = int(r["n"]) if r.get("n", "").isdigit() else 0
     rows.sort(key=lambda r: (CLASS_ORDER.index(r["_class"]) if r["_class"] in CLASS_ORDER else 99, r["_n"]))
 
-    REFS = [("cu", "cu"), ("opSparse", "opSp"), ("HSMU", "HSMU"), ("dense", "dense")]
+    keys = [k for k, _, _ in BASES] + ["Auto"]
     out = []
-    out.append("[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h);dense=naive scalar GEMM kernel;HSMU=time2;opSparse=total]  ms")
-    out.append(f"{'cls':>4} {'name':<24}{'n':>7}{'cu':>9}{'opSp':>9}{'HSMU':>9}{'dense':>10}{'Auto':>9}"
-               + "".join(f"{'A/'+short:>8}" for _, short in REFS))
-    out.append("-" * 110)
+    out.append("[compute-only:cudaEvent 纯 GPU(去边界 h2d/d2h);dense=tiled FP64 GEMM;Ocean=各 phase 求和;HSMU=time2;opSparse=total]  ms")
+    out.append(header())
+    out.append("-" * 118)
     for r in rows:
-        vals = {k: fnum(r, k) for k in ("cu", "opSparse", "HSMU", "dense", "Auto")}
+        vals = {k: fnum(r, k) for k in keys}
         au = vals["Auto"]
-        out.append(f"{CLASS_TAG.get(r['_class'],'?'):>4} {r['matrix']:<24}{r['_n']:>7}"
-                   f"{fmt(vals['cu'],9,2)}{fmt(vals['opSparse'],9,2)}{fmt(vals['HSMU'],9,2)}"
-                   f"{fmt(vals['dense'],10,2)}{fmt(au,9,2)}"
-                   + "".join(fmt(au / vals[k] if (au and vals[k] and vals[k] > 0) else None, 8, 2) for k, _ in REFS))
+        out.append(f"{CLASS_TAG.get(r['_class'],'?'):>4} {r['matrix']:<24}{r['_n']:>7}" + method_cells(vals, au))
 
     # ---- 按类别聚合 ----
-    out.append(""); out.append("=" * 110)
+    out.append(""); out.append("=" * 118)
     out.append("按类别聚合(几何均值 ms;A/X = Auto 对该法比值均值,<1 = Auto 快)")
-    out.append("-" * 110)
-    out.append(f"{'class':<20}{'#':>4}{'cu':>9}{'opSp':>9}{'HSMU':>9}{'dense':>10}{'Auto':>9}"
-               + "".join(f"{'A/'+short:>8}" for _, short in REFS))
+    out.append("-" * 118)
+    out.append(f"{'class':<20}{'#':>4}" + method_header())
     for c in CLASS_ORDER:
         sub = [r for r in rows if r["_class"] == c]
         if not sub: continue
-        gm = {k: gmean([fnum(r, k) for r in sub if fnum(r, k)]) for k in ("cu", "opSparse", "HSMU", "dense", "Auto")}
-        out.append(f"{c:<20}{len(sub):>4}{fmt(gm['cu'],9,2)}{fmt(gm['opSparse'],9,2)}{fmt(gm['HSMU'],9,2)}"
-                   f"{fmt(gm['dense'],10,2)}{fmt(gm['Auto'],9,2)}"
-                   + "".join(fmt(gm['Auto'] / gm[k] if (gm['Auto'] == gm['Auto'] and gm[k] == gm[k] and gm[k] > 0) else None, 8, 2)
-                             for k, _ in REFS))
-    # 总体
-    gm = {k: gmean([fnum(r, k) for r in rows if fnum(r, k)]) for k in ("cu", "opSparse", "HSMU", "dense", "Auto")}
-    out.append(f"{'ALL('+str(len(rows))+')':<20}{len(rows):>4}{fmt(gm['cu'],9,2)}{fmt(gm['opSparse'],9,2)}{fmt(gm['HSMU'],9,2)}"
-               f"{fmt(gm['dense'],10,2)}{fmt(gm['Auto'],9,2)}"
-               + "".join(fmt(gm['Auto'] / gm[k] if (gm['Auto'] == gm['Auto'] and gm[k] == gm[k] and gm[k] > 0) else None, 8, 2)
-                         for k, _ in REFS))
+        gm = {k: gmean([fnum(r, k) for r in sub if fnum(r, k)]) for k in keys}
+        out.append(f"{c:<20}{len(sub):>4}" + method_cells(gm, gm["Auto"]))
+    gm = {k: gmean([fnum(r, k) for r in rows if fnum(r, k)]) for k in keys}
+    out.append(f"{'ALL('+str(len(rows))+')':<20}{len(rows):>4}" + method_cells(gm, gm["Auto"]))
 
     # ---- Auto vs 各基线 赢/输 ----
     def vs_section(ref_col, ref_name):
@@ -103,8 +111,7 @@ def main():
         if len(lose) > 20:
             out.append(f"  ... 另有 {len(lose)-20} 个")
 
-    DISPLAY = {"cu": "cuSPARSE", "opSparse": "opSparse", "HSMU": "HSMU", "dense": "dense"}
-    for col, _ in REFS:
+    for col, _, _ in BASES:
         vs_section(col, DISPLAY[col])
 
     report = "\n".join(out) + "\n"

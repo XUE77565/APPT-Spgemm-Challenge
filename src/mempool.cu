@@ -5,6 +5,10 @@
 
 // 运行时开关,默认 false(原路径)。main 启动时按 USE_MEMPOOL 覆盖。
 bool g_use_mempool = false;
+// device arena 独立开关(USE_DEV_POOL,默认关)。device pool 省的是 driver 往返
+// (wall-clock),但实测让 hash 扫描 phase 在小阵上慢 1.5-3×(compute-only 口径)→
+// 对论文 compute-only 对比是负优化,故默认关;需 wall-clock 实验时 USE_DEV_POOL=1 开。
+bool g_use_dev_pool = false;
 
 // pinned arena 的全部状态。单线程串行使用(benchmark 一矩阵一进程),无需加锁。
 static char*  g_base = nullptr;
@@ -56,6 +60,11 @@ bool mempool_init(size_t cap_bytes) {
 
     // device arena:给 spgemm kernel 的 device 临时 buffer 复用,省每调用 ~13 次
     // cudaMalloc/cudaFree 的 driver 往返(~0.66ms 固定开销)。默认 8GB,MP_DEV_MB 覆盖。
+    // ⚠ 仅 USE_DEV_POOL=1 时分配(默认关:对 compute-only 是负优化,见 g_use_dev_pool 注释)。
+    if (!g_use_dev_pool) {
+        fprintf(stderr, "[mempool] device arena OFF (USE_DEV_POOL unset; compute-only 友好)\n");
+        return true;
+    }
     const char* ed = std::getenv("MP_DEV_MB");
     size_t dcap = ed ? (size_t)std::atol(ed) * 1024 * 1024
                      : (size_t)16384 * 1024 * 1024;
@@ -87,12 +96,12 @@ void mempool_destroy() {
 
 // ---- device arena API(见 mempool.h)----
 void dev_pool_reset() {
-    if (g_use_mempool) g_dev_off = 0;
+    if (g_use_dev_pool) g_dev_off = 0;
 }
 
 void* dev_alloc(size_t bytes) {
     if (bytes == 0) bytes = 1;
-    if (!g_use_mempool) {                  // legacy:原路径 cudaMalloc(A/B 同二进制)
+    if (!g_use_dev_pool) {                  // legacy:原路径 cudaMalloc(A/B 同二进制)
         void* p = nullptr;
         cudaError_t err = cudaMalloc(&p, bytes);
         if (err != cudaSuccess) {
@@ -114,7 +123,7 @@ void* dev_alloc(size_t bytes) {
 }
 
 void dev_free(void* p) {
-    if (!g_use_mempool) cudaFree(p);       // 池模式:no-op,arena 由 dev_pool_reset 回收
+    if (!g_use_dev_pool) cudaFree(p);       // 池模式:no-op,arena 由 dev_pool_reset 回收
 }
 
 size_t dev_pool_used() { return g_dev_off; }

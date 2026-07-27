@@ -34,6 +34,12 @@ spgemm_dense: src/spgemm_dense.cu src/matrix_utils.cu src/mempool.cu $(HEADERS)
 
 dense: spgemm_dense
 
+# cuBLAS dense baseline(FP64 dgemm,CUBLAS_PEDANTIC 无 Tensor Core):densify+cublasDgemm+sparsify
+spgemm_dense_cublas: src/spgemm_dense_cublas.cu src/matrix_utils.cu src/mempool.cu $(HEADERS)
+	$(NVCC) -O3 -arch=sm_90 -std=c++14 $(INCLUDES) -o $@ src/spgemm_dense_cublas.cu src/matrix_utils.cu src/mempool.cu $(LIBS)
+
+cublas: spgemm_dense_cublas
+
 run_all: $(TARGET)
 	bash scripts/run_all.sh
 
