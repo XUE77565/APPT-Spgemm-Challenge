@@ -122,8 +122,7 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     size_t val_size = actual_nnz * sizeof(double);
     size_t total_size = ALIGN8(row_ptr_size + col_idx_size) + val_size;
 
-    // 分配单块连续 host memory:USE_MEMPOOL=1 → pinned(cudaMallocHost,H2D 走 DMA 直传);
-    //                         USE_MEMPOOL=0 → pageable(malloc,走 driver staging)。便于 A/B。
+    // 分配单块连续 host memory:USE_MEMPOOL=1 → pinned(DMA 直传);0 → pageable(driver staging)。便于 A/B。
     void *buffer = nullptr;
     if (g_use_mempool) {
         if (cudaMallocHost(&buffer, total_size) != cudaSuccess) {

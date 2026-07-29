@@ -10,12 +10,7 @@
 #include <cstring>
 #include <vector>
 
-// ==========================================================================
-//  hash SPA:C = A·A,每行一个 SMEM hash 累加器(atomicCAS 插列号 + atomicAdd 累值)
-//  pipeline: count flop_ub → SMEM hash 累加+extract 去重 → compact → 全局 sort by (row,col) → CSR
-//    · hash 负责 dedup+sum,sort 只排 C_nnz(远小于 flop_ub,~19× 省于 ESC 的排 flop_ub)
-//    · 溢出检测:某行 distinct > HASH_CAP 时置 overflow_flag,host 返回 C_nnz=-1(dispatcher 回退)
-// ==========================================================================
+// hash SPA:C = A·A,SMEM hash 累加器(atomicCAS 插列+atomicAdd 累值);pipeline count→累加→compact→sort;overflow→回退
 
 #define CHECK_CUDA(call) do { \
     cudaError_t err = call; \
@@ -28,8 +23,7 @@
 extern __global__ void count_intermediates_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub);
 
-// 并行 count flop_ub:每行一个 block,线程并行 Σ nnz(row k) + block 归约(无 straggler,O(nnz_A))。
-//   小阵 streamline 用它替 HLL 两阶段(1 kernel vs 2),flop_ub 是确定性上界(≥distinct,无 underflow)。
+// 并行 count flop_ub:每行一 block,Σ nnz(row k)+归约;小阵替 MinHash 两阶段,flop_ub 是确定性上界
 __global__ void count_intermediates_par_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub)
 {
@@ -61,20 +55,14 @@ __global__ void count_intermediates_par_kernel(
 #define N_BINS 11    // 10 hash ht-buckets(ht=32<<i, i=0..9) + 1 ultra(flop≤16)
 #define CSORT_HT 1024   // ht≤此值的行(bin0-5)在 accumulate 内 count-sort 写有序;compact 阶段只 copy
 
-// HLL(HyperLogLog)概率基数估计:替 flop_ub 定 tmp buffer + hash 表大小(统一 sizing)
-// Ocean 两阶段架构:Phase1 对 B(=A 自乘)每行建 sketch(O(nnz));Phase2 对 A 每行读 B 的 sketch 做 packed merge(O(nnz))
-// 原理详见 worklog/hll_estimation_explained.md
-#define HLL_P 7                       // precision bits → m=128 寄存器(对齐 Ocean HLL_CONSTANT 表上限),误差~9.2%
-#define HLL_M (1 << HLL_P)
-#define HLL_EXPAND 1.5                // expansion(覆盖估计低估;原 2.0 过保守→over-alloc 3.14×;1.5 是安全下限,1.3 在 bcsstk30 溢出。溢出→回退 merge3 兜底)
-#define HLL_ULTRA_THR 16              // bin-snap:est≤此值 → ultrasparse(线性 kernel,CAP=32 留 2× 余量)
-#define STREAMLINE_NNZ 100000         // 小阵 pipeline 精简:A_nnz<此值 → flop_ub(1 count kernel)替 HLL 两阶段
+// MinHash 概率基数估计:替 flop_ub 定 tmp buffer + hash 表大小
+#define MH_M 128                      // partition 数(=128)
+#define EST_EXPAND 1.5                // expansion(覆盖估计低估;溢出→回退 merge3 兜底)
+#define EST_ULTRA_THR 16              // bin-snap:est≤此值 → ultrasparse(线性 kernel,CAP=32 留 2× 余量)
+#define STREAMLINE_NNZ 100000         // 小阵 pipeline 精简:A_nnz<此值 → flop_ub(1 count kernel)替 MinHash 两阶段
 #define WARP_SIZE 32
-// HLL 偏差校正 α(标准公式 0.7213/(1+1.079/m) 预算;对齐 Ocean HLL_CONSTANT[Common.h])
-constexpr double HLL_CONSTANT[8] = {0.0, 0.0, 0.0, 0.0, 0.673, 0.697, 0.709, 0.715};
 
-// MurmurHash3(Ocean MurmurHash.cuh 同款:full mix = body(c1/c2 rotl) + len + fmix32,seed=1234)
-// 替掉旧版只有 fmix32 finalizer 的弱 hash。HLL 两阶段复用此函数(SPA 累加暂仍用 Knuth 乘法,隔离测量)
+// MurmurHash3(full mix body+fmix32);MinHash 两阶段复用,SPA 累加暂仍用 Knuth 乘法
 __device__ __forceinline__ unsigned int rotl32(unsigned int x, int r) { return (x << r) | (x >> (32 - r)); }
 __device__ __forceinline__ unsigned int murmur_hash3(unsigned int key) {
     unsigned int h1 = 1234u;                       // MURMUR3_SEED
@@ -89,171 +77,10 @@ __device__ __forceinline__ unsigned int murmur_hash3(unsigned int key) {
     return h1;
 }
 
-// ============ Phase 1: 对 B(=A)的每行建 HLL sketch(O(nnz),线性扫描) ============
-// 每个 block 处理 rows_per_block 行,线性遍历 B 的 CSR → hash(col) → atomicMax SMEM 寄存器 → 写 global
-__global__ void hll_construct_kernel(
-    const int *B_row_ptr, const int *B_col_ind,
-    int B_rows, int B_nnz,
-    unsigned char *global_hll,           // [B_rows * HLL_M] uint8 寄存器
-    int rows_per_block)
-{
-    int row_start = blockIdx.x * rows_per_block;
-    int row_end = min(row_start + rows_per_block, B_rows);
-    if (row_start >= B_rows) return;
+// MinHash 概率基数估计(partition bottom-k sketch)
+#define MH_EMPTY 0xffffffffu
 
-    int elem_start = B_row_ptr[row_start];
-    int elem_end = (row_end < B_rows) ? B_row_ptr[row_end] : B_nnz;
-    int num_rows = row_end - row_start;
-
-    extern __shared__ int smem_raw[];    // 共享 extern(全文件统一 int 基类型)
-    unsigned int *smem = (unsigned int*)smem_raw;    // [num_rows * HLL_M] scratch(uint32,atomicMax 用)
-    int total_items = num_rows * HLL_M;
-    for (int i = threadIdx.x; i < total_items; i += blockDim.x) smem[i] = 0;
-
-    // 行偏移表(用于判断当前元素属于哪行)
-    int *row_offsets = smem_raw + total_items;
-    for (int i = threadIdx.x; i <= num_rows; i += blockDim.x)
-        row_offsets[i] = (row_start + i < B_rows) ? B_row_ptr[row_start + i] : elem_end;
-    __syncthreads();
-
-    // 线性遍历 B 的元素(coalesced!)
-    int current_row = 0;
-    unsigned int *current_scratch = smem;
-    for (int e = elem_start + threadIdx.x; e < elem_end; e += blockDim.x) {
-        unsigned int col = (unsigned int)B_col_ind[e];
-        // 找到当前元素属于哪行
-        while (e >= row_offsets[current_row + 1]) {
-            current_row++;
-            current_scratch = smem + current_row * HLL_M;
-        }
-        unsigned int h = murmur_hash3(col);
-        int idx = h & (HLL_M - 1);                  // 低 P 位 → 寄存器索引
-        unsigned int rho = __clz(h) + 1;            // 全 32 位前导零+1(高位决定;对齐 Ocean hllAdd)
-        const unsigned int rho_max = (32 - HLL_P) + 1;
-        if (rho > rho_max) rho = rho_max;           // 高 (32-P) 位全 0 时封顶(等价旧 rest==0 分支)
-        atomicMax(&current_scratch[idx], rho);
-    }
-    __syncthreads();
-
-    // 收缩 uint32 → uint8 写回 global
-    unsigned char *global_ptr = global_hll + row_start * HLL_M;
-    for (int i = threadIdx.x; i < num_rows * HLL_M; i += blockDim.x)
-        global_ptr[i] = (unsigned char)min(smem[i], 255u);
-}
-
-// ============ Phase 2: 对 A 的每行 merge B 的 HLL sketch(O(nnz_A),packed __vmaxu4) ============
-// 每个 block 处理 A 的一行。读 A 引用的 B 行的 HLL sketch(uint8),packed 4-byte max → SMEM reduce → 估计公式
-__global__ void hll_merge_kernel(
-    const int *A_row_ptr, const int *A_col_ind,
-    int A_rows,
-    const unsigned char *b_hll,           // [B_rows * HLL_M] from Phase 1
-    int *est_nnz)                         // [A_rows] output
-{
-    int row = blockIdx.x;
-    if (row >= A_rows) return;
-    int tid = threadIdx.x;
-
-    // packed merge:每个线程维护一个 uint32 packed max(4 个 uint8 寄存器)
-    // 每次迭代读 4 个 B 行的 4 字节,做 __vmaxu4
-    constexpr int bytes_per_thread = 4;   // 每线程每次读 4 字节
-    int elements_per_iter = blockDim.x * bytes_per_thread;
-    int b_rows_per_iter = elements_per_iter / HLL_M;
-    if (b_rows_per_iter == 0) b_rows_per_iter = 1;
-
-    extern __shared__ int smem_merge_raw[];
-    unsigned char *smem_merge = (unsigned char*)smem_merge_raw;
-    for (int i = tid; i < HLL_M; i += blockDim.x) smem_merge[i] = 0;
-    __syncthreads();
-
-    int start_elem = A_row_ptr[row];
-    int end_elem = A_row_ptr[row + 1];
-
-    // packed merge:每个线程跨 B 行步进,读 4 字节做 __vmaxu4
-    int my_row_offset = tid / (blockDim.x / b_rows_per_iter);
-    int my_col_offset = bytes_per_thread * (tid % (blockDim.x / b_rows_per_iter));
-
-    unsigned int packed_max = 0;
-    for (int e = start_elem + my_row_offset; e < end_elem; e += b_rows_per_iter) {
-        int row_b = A_col_ind[e];
-        int byte_idx = row_b * HLL_M + my_col_offset;
-        // 读 4 字节(packed),__vmaxu4 4 路并行 max
-        if (byte_idx + 4 <= (row_b + 1) * HLL_M) {
-            unsigned int buf = *(const unsigned int*)(b_hll + byte_idx);
-            packed_max = __vmaxu4(packed_max, buf);
-        }
-    }
-
-    // 展开到 SMEM(uint8)
-    #pragma unroll
-    for (int i = 0; i < bytes_per_thread; i++) {
-        smem_merge[tid * bytes_per_thread + i] = (unsigned char)(packed_max & 0xFF);
-        packed_max >>= 8;
-    }
-    __syncthreads();
-
-    // 并行估计 reduce(对齐 Ocean hllMerge:for 累加 → warp shuffle → atomicAdd 跨 warp)
-    constexpr int items_padded = HLL_M < 32 ? 32 : HLL_M;   // P=7 → 128
-    constexpr double a = HLL_CONSTANT[HLL_P];               // α 校正(查表,等价 0.7213/(1+1.079/m))
-    double z = 0.0;
-    int empty_reg = 0;
-    for (int i = tid; i < items_padded; i += blockDim.x) {
-        unsigned char val = 0;
-        if (i < HLL_M) {
-            for (int j = 0; j < b_rows_per_iter; j++)        // 跨 batch 取 max(b_rows_per_iter 路写)
-                if (val < smem_merge[j * HLL_M + i]) val = smem_merge[j * HLL_M + i];
-        }
-        z += 1.0 / (double)(1ULL << val);
-        if (val == 0) empty_reg++;
-    }
-    for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {       // warp 内归约 z / empty_reg
-        z += __shfl_down_sync(0xFFFFFFFF, z, off);
-        empty_reg += __shfl_down_sync(0xFFFFFFFF, empty_reg, off);
-    }
-    __shared__ double total_z;
-    __shared__ int total_empty_reg;
-    if (tid == 0) { total_z = 0.0; total_empty_reg = 0; }
-    __syncthreads();
-    if (tid % WARP_SIZE == 0) { atomicAdd(&total_z, z); atomicAdd(&total_empty_reg, empty_reg); }
-    __syncthreads();
-
-    // HLL 估计公式(thread 0):调和平均 + 小范围 linear counting
-    if (tid == 0) {
-        z = total_z; empty_reg = total_empty_reg;
-        double E = a * (double)HLL_M * (double)HLL_M / z;
-        if (empty_reg != 0 && E <= 2.5 * HLL_M)
-            E = (double)HLL_M * log((double)HLL_M / (double)empty_reg);
-        int temp = (int)(E * HLL_EXPAND);
-        if (temp < 1) temp = 1;
-        // bin-snap(对齐 Ocean hllMerge:估计 → hash 表大小)。统一 sizing:此 est 同时定
-        //   ① tmp buffer 每行槽位(row_off = est 的 prefix sum)② hash 表大小(compute_bucket 直接读)。
-        //   ultra(temp≤HLL_ULTRA_THR)→ 线性 kernel,est 保留紧 temp;否则 snap 到 next_pow2 ∈[32,HASH_CAP]。
-        int est;
-        if (temp <= HLL_ULTRA_THR) {
-            est = temp;
-        } else {
-            int ht = 32;
-            while (ht < temp && ht < HASH_CAP) ht <<= 1;
-            est = ht;
-        }
-        est_nnz[row] = est;
-    }
-}
-
-// ==========================================================================
-//  MinHash 估计(非-HLL 上界估计;EST_METHOD=minhash|kmv 启用,默认 HLL)
-// --------------------------------------------------------------------------
-//  与 HLL 的机制差异(刻意与 Ocean 的 HLL 正交,不撞车):
-//    · HLL  :每个 partition 存【leading-zero 寄存器】(uint8),build 用 atomicMax(clz),merge 用 packed __vmaxu4。
-//    · MinHash:每个 partition 存【最小完整 hash 值】(uint32),build 用 atomicMin(hash),merge 用逐 partition min。
-//  estimator:V<m → linear counting(小范围);V==m → 2^32·Σ(1/min_j) − m。
-//  目的是安全上界(给 buffer/hash 表 sizing),非紧点估计;×EXPAND + overflow 回退兜底低估。
-//  注:这是「per-partition MinHash」sketch(bottom-k 家族的 partition 变体),build/merge 代数与 HLL
-//    同形(per-element 一次 atomic、逐位 merge),故可直接复用现有两阶段 pipeline。
-// ==========================================================================
-#define MH_M HLL_M                       // partition 数(=128,与 HLL 同,便于复用 bin-snap 阈值)
-#define MH_EMPTY 0xffffffffu             // 空 partition 哨兵
-
-// Phase 1:对 B(=A)每行建 MinHash sketch(线性扫 CSR,O(nnz))。结构同 hll_construct,仅 max→min、uint8→uint32。
+// Phase 1:对 B(=A)每行建 MinHash sketch(线性扫 CSR,O(nnz))。每元素 atomicMin keep 最小完整 hash(uint32)。
 __global__ void mh_construct_kernel(
     const int *B_row_ptr, const int *B_col_ind,
     int B_rows, int B_nnz,
@@ -287,7 +114,7 @@ __global__ void mh_construct_kernel(
         }
         unsigned int h = murmur_hash3(col);
         int idx = h & (MH_M - 1);                  // 低 log2(MH_M) 位 → partition
-        atomicMin(&current_scratch[idx], h);       // MIN 完整 hash(替代 HLL 的 atomicMax(clz))
+        atomicMin(&current_scratch[idx], h);       // MIN 完整 hash(keep 最小值)
     }
     __syncthreads();
 
@@ -295,9 +122,7 @@ __global__ void mh_construct_kernel(
     for (int i = threadIdx.x; i < num_rows * MH_M; i += blockDim.x) global_ptr[i] = smem[i];
 }
 
-// Phase 2:对 A 每行,逐 partition min 合并引用 B 行的 MinHash sketch(O(nnz_A))。
-//   blockDim.x = MH_M/4 = 32(单 warp):每线程 owning 4 consecutive partitions,vectorized uint4 merge。
-//   整行 sketch = 128 uint32 = 512B = 32×uint4 → 一个 warp 一次 coalesced 读完一行(对齐 HLL packed 吞吐)。
+// Phase 2:对 A 每行逐 partition min 合并(单 warp,vectorized uint4 merge)
 __global__ void mh_merge_kernel(
     const int *A_row_ptr, const int *A_col_ind,
     int A_rows,
@@ -354,12 +179,12 @@ __global__ void mh_merge_kernel(
         } else {
             E = (double)0x100000000LL * sum_inv - (double)MH_M;           // 2^32·Σ(1/min_j) − m
         }
-        int temp = (int)(E * HLL_EXPAND);
+        int temp = (int)(E * EST_EXPAND);
         if (temp < 1) temp = 1;
         int est;
-        if (temp <= HLL_ULTRA_THR) {                                      // ultra:线性 kernel,est 保留紧 temp
+        if (temp <= EST_ULTRA_THR) {                                      // ultra:线性 kernel,est 保留紧 temp
             est = temp;
-        } else {                                                          // 否则 snap 到 next_pow2 ∈[32,HASH_CAP](同 HLL)
+        } else {                                                          // 否则 snap 到 next_pow2 ∈[32,HASH_CAP]
             int ht = 32;
             while (ht < temp && ht < HASH_CAP) ht <<= 1;
             est = ht;
@@ -368,8 +193,7 @@ __global__ void mh_merge_kernel(
     }
 }
 
-// 按【桶】跑:blockIdx.x = 桶内行索引,实际行号 = bucket_rows[idx];ht_size = 该桶 hash 表大小(2 的幂,全 launch 统一)。
-// binning:轻行桶用小表 → 高 SMEM 占用率;重行桶用大表;distinct>ht_size → overflow_flag(上层回退 merge3)。
+// 按桶跑:ht_size = 该桶 hash 表大小;轻行小表、重行大表,distinct>ht_size → overflow_flag
 __global__ void hash_spa_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,   // 内层 j 来源:AA=A,ATT=Aᵀ(CSC)
@@ -392,8 +216,7 @@ __global__ void hash_spa_kernel(
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    // G 从 ht_size 推(零 scan):ht_size 大 = 重行(更多 distinct → 更长 B-row → 更多 j) → G 大;
-    //   ht_size 小 = 轻行(短 B-row) → G 小(更多 k 并行)。G ∈ {4,8,16,32}。
+    // G 从 ht_size 推:重行→G 大,轻行→G 小(更多 k 并行);G ∈ {4,8,16,32}
     int G = (ht_size <= 64) ? 4 : (ht_size <= 256) ? 8 : (ht_size <= 1024) ? 16 : 32;
     int num_groups = HASH_BLOCK / G;
     int my_group = tid / G, my_id = tid % G;
@@ -417,8 +240,7 @@ __global__ void hash_spa_kernel(
     }
     __syncthreads();
 
-    // extract 去重项 → tmp。小行(ht≤CSORT_HT)在 SMEM 内 compact+count-sort 写有序(Ocean compactAndSort 式);
-    //   大行无序写(交 compact_sort 的 BlockRadixSort)。
+    // extract 去重项 → tmp:小行(ht≤CSORT_HT)SMEM 内 compact+count-sort 写有序,大行无序写(交 compact_sort)
     __shared__ int cnt;
     if (tid == 0) cnt = 0;
     __syncthreads();
@@ -457,14 +279,7 @@ __global__ void hash_spa_kernel(
     }
 }
 
-// hash_spa_priv_kernel —— warp 私有 SPA(创新点原型,HASH_PRIV 门控)。
-//   把 k 循环按 warp 分区(W 张私有 SMEM 表)。关键不变式:CSR 行内列唯一 + k 按 warp 不相交分区
-//   ⇒ 单 warp 内对任一列 j 的访问在时间上不并发(同一 k 内 32 lane 取不同 j;跨 k 顺序执行)
-//   ⇒ Phase A 累加用【plain +=,无 atomicAdd】,只有插入用 atomicCAS(处理碰撞)。
-//   于是热门列的 dup 次 atomicAdd 被整体消除(这正是 flat SPA 的结构瓶颈,worklog §21-24 已证)。
-//   Phase B 把 warp 1..W-1 的私表并入 warp 0 表(跨 warp 共享 → atomicAdd,fan-in ≤ W)。
-//   Phase C extract warp 0 表 → tmp(复用 flat extract)。SMEM = W*ht*(int+double);不 fit → 上层走 flat。
-//   blockDim = W*32(每 warp 一表);W 由 host 传(HASH_PRIV_W,默认 8)。
+// hash_spa_priv_kernel:warp 私有 SPA(HASH_PRIV 门控):k 按 warp 分区→Phase A 无 atomicAdd 累加,Phase B 跨 warp merge,Phase C extract
 __global__ void hash_spa_priv_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *bucket_rows, int n_in_bucket, int ht_size, int W,
@@ -490,7 +305,7 @@ __global__ void hash_spa_priv_kernel(
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
 
-    // ---- Phase A:warp 私有累加(k 按 warp 分区;plain +=,无 atomicAdd)----
+    // Phase A:warp 私有累加(k 按 warp 分区;plain +=,无 atomicAdd)
     for (int p = rs + warp; p < re; p += W) {              // 本 warp 的 k(stride W)
         int k = A_col_idx[p];
         double a_ik = A_val[p];
@@ -510,7 +325,7 @@ __global__ void hash_spa_priv_kernel(
     }
     __syncthreads();
 
-    // ---- Phase B:merge warp 1..W-1 → warp 0 表(共享,atomicAdd,fan-in ≤ W)----
+    // Phase B:merge warp 1..W-1 → warp 0 表(共享,atomicAdd,fan-in ≤ W)
     if (warp > 0) {
         for (int s = lane; s < ht_size; s += 32) {
             int c = my_col[s];
@@ -529,7 +344,7 @@ __global__ void hash_spa_priv_kernel(
     }
     __syncthreads();
 
-    // ---- Phase C:extract warp 0 表 → tmp(同 flat)----
+    // Phase C:extract warp 0 表 → tmp(同 flat)
     int *w0_col = sh_col; double *w0_val = sh_val;
     __shared__ int cnt;
     if (tid == 0) cnt = 0;
@@ -567,9 +382,7 @@ __global__ void hash_spa_priv_kernel(
     }
 }
 
-// ultrasparse:est ≤ HLL_ULTRA_THR(HLL 估计 ≤ 16)。不建 hash,每线程一行,寄存器小数组线性去重累加
-//   (省 hash 建表/atomic/行内排序)。对应 Ocean 的 use_ultrasparse_workflow。
-//   CAP=32 给 est≤16(真 distinct ~≤16)留 2× 余量;若仍不够(HLL 低估)→ overflow_flag → 上层回退 merge3。
+// ultrasparse:est≤EST_ULTRA_THR,不建 hash,每线程一行寄存器小数组线性去重累加;CAP=32 留 2× 余量,不够→overflow_flag
 __global__ void hash_ultra_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
@@ -581,7 +394,7 @@ __global__ void hash_ultra_kernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n_ultra) return;
     int i = ultra_rows[idx];
-    const int CAP = 32;                          // 2× 于 HLL_ULTRA_THR,吸收 HLL 低估
+    const int CAP = 32;                          // 2× 于 EST_ULTRA_THR,吸收估计低估
     int u_col[CAP]; double u_val[CAP]; int u_cnt = 0;
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     for (int p = rs; p < re; p++) {
@@ -628,10 +441,7 @@ __global__ void split_key_kernel(const unsigned long long *key, int *col, int n)
     if (t < n) col[t] = (int)(key[t] & 0xffffffffu);
 }
 
-// per-row compact+sort(Ocean sortOutputDyn 式):每 block 一行。
-//   从 tmp(gapped,row_off)读 (col,val) → cub::BlockRadixSort 行内按 col 排 → 直接写 CSR(packed,row_ptr)。
-//   一次替掉 hash_compact_kernel + 全局 thrust::sort + split_key_kernel。
-//   要求 TPB*IPT ≥ ht(该行 hash 表大小);因非溢出行 ht ≥ row_nnz,故装得下。col=key 低 32 位,排序位 [0,32)。
+// per-row compact+sort:每 block 一行,BlockRadixSort 行内按 col 排→直接写 CSR;一次替掉 compact+全局 sort+split_key
 template<int TPB, int IPT>
 __global__ void hash_compact_sort_kernel(
     const int *rows, int n_rows,
@@ -673,55 +483,7 @@ __global__ void hash_compact_sort_kernel(
     }
 }
 
-// ========== HLL 估计(Ocean 风格:替 flop_ub 收紧 tmp buffer)==========
-// 每行一个 block,SMEM=m=1024 个 uint32 寄存器。
-// 遍历行 i 的所有中间积(列 j)→ hash(j) → atomicMax 寄存器 → thread 0 算 HLL 公式。
-__global__ void hll_estimate_kernel(
-    const int *A_row_ptr, const int *A_col_idx, int A_rows,
-    int *est_nnz)
-{
-    int i = blockIdx.x;
-    if (i >= A_rows) return;
-    int tid = threadIdx.x;
-
-    extern __shared__ unsigned int regs[];          // [HLL_M], init 0
-    for (int j = tid; j < HLL_M; j += blockDim.x) regs[j] = 0;
-    __syncthreads();
-
-    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    for (int p = rs; p < re; p++) {                 // 顺序遍历 k(同 hash_spa_kernel)
-        int k = A_col_idx[p];
-        int ks = A_row_ptr[k], ke = A_row_ptr[k + 1];
-        for (int q = ks + tid; q < ke; q += blockDim.x) {
-            unsigned int h = (unsigned int)(A_col_idx[q] * 2654435761u);
-            int idx = h >> (32 - HLL_P);
-            unsigned int rest = h << HLL_P;
-            int rho = (rest == 0) ? (33 - HLL_P) : (__clz(rest) + 1);
-            atomicMax(&regs[idx], (unsigned int)rho);
-        }
-    }
-    __syncthreads();
-
-    if (tid == 0) {
-        double sum = 0.0;
-        int zeros = 0;
-        for (int j = 0; j < HLL_M; j++) {
-            sum += 1.0 / (double)(1ULL << regs[j]);
-            if (regs[j] == 0) zeros++;
-        }
-        double alpha = 0.7213 / (1.0 + 1.079 / (double)HLL_M);
-        double E = alpha * (double)HLL_M * (double)HLL_M / sum;
-        if (E <= 2.5 * HLL_M && zeros > 0)          // 小范围修正(linear counting)
-            E = (double)HLL_M * log((double)HLL_M / (double)zeros);
-        int est = (int)(E * HLL_EXPAND);
-        if (est < 1) est = 1;
-        est_nnz[i] = est;
-    }
-}
-
-// ========== GPU 端分桶(Ocean 风格:无 host 往返)==========
-// 每行算 bucket_id 并同时直方图计数(融合原 compute_bucket + bucket_count,省 1 launch):
-//   est≤HLL_ULTRA_THR → ultra(bin N_BINS-1);否则 est(已是 next_pow2)→ bin 0..9
+// GPU 端分桶(无 host 往返):每行算 bucket_id 并直方图计数(融合省 1 launch)
 __global__ void compute_bucket_kernel(
     const int *est, int A_rows, int ultra_thr, int *bucket_id, int *counts)
 {
@@ -751,9 +513,7 @@ __global__ void scatter_rows_kernel(
     sorted_rows[slot] = i;
 }
 
-// 单 block inclusive prefix-sum(Hillis-Steele)。小阵(A_rows ≤ 1024)专用,
-//   替 thrust::inclusive_scan(thrust 对几百元素也走多 kernel,launch 开销大)。
-//   blockDim = next_pow2(n)(≥ n),shared = blockDim×sizeof(int)。y[k]=Σx[0..k]。
+// 单 block inclusive prefix-sum(Hillis-Steele);小阵专用,替 thrust::inclusive_scan
 __global__ void scan_inclusive_kernel(const int *x, int *y, int n) {
     extern __shared__ int ss[];
     int tid = threadIdx.x;
@@ -808,14 +568,14 @@ __global__ void hash_check_sorted_kernel(const int *row_ptr, const int *col, int
         if (col[i] >= col[i + 1]) atomicAdd(violations, 1);
 }
 
-// ========== Host ==========
+// Host
 
 static void hash_product(
     void *A_buffer, int A_rows, int A_cols, int A_nnz, bool att,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
     const char *tag = att ? "atth" : "hash";
-    dbg("[%s] start (HASH_CAP=%d, HLL_P=%d)\n", tag, HASH_CAP, HLL_P);
+    dbg("[%s] start (HASH_CAP=%d)\n", tag, HASH_CAP);
     HashProf prof(att ? "atth-prof" : "hash-prof");
     dev_pool_reset();   // device arena:本调用所有 device buffer 复用(省 ~13 cudaMalloc/Free)
 
@@ -831,7 +591,7 @@ static void hash_product(
     double *dA_val = (double*)(b + ALIGN8(A_rp_sz + A_ci_sz));
     dbg("[%s] h2d\n", tag);
 
-    // 内层 j 的来源 B:AA → A 本身;ATT → Aᵀ(= A 的 CSC)。hash_spa/ultra/HLL-construct 读 B 的行 k。
+    // 内层 j 的来源 B:AA → A 本身;ATT → Aᵀ(= A 的 CSC)。hash_spa/ultra/mh-construct 读 B 的行 k。
     int *dB_rp, *dB_ci; double *dB_val;
     int *d_csc_cp = nullptr, *d_csc_ri = nullptr; double *d_csc_val = nullptr;
     if (att) {
@@ -843,12 +603,10 @@ static void hash_product(
     }
     const int upper_tri = att ? 1 : 0;
 
-    // Stage 1: row_off 由 HLL est 的 scan 给出。
-    //   (streamline:小阵用 flop_ub count 替 HLL 两阶段。bp_0 有效(0.36→0.32);bin8-9 sort
-    //    landmine 已修(<256,64>);count 实测 0.011ms 快(旧 0.85 是 clock 抖动)。现已重开。)
+    // Stage 1: row_off 由 est 的 scan 给出(小阵 streamline 用 flop_ub count)
     int *d_off; d_off = decltype(d_off)(dev_alloc((A_rows + 1) * sizeof(int)));
 
-    // 估计每行 distinct:小阵(A_nnz<STREAMLINE_NNZ)→ flop_ub(1 并行 count kernel);大阵 → HLL 两阶段
+    // 估计每行 distinct:小阵(A_nnz<STREAMLINE_NNZ)→ flop_ub(1 并行 count kernel);大阵 → MinHash 两阶段
     int *d_est; d_est = decltype(d_est)(dev_alloc(A_rows * sizeof(int)));
     if (A_nnz < STREAMLINE_NNZ) {
         prof("count_flop", [&]{
@@ -856,58 +614,26 @@ static void hash_product(
             CHECK_CUDA(cudaGetLastError());
         });
     } else {
-        // 估计方法门控:默认 MinHash(自研,与 Ocean HLL 区分);EST_METHOD=hll → HLL;minhash/kmv/unset → MinHash。
-        static int g_est = -1;
-        if (g_est < 0) {
-            const char *e = getenv("EST_METHOD");
-            g_est = (e && !strcmp(e, "hll")) ? 0 : 1;   // HLL iff EST_METHOD=hll; else MinHash
-            dbg("[hash] EST_METHOD=%s → %s\n", e ? e : "(unset)", g_est ? "MinHash" : "HLL");
-        }
-        if (g_est) {
-            // ===== MinHash 两阶段(非-HLL;机制见 mh_construct/mh_merge 注释)=====
-            unsigned int *d_mh; d_mh = decltype(d_mh)(dev_alloc((size_t)A_rows * MH_M * sizeof(unsigned int)));
-            int rows_per_block = 32;
-            size_t smem_p1 = (size_t)rows_per_block * MH_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
-            if (smem_p1 > 48 * 1024)
-                CHECK_CUDA(cudaFuncSetAttribute(mh_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
-            int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
-            prof("mh_construct", [&]{
-                mh_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
-                    dB_rp, dB_ci, A_rows, A_nnz, d_mh, rows_per_block);
-                CHECK_CUDA(cudaGetLastError());
-            });
-            int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
-            int smem_p2 = MH_M * sizeof(unsigned int);   // [MH_M] uint32(smem_merge)
-            prof("mh_merge", [&]{
-                mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                    dA_rp, dA_ci, A_rows, d_mh, d_est);
-                CHECK_CUDA(cudaGetLastError());
-            });
-            dev_free(d_mh);
-        } else {
-            // ===== HLL 两阶段(默认,对齐 Ocean)=====
-            // Phase 1: 对 A(=B 自乘)每行建 HLL sketch。线性扫 CSR,O(nnz) 非 O(flop)。
-            unsigned char *d_hll; d_hll = decltype(d_hll)(dev_alloc((size_t)A_rows * HLL_M));
-            int rows_per_block = 32;  // 大 rows_per_block 摊薄 SMEM init 开销(32×1024×4=128KB → opt-in)
-            size_t smem_p1 = (size_t)rows_per_block * HLL_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
-            if (smem_p1 > 48 * 1024)
-                CHECK_CUDA(cudaFuncSetAttribute(hll_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
-            int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
-            prof("hll_construct", [&]{
-                hll_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
-                    dB_rp, dB_ci, A_rows, A_nnz, d_hll, rows_per_block);
-                CHECK_CUDA(cudaGetLastError());
-            });
-            // Phase 2: 对 A 每行,读 B 的 HLL sketch 做 packed __vmaxu4 merge。O(nnz_A)。
-            int p2_block = HLL_M / 2;   // blockDim×4 = 2×HLL_M → b_rows_per_iter=2(Ocean 同款,2× 吞吐)
-            int smem_p2 = HLL_M * 2;   // 2 批 × HLL_M(smem_merge 用)
-            prof("hll_merge", [&]{
-                hll_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                    dA_rp, dA_ci, A_rows, d_hll, d_est);
-                CHECK_CUDA(cudaGetLastError());
-            });
-            dev_free(d_hll);
-        }
+        // MinHash 两阶段(partition bottom-k sketch;机制见 mh_construct/mh_merge)
+        unsigned int *d_mh; d_mh = decltype(d_mh)(dev_alloc((size_t)A_rows * MH_M * sizeof(unsigned int)));
+        int rows_per_block = 32;
+        size_t smem_p1 = (size_t)rows_per_block * MH_M * sizeof(unsigned int) + (size_t)(rows_per_block + 1) * sizeof(int);
+        if (smem_p1 > 48 * 1024)
+            CHECK_CUDA(cudaFuncSetAttribute(mh_construct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_p1));
+        int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
+        prof("mh_construct", [&]{
+            mh_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
+                dB_rp, dB_ci, A_rows, A_nnz, d_mh, rows_per_block);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
+        int smem_p2 = MH_M * sizeof(unsigned int);   // [MH_M] uint32(smem_merge)
+        prof("mh_merge", [&]{
+            mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
+                dA_rp, dA_ci, A_rows, d_mh, d_est);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        dev_free(d_mh);
     }
     int total_est;
     prof("est_scan", [&]{
@@ -920,11 +646,11 @@ static void hash_product(
                                    thrust::device_ptr<int>(d_est + A_rows),
                                    thrust::device_ptr<int>(d_off + 1));
         }
-        CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入计时(对齐 Ocean)
+        CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入计时
     });
     dbg("[hash] total_est=%d\n", total_est);
 
-    // Stage 2: GPU 端分桶(Ocean 风格:全 device,无 host 往返)+ 预分配大 buffer(零 per-bucket malloc/free)
+    // Stage 2: GPU 端分桶(全 device,无 host 往返)+ 预分配大 buffer(零 per-bucket malloc/free)
     int *d_row_nnz; d_row_nnz = decltype(d_row_nnz)(dev_alloc(A_rows * sizeof(int)));
     int *d_overflow; d_overflow = decltype(d_overflow)(dev_alloc(sizeof(int)));
     unsigned long long *d_tmp_key; double *d_tmp_val;
@@ -933,7 +659,7 @@ static void hash_product(
     // d_val(C_val)现 alias 进连续 dC(compact+sort 直写,见 cnnz_scan 后),不再单独分配/释放。
     double *d_val = nullptr;
 
-    // 2a: GPU 端分桶(HLL est → bucket):bucket_id → count → exclusive scan → scatter(全 device)
+    // 2a: GPU 端分桶(MinHash est → bucket):bucket_id → count → exclusive scan → scatter(全 device)
     int *d_bkid; d_bkid = decltype(d_bkid)(dev_alloc(A_rows * sizeof(int)));
     int *d_cnt;  d_cnt = decltype(d_cnt)(dev_alloc( N_BINS * sizeof(int)));
     int *d_offb; d_offb = decltype(d_offb)(dev_alloc(N_BINS * sizeof(int)));
@@ -942,7 +668,7 @@ static void hash_product(
     int h_cnt[N_BINS], h_off[N_BINS];
     prof("binning", [&]{
         CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));   // 先清零(fused kernel 内 atomicAdd 累加)
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, HLL_ULTRA_THR, d_bkid, d_cnt);
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, EST_ULTRA_THR, d_bkid, d_cnt);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
@@ -960,8 +686,7 @@ static void hash_product(
         if (maxsm > 48 * 1024)
             CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)maxsm));
     }
-    // 2b-priv: warp 私有 SPA 门控(HASH_PRIV=1 启用;HASH_PRIV_W=warp/私有表数,默认 8,范围 [2,8])。
-    //   仅对 SMEM 可容纳的桶(W*ht*(int+double) ≤ PRIV_SMEM_MAX)走 priv,其余桶走 flat。
+    // 2b-priv: warp 私有 SPA 门控(HASH_PRIV=1,HASH_PRIV_W 默认 8);仅 SMEM 可容纳的桶走 priv
     static int g_priv = -1, g_privW = 8;
     if (g_priv < 0) {
         const char *e = getenv("HASH_PRIV");
@@ -973,7 +698,7 @@ static void hash_product(
                 cudaFuncAttributeMaxDynamicSharedMemorySize, 196 * 1024));   // H100 ≤228KB;launch 时按 bin 再判
     }
     const int PRIV_W = g_privW;
-    // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync)。memset+overflow D2H 纳入计时(对齐 Ocean)
+    // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync);memset+overflow D2H 纳入计时
     int overflow;
     prof("accumulate", [&]{
         CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
@@ -982,7 +707,7 @@ static void hash_product(
             if (n == 0) continue;
             int *rows_ptr = d_sort + h_off[bi];
             if (bi == N_BINS - 1) {
-                // ultra(est≤HLL_ULTRA_THR):线性,免 hash
+                // ultra(est≤EST_ULTRA_THR):线性,免 hash
                 hash_ultra_kernel<<<(n + 255) / 256, 256>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
@@ -1032,9 +757,9 @@ static void hash_product(
     dbg("[hash] C_nnz=%d (est=%d, %.2fx over-alloc)\n", C_nnz_result, total_est,
         total_est > 0 ? (double)total_est / C_nnz_result : 0.0);
 
-    // HLL underflow check: actual C_nnz > estimated total → 回退 merge3
+    // est underflow check: actual C_nnz > estimated total → 回退 merge3
     if (C_nnz_result > total_est) {
-        fprintf(stderr, "[hash] HLL underflow: C_nnz=%d > total_est=%d → 回退 merge\n", C_nnz_result, total_est);
+        fprintf(stderr, "[hash] est underflow: C_nnz=%d > total_est=%d → 回退 merge\n", C_nnz_result, total_est);
         *C_buffer_out = nullptr; *C_rows = A_rows; *C_cols = A_cols; *C_nnz = -1;
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
@@ -1044,11 +769,7 @@ static void hash_product(
         return;
     }
 
-    // Stage 4+5+6: per-row compact+sort(Ocean sortOutputDyn 式 BlockRadixSort)一次替掉 compact + 全局 sort + split_key。
-    //   每 block 一行:从 tmp(gapped,row_off)读 → BlockRadixSort 行内按 col 排 → 写 CSR(packed,row_ptr)。
-    //   复用 est-分桶,按 bin 选 config(cap ≥ ht ≥ row_nnz):bi0-1/ultra→64×1, bi2-3→128×2, bi4-5→256×4, bi6-7→512×8, bi8-9→1024×16。
-    //   输出连续 dC=[row_ptr|col|val](精确大小):dC_ci/d_val 是 dC 偏移别名 → compact+sort 直写连续布局,
-    //   免去旧 pack 的 col/val 两个大 D2D gather(对齐 Ocean 连续 C)。dC_rp(scan 产物)落位 dC 头部用 1 个小 D2D。
+    // Stage 4+5+6: per-row compact+sort(BlockRadixSort)替掉 compact+全局 sort+split_key;按 bin 选 config,直写连续 dC
     size_t C_rp_sz  = (A_rows + 1) * sizeof(int);
     size_t C_ci_sz  = (size_t)C_nnz_result * sizeof(int);
     size_t C_v_sz   = (size_t)C_nnz_result * sizeof(double);
@@ -1113,7 +834,7 @@ void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
     hash_product(A_buffer, A_rows, A_cols, A_nnz, /*att=*/false, C_buffer_out, C_rows, C_cols, C_nnz);
 }
 
-// C = A·Aᵀ 上三角(j≥i):AA hash SPA 的忠实拷贝,B=Aᵀ(CSC)+ j≥i 过滤。复用 HLL sizing/binning/compact_sort。
+// C = A·Aᵀ 上三角(j≥i):AA hash SPA 的忠实拷贝,B=Aᵀ(CSC)+ j≥i 过滤。复用 MinHash sizing/binning/compact_sort。
 void spgemm_att_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
                      void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz) {
     hash_product(A_buffer, A_rows, A_cols, A_nnz, /*att=*/true, C_buffer_out, C_rows, C_cols, C_nnz);

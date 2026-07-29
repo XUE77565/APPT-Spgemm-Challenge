@@ -1,0 +1,24 @@
+\begin{document}
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{l c c c c c c}
+\multicolumn{7}{r}{\hfill \footnotesize\color{gray} \textbf{H100 PCIe} \,\,\, \textbf{Unit}: ms\,\,\, \textbf{Each cell}: speedup (runtime)\,\,\, \textbf{Arithmetic} mean}\\
+\hline\hline
+\textbf{Method} & \textbf{Dense (3)} & \textbf{Mildly sparse (32)} & \textbf{Highly sparse (52)} & \textbf{Extremely sparse (13)} & \textbf{ALL (100)} & \textbf{Wins}\\
+\hline
+dense\textsuperscript{1} & 1.54$\times$ {\small\color{gray}(0.19)} & 2.33$\times$ {\small\color{gray}(0.29)} & \textbf{70.0$\times$} {\small\color{gray}(1.61)} & \textbf{1851$\times$} {\small\color{gray}(47.8)} & \textbf{278$\times$} {\small\color{gray}(1.35)} & \textbf{100/100} \\
+cuBLAS\textsuperscript{2} & 2.05$\times$ {\small\color{gray}(0.24)} & 2.37$\times$ {\small\color{gray}(0.33)} & 20.0$\times$ {\small\color{gray}(0.98)} & 468$\times$ {\small\color{gray}(15.80)} & 72.1$\times$ {\small\color{gray}(0.93)} & \textbf{100/100} \\
+cuSPARSE\textsuperscript{2} & 2.54$\times$ {\small\color{gray}(0.31)} & 2.28$\times$ {\small\color{gray}(0.31)} & 2.21$\times$ {\small\color{gray}(0.42)} & 2.44$\times$ {\small\color{gray}(0.53)} & 2.28$\times$ {\small\color{gray}(0.39)} & 91/100 \\
+OpSparse\textsuperscript{3} & \textbf{6.30$\times$} {\small\color{gray}(0.71)} & \textbf{6.73$\times$} {\small\color{gray}(0.81)} & 4.64$\times$ {\small\color{gray}(0.86)} & 5.56$\times$ {\small\color{gray}(1.01)} & 5.48$\times$ {\small\color{gray}(0.86)} & \textbf{100/100} \\
+HSMU\textsuperscript{4} & 3.33$\times$ {\small\color{gray}(0.39)} & 2.30$\times$ {\small\color{gray}(0.30)} & 2.04$\times$ {\small\color{gray}(0.41)} & 2.66$\times$ {\small\color{gray}(0.57)} & 2.24$\times$ {\small\color{gray}(0.39)} & \textbf{100/100} \\
+Ocean\textsuperscript{5} & 3.71$\times$ {\small\color{gray}(0.41)} & 1.96$\times$ {\small\color{gray}(0.26)} & 1.51$\times$ {\small\color{gray}(0.29)} & 1.17$\times$ {\small\color{gray}(0.26)} & 1.68$\times$ {\small\color{gray}(0.28)} & 84/100 \\
+\textbf{\textit{Ours (ms)}} & \textbf{\textit{0.12}} & \textbf{\textit{0.14}} & \textbf{\textit{0.21}} & \textbf{\textit{0.23}} & \textbf{\textit{0.18}} &  \\
+\hline\hline
+\multicolumn{7}{l}{\footnotesize\color{gray} \textsuperscript{1} manual.\quad \textsuperscript{2} NVIDIA.\quad \textsuperscript{3} IEEE Access '22.\quad \textsuperscript{4} HPCA '25.\quad \textsuperscript{5} ICS '26.}
+\end{tabular}
+\end{table}
+
+
+\end{document}

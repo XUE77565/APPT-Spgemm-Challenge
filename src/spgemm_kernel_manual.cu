@@ -44,7 +44,7 @@ __device__ double row_dot_product(
     return dot;
 }
 
-// ========== A x A^T ==========
+// A x A^T
 
 __global__ void count_full_nnz_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
@@ -105,17 +105,7 @@ __global__ void fill_full_result_kernel(
     }
 }
 
-// ========== A x A (self product) —— ESC: Expand–Sort–Compress ==========
-// 设计(替掉旧的 shared-hash SPA):
-//   每个中间乘积 a_ik * a_kj 看成三元组 (row=i, col=j, val=a_ik*a_kj)。
-//   1) count_intermediates : 便宜的符号阶段,算每行"中间项数"= Σ_{k∈A[i,:]} nnz(A[k,:]),
-//      用来分配展开阶段的写偏移(无需 hash,无需原子)。
-//   2) expand_intermediates : 【唯一的重计算】一行一块,把所有中间项写进全局 COO,
-//      key=(row<<32)|col 便于一次排序就按(行,列)有序;每行用 shared 计数器领号。
-//   3) thrust::sort_by_key  : 按 key 排序。
-//   4) thrust::reduce_by_key: 相邻同 key 求和去重 → 列有序、无重复的 CSR。
-// 相比旧版:中间展开只做一遍(旧版 count+fill 各一遍);全局存储无 HASH_SIZE=4096 /
-// temp[256] 上限,不再丢非零;排序/去重交给 thrust,正确性有保证。
+// A x A (self product) — ESC: Expand–Sort–Compress(count 中间项数 → expand 全局 COO → sort → reduce_by_key 去重 → CSR)。
 
 // Stage 1: 每行中间乘积数(精确,非上界:每个 a_ik 与 a_kj 各产生一条)。
 __global__ void count_intermediates_kernel(
@@ -126,7 +116,7 @@ __global__ void count_intermediates_kernel(
     long long s = 0;
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1]; //A的第i行有这么多非0的
     for (int p = rs; p < re; p++) {
-        int k = A_col_idx[p]; //找这些非零的对应的k有没有非零的, 进而估算出nnz数量 
+        int k = A_col_idx[p]; // 取列号 k
         s += (long long)(A_row_ptr[k + 1] - A_row_ptr[k]);   // nnz(A 的第 k 行)
     }
     ub[i] = (int)s;
@@ -172,7 +162,7 @@ __global__ void finalize_csr_kernel(
     atomicAdd(&C_row_nnz[(int)(k >> 32)], 1);               // 行号 = key 高 32 位
 }
 
-// ========== A x A^T Host ==========
+// A x A^T Host
 
 void spgemm_transpose_product_manual(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
@@ -226,9 +216,7 @@ void spgemm_transpose_product_manual(
         dC_row_ptr, dC_col_idx, dC_val);
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    // 去掉逐行排序，改成批量排序
-    // 注意：这里结果已经是按列号递增的（因为 j 递增遍历）
-    // 所以不需要排序！
+    // 结果已按列号递增(j 递增遍历),无需排序
 
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = C_nnz_result * sizeof(int);
@@ -267,14 +255,14 @@ void spgemm_transpose_product_manual(
     cudaFree(dC_buffer);
 }
 
-// ========== A x A Host (ESC) ==========
+// A x A Host (ESC)
 
 void spgemm_self_product_manual(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
     dbg("[gust] start\n");
-    // ---- 0. A 上传到 GPU(与旧版相同)----
+    // 0. A 上传到 GPU
     size_t A_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t A_col_idx_size = A_nnz * sizeof(int);
     size_t A_val_size = A_nnz * sizeof(double);
@@ -296,7 +284,7 @@ void spgemm_self_product_manual(
 
     const int block = 256;
 
-    // ---- Stage 1: 每行中间乘积数(便宜符号阶段,无 hash/原子)----
+    // Stage 1: 每行中间乘积数(便宜符号阶段,无 hash/原子)
     dbg("ESC: count intermediates begin\n");
     int *d_ub; //d_ub是每一行的upper_bound
     CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
@@ -309,7 +297,7 @@ void spgemm_self_product_manual(
         dbg("[gust] count\n");
     });
 
-    // ---- Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数 ----
+    // Stage 1b: 前缀和得每行写偏移; off[A_rows] = 总中间项数
     int *d_off;
     CHECK_CUDA(cudaMalloc(&d_off, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));                 // off[0] = 0
@@ -323,7 +311,7 @@ void spgemm_self_product_manual(
         dbg("[gust] scan\n");
     });
 
-    // ---- Stage 2: 展开(唯一的重计算)写全局 COO(key, val)----
+    // Stage 2: 展开(唯一的重计算)写全局 COO(key, val)
     unsigned long long *d_key;
     double *d_val;
     CHECK_CUDA(cudaMalloc(&d_key, (size_t)total_ub * sizeof(unsigned long long)));
@@ -336,7 +324,7 @@ void spgemm_self_product_manual(
         dbg("[gust] expand\n");
     });
 
-    // ---- Stage 3: 按 key=(row<<32|col) 全局排序 ----
+    // Stage 3: 按 key=(row<<32|col) 全局排序
     prof("sort", [&] {
         dbg("ESC: sort_by_key begin\n");
         thrust::sort_by_key(thrust::device_ptr<unsigned long long>(d_key),
@@ -346,7 +334,7 @@ void spgemm_self_product_manual(
         dbg("[gust] sort\n");
     });
 
-    // ---- Stage 3b: 相邻同 key 求和去重 → (red_key, red_val) ----
+    // Stage 3b: 相邻同 key 求和去重 → (red_key, red_val)
     unsigned long long *d_rk;
     double *d_rv;
     CHECK_CUDA(cudaMalloc(&d_rk, (size_t)total_ub * sizeof(unsigned long long)));
@@ -369,7 +357,7 @@ void spgemm_self_product_manual(
     cudaFree(d_key);          // COO 不再需要
     cudaFree(d_val);
 
-    // ---- Stage 4: 拆 key→col 写 C_col_idx/C_val,统计每行 nnz ----
+    // Stage 4: 拆 key→col 写 C_col_idx/C_val,统计每行 nnz
     int *dC_col_idx;
     double *dC_val;
     int *dC_row_nnz;
@@ -377,7 +365,7 @@ void spgemm_self_product_manual(
     CHECK_CUDA(cudaMalloc(&dC_val, (size_t)C_nnz_result * sizeof(double)));
     CHECK_CUDA(cudaMalloc(&dC_row_nnz, A_rows * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_nnz, 0, A_rows * sizeof(int)));
-    // ---- Stage 4b: 每行 nnz → C_row_ptr ----
+    // Stage 4b: 每行 nnz → C_row_ptr
     int *dC_row_ptr;
     CHECK_CUDA(cudaMalloc(&dC_row_ptr, (A_rows + 1) * sizeof(int)));
     CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
@@ -394,7 +382,7 @@ void spgemm_self_product_manual(
     cudaFree(d_rk);
     cudaFree(d_rv);
 
-    // ---- 打包成单块 + D2H(与旧版相同)----
+    // 打包成单块 + D2H
     size_t C_row_ptr_size = (A_rows + 1) * sizeof(int);
     size_t C_col_idx_size = (size_t)C_nnz_result * sizeof(int);
     size_t C_val_size = (size_t)C_nnz_result * sizeof(double);

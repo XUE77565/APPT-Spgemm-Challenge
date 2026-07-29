@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
     }
 
 
-    // ============ A·Aᵀ 上三角 profiling 模式 (argv[2]=="att") ============
+    // A·Aᵀ 上三角 profiling 模式 (argv[2]=="att")
     if (argc >= 3 && std::string(argv[2]) == "att") {
         printf("===============WARMING UP (att)===============");
         {
@@ -143,8 +143,7 @@ int main(int argc, char **argv) {
     }
 
 
-    // ---- 预热:正式计时前各方法空跑 3 轮,摊掉 thrust 工作区 / cuSPARSE handle /
-    //   CUDA allocator 的一次性冷启动开销 + cache/TLB 预热,使 T1–T4 测的是稳态性能 ----
+    // 预热:各方法空跑数轮,摊掉 thrust/cuSPARSE handle/CUDA allocator 的冷启动开销,测稳态性能
     printf("===============WARMINGUP (5 rounds)===============");
     for (int warmup = 0; warmup < 5; warmup++) {
         void *wc = nullptr; int wr = 0, wcol = 0, wn = 0;

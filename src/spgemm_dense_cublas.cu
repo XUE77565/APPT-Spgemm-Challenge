@@ -15,15 +15,8 @@
 #define CHECK_CUBLAS(call) do { cublasStatus_t _s=(call); if(_s!=CUBLAS_STATUS_SUCCESS){ \
     std::cerr<<"cuBLAS error "<<_s<<" ("<<__FILE__<<":"<<__LINE__<<")\n"; std::exit(1);} } while(0)
 
-// =============================================================================
-//  cuBLAS dense baseline for C = A·A (sparse self-product via dense matmul).
-//  densify(A) → cublasDgemm(C=A·A, FP64) → sparsify(C). 全 GPU compute。
-//
-//  ⚠ 严格 FP64,无 Tensor Core:cublasDgemm(double) 本身只在 CUDA cores 上做 FP64
-//  FMA(Tensor Core 只做 FP16/BF16/TF32/FP8,不做 FP64);并显式 CUBLAS_PEDANTIC 关掉
-//  一切近似(TF32 等),确保纯 FP64。这是 dense-for-sparse 的"强 dense"参照(对照
-//  spgemm_dense 的 naive 标量 GEMM 弱参照)。
-// =============================================================================
+// cuBLAS dense baseline for C = A·A: densify(A) → cublasDgemm(FP64) → sparsify(C), all GPU.
+// Strict FP64 via CUBLAS_PEDANTIC_MATH (disables TF32/tensor cores) — the "strong dense" reference.
 
 // densify: scatter sparse CSR → dense row-major N×N。每 thread 一个 entry。
 __global__ void densify_kernel(const int *row_ptr, const int *col_idx,
@@ -86,9 +79,7 @@ int main(int argc, char **argv) {
 
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
-    // ⚠ 强制纯 FP64、无 Tensor Core、无 TF32:H100 有 FP64 Tensor Core(67 TFLOPS),
-    //   默认 cublasDgemm 可能走它。CUBLAS_PEDANTIC_MATH(=2)强制走 CUDA-core FP64
-    //   FMA(34 TFLOPS,纯 IEEE,无 TC、无 TF32)。慢 ~2× 但严格无 Tensor Core。
+    // 强制纯 FP64:CUBLAS_PEDANTIC_MATH 关掉 TF32/Tensor Core(慢 ~2×,严格无 TC)。
     CHECK_CUBLAS(cublasSetMathMode(handle, CUBLAS_PEDANTIC_MATH));
 
     int TPB=256;

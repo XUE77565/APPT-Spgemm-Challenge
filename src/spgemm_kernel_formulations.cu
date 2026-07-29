@@ -10,13 +10,7 @@
 #include <cstdlib>
 #include <vector>
 
-// 三种 SpGEMM 公式(自乘 C=A·A)的 ESC 对照实现:
-//   - Gustavson(行向, 外层=i): 见 spgemm_kernel_manual.cu, 保留不动
-//   - 外积  (outer, 外层=k): 本文件 spgemm_self_product_outer
-//   - 列向  (colwise, 外层=j):本文件 spgemm_self_product_colwise
-// 三者展开的是同一批中间项 (i,j,A[i,k]*A[k,j]),区别只在【外层并行轴 / 访存模式】;
-// 合并阶段(排序+去重求和)完全相同 → 共用 esc_merge()。
-// 外积与列向都要读 A 的"列",所以先把 CSR 转成 CSC。
+// 三种 SpGEMM 公式(自乘 C=A·A)的 ESC 对照实现:外积/列向/内积,合并阶段共用 esc_merge()。
 
 #define CHECK_CUDA(call) do { \
     cudaError_t err = call; \
@@ -27,11 +21,10 @@
     } \
 } while(0)
 
-// profiling:当前方法标签(各 host 入口设置),共享 helper 用它打统一 [tag] phase 桩。
-// parser 按相邻两戳相减得各阶段耗时。
+// profiling:当前方法标签(各 host 入口设置),parser 按相邻 [tag] phase 桩相减得各阶段耗时。
 static const char *g_tag = "?";
 
-// ===================== CSR -> CSC(自包含,不依赖 cusparse 版本)=====================
+// CSR -> CSC(自包含,不依赖 cusparse 版本)
 
 __global__ void csc_count_kernel(const int *col_idx, int nnz, int *col_count)
 {
@@ -98,8 +91,7 @@ void build_csc(const int *d_row_ptr, const int *d_col_idx, const double *d_val,
                                        d_tmp, d_csc_row, d_csc_val);
     }
     CHECK_CUDA(cudaDeviceSynchronize());
-    // 列内排序(row_idx 升序):并行散导致列内无序,而 lower_bound-based kernel(ATT merge3)需列内有序。
-    //   ESC(AA outer/colwise)走全局 sort、hash 遍历全项,均不依赖列内序;排序对它们无害。
+    // 列内排序(row_idx 升序):lower_bound-based kernel(ATT merge3)需列内有序;ESC/hash 不依赖列内序,排序无害。
     {
         unsigned long long *d_sortkey;
         CHECK_CUDA(cudaMalloc(&d_sortkey, (size_t)A_nnz * sizeof(unsigned long long)));
@@ -119,7 +111,7 @@ void build_csc(const int *d_row_ptr, const int *d_col_idx, const double *d_val,
     *val_out = d_csc_val;
 }
 
-// ===================== 共用:ESC 合并(排序 + 去重求和 → CSR)=====================
+// 共用:ESC 合并(排序 + 去重求和 → CSR)
 
 __global__ void esc_finalize_kernel(
     const unsigned long long *red_key, const double *red_val,
@@ -133,8 +125,7 @@ __global__ void esc_finalize_kernel(
     atomicAdd(&C_row_nnz[(int)(k >> 32)], 1);
 }
 
-// 输入展开好的 d_key[total]=(row<<32|col), d_val[total];
-// 输出(设备)*dC_col_idx[Cnnz], *dC_val[Cnnz], *dC_row_ptr[A_rows+1]; 返回 Cnnz。
+// ESC 合并:输入 d_key[total]/d_val[total],输出 *dC_col_idx/*dC_val/*dC_row_ptr,返回 Cnnz。
 static int esc_merge(unsigned long long *d_key, double *d_val, int total, int A_rows,
                      int **dC_col_idx, double **dC_val, int **dC_row_ptr)
 {
@@ -206,7 +197,7 @@ static void *pack_and_download(int *d_row_ptr, int *d_col_idx, double *d_val,
     return hb;
 }
 
-// ===================== 外积 (outer product, 外层 = k) =====================
+// 外积 (outer product, 外层 = k)
 
 // 每个收缩维 k 的中间项数 = nnz(列k) * nnz(行k)
 __global__ void count_outer_kernel(
@@ -295,9 +286,7 @@ void spgemm_self_product_outer(
     cudaFree(c_col); cudaFree(c_val); cudaFree(c_rp);
 }
 
-// ===================== 列向 (column-wise, 外层 = j) =====================
-// 注:经典"内积"(逐元素点积)与外积展开同一批中间项;这里以【输出列 j】为外层
-// 并行作为第三种收缩轴,访存全走 CSC。
+// 列向 (column-wise, 外层 = j):以输出列 j 为外层并行轴,访存全走 CSC。
 
 // 每个输出列 j 的中间项数 = Σ_{k ∈ 列j} nnz(列k)
 __global__ void count_colwise_kernel(
@@ -387,14 +376,7 @@ void spgemm_self_product_colwise(
     cudaFree(c_col); cudaFree(c_val); cudaFree(c_rp);
 }
 
-// ===================== 逐元素内积 (inner product) =====================
-// C[i,j] = row_i(A) · col_j(A),数值阶段对【每个输出元素】独立归并 row_i 与 col_j。
-// 关键:内积要"逐元素",必须先知道有哪些 (i,j) ——而"找结构"本身就是 SpGEMM,
-// 没法用廉价的全局 mark 并行去重(并发行会互相覆盖)。所以这里:
-//   符号阶段:借用 ESC(count+expand+sort+reduce)拿到【结构】(哪些 (i,j) 存在);
-//   数值阶段:才是真正的"逐元素内积"——每个 C[i,j] 用归并点积重算,
-//            row_i 会被该行每个输出列重复读取(这正是内积低效的根源)。
-// 因此 inner 比 ESC 多一遍数值归并,用它和前三种对照能看出"逐元素点积"的代价。
+// 逐元素内积 (inner product):符号阶段借用 ESC 拿结构,数值阶段逐元素归并点积重算(比 ESC 多一遍数值归并)。
 
 // 复用 manual.cu 里 Gustavson 的符号展开(只取结构,值会被数值阶段覆盖)
 extern __global__ void count_intermediates_kernel(const int *A_row_ptr,
@@ -456,7 +438,7 @@ void spgemm_self_product_inner(
     int *d_csc_cp, *d_csc_ri; double *d_csc_v;
     build_csc(d_rp, d_ci, d_v, A_rows, A_nnz, &d_csc_cp, &d_csc_ri, &d_csc_v);   // -> [inner] csc
 
-    // ---- 符号阶段:ESC 展开+排序+去重,只取结构 ----
+    // 符号阶段:ESC 展开+排序+去重,只取结构
     int *d_ub; CHECK_CUDA(cudaMalloc(&d_ub, A_rows * sizeof(int)));
     count_intermediates_kernel<<<(A_rows + 255) / 256, 256>>>(d_rp, d_ci, A_rows, d_ub);
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -478,7 +460,7 @@ void spgemm_self_product_inner(
     int Cnnz = esc_merge(d_key, d_val, total, A_rows, &c_col, &c_val, &c_rp);   // -> sort/reduce/final
     cudaFree(d_ub); cudaFree(d_off); cudaFree(d_key); cudaFree(d_val);
 
-    // ---- 数值阶段(内积本体):逐元素归并 row_i 与 col_j,重算 c_val ----
+    // 数值阶段(内积本体):逐元素归并 row_i 与 col_j,重算 c_val
     inner_numeric_kernel<<<A_rows, 256>>>(d_rp, d_ci, d_v,
                                           d_csc_cp, d_csc_ri, d_csc_v,
                                           A_rows, c_rp, c_col, c_val);
@@ -492,17 +474,7 @@ void spgemm_self_product_inner(
     cudaFree(c_col); cudaFree(c_val); cudaFree(c_rp);
 }
 
-// ==========================================================================
-//  A·Aᵀ 上三角 SpGEMM  (ESC, 只算 i≤j, 利用 C=A·Aᵀ 对称)
-// --------------------------------------------------------------------------
-//  C[i,j] = Σ_k A[i,k]·A[j,k]   (行 i · 行 j),   对称 ⇒ 只算上三角 i≤j。
-//  4 种公式展开的是【同一批】中间项 {(i,j,k) : i≤j, A[i,k]≠0, A[j,k]≠0},
-//  只是外层并行轴不同;合并阶段(sort+reduce)共用 esc_merge()。
-//    · 外积    : axis = k,col_k 内 a≤b 对 → 自然 i≤j;count=c_k(c_k+1)/2 精确,无需 compact
-//    · Gustavson: axis = i,filter j≥i;count 用上界 + 紧凑写 + compact
-//    · 列向    : axis = j,filter i≤j;count 用上界 + 紧凑写 + compact
-//    · 内积    : ESC 符号(复用 Gustavson 展开)+ 数值阶段逐元素 row_i·row_j
-// ==========================================================================
+// A·Aᵀ 上三角 SpGEMM(ESC,只算 i≤j,利用对称):4 种公式同一批中间项,合并阶段共用 esc_merge()。
 
 // thrust device_ptr 的简写,避免每行都写一长串
 static inline thrust::device_ptr<int> dpi(int *p) { return thrust::device_ptr<int>(p); }

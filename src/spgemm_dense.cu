@@ -20,35 +20,11 @@
         }                                                                      \
     } while (0)
 
-// =============================================================================
-//  Weak dense baseline for the sparse self-product C = A·A.
-//
-//  This is the honest cost of using a DENSE matmul on SPARSE data: you must
-//  densify the sparse input (O(N²) GPU writes), run a dense matmul C=A·A
-//  (O(N³)), then sparsify the output (O(N²) count/scan/compact). The O(N²)/
-//  O(N³) waste — touching the whole N×N matrix regardless of sparsity — is
-//  exactly why dense is the wrong tool for sparse data, and why this baseline
-//  loses to a sparse method on every matrix in the suite.
-//
-//  The GEMM is a hand-written TILED shared-memory kernel (FP64, no tensor
-//  cores, no cuBLAS). It is "optimized enough to complete" — i.e. it reuses
-//  tiles through shared memory instead of the catastrophically memory-bound
-//  one-thread-per-output scalar loop (which took >100 s on the largest matrix),
-//  yet it is deliberately NOT vendor-tuned: cuBLAS is so fast on small inputs
-//  that it can beat the sparse method by launch-overhead alone, obscuring the
-//  point. This kernel keeps the per-FMA work un-tuned enough that the O(N³)
-//  cost dominates even at small N, so dense loses across the full size range
-//  while still completing the largest matrix (n≈44.6k) in ~20 s. Correctness is
-//  exact (C_nnz verified against cuSPARSE, e.g. bcsstk30 = 8,946,070).
-//
-//  All three stages are GPU compute; transfers are excluded (same compute-only
-//  口径 as the sparse methods = TOTAL − h2d − d2h). The host-side C_nnz
-//  reduction (sync readback + output allocation) is kept inside the timed
-//  region: it is genuine dense-pipeline bookkeeping the sparse methods avoid.
-// =============================================================================
+// Weak dense baseline for C = A·A: densify(O(N²)) → tiled FP64 GEMM(O(N³)) → sparsify(O(N²)).
+// Hand-written shared-memory GEMM (no tensor cores/cuBLAS), un-tuned so O(N³) dominates and
+// dense loses to the sparse method everywhere, yet completes the largest matrix. Compute-only.
 
-// densify: scatter sparse CSR into a dense row-major N×N matrix (zero-init then
-// scatter). Each thread handles one sparse entry.
+// densify: scatter sparse CSR → dense N×N (one entry/thread).
 __global__ void densify_kernel(const int *row_ptr, const int *col_idx,
                                const double *val, double *dense, int N, int nnz) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
@@ -65,13 +41,7 @@ __global__ void densify_kernel(const int *row_ptr, const int *col_idx,
     dense[(size_t)row * N + col] = val[t];
 }
 
-// TILED dense matmul C = A·A. Each block computes a TILE×TILE output tile; the
-// k-dimension is streamed in BK-wide slabs loaded once per slab into shared
-// memory (As: TILE×BK, Bs: BK×TILE) and reused across the tile. Each thread
-// accumulates a TM×TN (4×4) register block. No tensor cores, no cuBLAS — a
-// plain, honestly-unoptimized blocked GEMM: fast enough to complete the whole
-// suite, slow enough (O(N³) per-FMA work, untuned throughput) to lose to the
-// sparse method everywhere. BK=16 keeps the kernel launchable for all tiles.
+// TILED dense matmul C = A·A: each block does a TILE×TILE tile, k streamed in BK slabs via shared memory, TM×TN register block. No tensor cores/cuBLAS.
 template <int TILE, int BK = 16>
 __global__ void tiled_dgemm_kernel(const double *A, double *C, int N) {
     extern __shared__ double smem[];
@@ -120,8 +90,7 @@ __global__ void tiled_dgemm_kernel(const double *A, double *C, int N) {
         }
 }
 
-// count nonzeros per row of the dense result. A tiny threshold keeps all true
-// nonzeros (incl. cancellation-dust) and drops only exact zeros. Writes rowcnt.
+// count nonzeros per row of the dense result (tiny threshold drops only exact zeros).
 __global__ void count_row_nnz_kernel(const double *dense, int *rowcnt, int N) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= N) return;
@@ -131,8 +100,7 @@ __global__ void count_row_nnz_kernel(const double *dense, int *rowcnt, int N) {
     rowcnt[row] = c;
 }
 
-// scatter dense → CSR (row_ptr already built via scan). Each thread handles one
-// row; walks the dense row and appends (col,val) at a running cursor.
+// scatter dense → CSR (row_ptr already built via scan); one row/thread.
 __global__ void sparsify_kernel(const double *dense, const int *row_ptr,
                                 int *col_out, double *val_out, int N) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
@@ -160,10 +128,7 @@ static bool read_host_csr(const char *path, std::vector<int> &row_ptr,
     return true;
 }
 
-// tile size for the GEMM. 64 is the sweet spot: completes the largest matrix in
-// ~20 s while still losing to the sparse method on small inputs (where the
-// densify/sparsify host bookkeeping floor dominates). Larger tiles (96/128) are
-// faster on huge N but launch-fail or win small N; 64 is robust across the suite.
+// tile size for the GEMM; 64 is robust across the suite (completes largest matrix, loses on small N).
 static const int TILE = 64;
 
 int main(int argc, char **argv) {
@@ -218,7 +183,7 @@ int main(int argc, char **argv) {
             tiled_dgemm_kernel<96><<<gemm_grid, gemm_block, gemm_smem>>>(dA, dC, N);
     };
 
-    // ---- warmup (1 round): first-call JIT / allocator amortization ----
+    // warmup (1 round): first-call JIT / allocator amortization
     {
         CHECK_CUDA(cudaMemsetAsync(dA, 0, dense_bytes));
         densify_kernel<<<densify_grid, TPB>>>(d_rp, d_ci, d_val, dA, N, nnz);
@@ -226,7 +191,7 @@ int main(int argc, char **argv) {
         CHECK_CUDA(cudaDeviceSynchronize());
     }
 
-    // ---- timed compute-only: densify + tiled dgemm + sparsify (transfers excluded) ----
+    // timed compute-only: densify + tiled dgemm + sparsify (transfers excluded)
     CHECK_CUDA(cudaEventRecord(start));
     CHECK_CUDA(cudaMemsetAsync(dA, 0, dense_bytes));
     densify_kernel<<<densify_grid, TPB>>>(d_rp, d_ci, d_val, dA, N, nnz);

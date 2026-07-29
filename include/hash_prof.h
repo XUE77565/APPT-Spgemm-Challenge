@@ -1,8 +1,6 @@
 #pragma once
-// cudaEvent phase profiler(抗 CPU 争用:elapsed 在 GPU stream 上量,不含 host 调度延迟)。
-// RAII:函数返回(含 error 路径)时自动打印 TOTAL + 释放 event。DBG-gated;非 DBG 退化为直接执行。
-// tag = 输出前缀(如 "hash-prof" / "mrg3-prof"),供 compare_methods 解析区分方法。
-// 依赖 spgemm.h 的 dbg()(须在 spgemm.h 之后 include)。
+// cudaEvent phase profiler(抗 CPU 争用:elapsed 在 GPU stream 上量)。RAII 自动打印 TOTAL + 释放 event。
+// DBG-gated;非 DBG 退化为直接执行。tag=输出前缀。依赖 spgemm.h 的 dbg()(须在其后 include)。
 #include <cuda_runtime.h>
 
 #ifdef DBG

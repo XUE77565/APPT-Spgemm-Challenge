@@ -1,34 +1,24 @@
-% Speedup of Auto (ours) over each baseline (baseline\_time / Auto\_time, geomean). 每格上行 = 加速比(>1 = Auto 快,最优加粗),下行 = 该 baseline 几何均值 ms。Wins = Auto 整体快过的阵数/100。末行 = Auto 几何均值 ms。需 \usepackage{makecell}。
+\begin{document}
 \begin{table}[t]
 \centering
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.2}
-\begin{tabular}{l c c c c c c c}
-\toprule
-\textbf{Method} & \textbf{Year} & \textbf{Dense(3)} & \textbf{Mildly sparse(32)} & \textbf{Highly sparse(52)} & \textbf{Extremely sparse(13)} & \textbf{ALL(100)} & \textbf{Wins}\\ \hline
-dense & --- & \makecell{1.54$\times$\\ \scriptsize 0.19 ms} & \makecell{2.12$\times$\\ \scriptsize 0.29 ms} & \makecell{\textbf{7.68$\times$}\\ \scriptsize 1.61 ms} & \makecell{\textbf{212$\times$}\\ \scriptsize 47.8 ms} & \makecell{\textbf{7.47$\times$}\\ \scriptsize 1.35 ms} & 100/100 \\
-cuSPARSE & NVIDIA & \makecell{2.54$\times$\\ \scriptsize 0.31 ms} & \makecell{2.25$\times$\\ \scriptsize 0.31 ms} & \makecell{2.02$\times$\\ \scriptsize 0.42 ms} & \makecell{2.34$\times$\\ \scriptsize 0.53 ms} & \makecell{2.14$\times$\\ \scriptsize 0.39 ms} & 91/100 \\
-OpSparse & 2022 & \makecell{\textbf{5.77$\times$}\\ \scriptsize 0.71 ms} & \makecell{\textbf{5.98$\times$}\\ \scriptsize 0.81 ms} & \makecell{4.11$\times$\\ \scriptsize 0.86 ms} & \makecell{4.47$\times$\\ \scriptsize 1.01 ms} & \makecell{4.73$\times$\\ \scriptsize 0.86 ms} & 100/100 \\
-HSMU & 2025 & \makecell{3.16$\times$\\ \scriptsize 0.39 ms} & \makecell{2.23$\times$\\ \scriptsize 0.30 ms} & \makecell{1.96$\times$\\ \scriptsize 0.41 ms} & \makecell{2.53$\times$\\ \scriptsize 0.57 ms} & \makecell{2.14$\times$\\ \scriptsize 0.39 ms} & 100/100 \\
-Ocean & 2026 & \makecell{3.30$\times$\\ \scriptsize 0.41 ms} & \makecell{1.90$\times$\\ \scriptsize 0.26 ms} & \makecell{1.40$\times$\\ \scriptsize 0.29 ms} & \makecell{1.14$\times$\\ \scriptsize 0.26 ms} & \makecell{1.54$\times$\\ \scriptsize 0.28 ms} & 84/100 \\
-\textit{Ours (ms)} &  & \textit{0.12} & \textit{0.14} & \textit{0.21} & \textit{0.23} & \textit{0.18} &  \\
-\bottomrule
-\end{tabular}
-
-% 需 \usepackage[table]{xcolor}(\cellcolor)。绿=Auto 全胜、黄=多数(≥80%)、红=有明显输。
-\begin{table}[t]
-\centering
-\setlength{\tabcolsep}{6pt}
-\renewcommand{\arraystretch}{1.25}
-\begin{tabular}{l c c c c c}
-\toprule
-\textbf{Auto wins over} & \textbf{Dense(3)} & \textbf{Mildly sparse(32)} & \textbf{Highly sparse(52)} & \textbf{Extremely sparse(13)} & \textbf{ALL(100)}\\
+\begin{tabular}{l c c c c c c}
+\multicolumn{7}{r}{\hfill \footnotesize\color{gray} \textbf{H100 PCIe} \,\,\, \textbf{Unit}: ms\,\,\, \textbf{Each cell}: speedup (runtime)\,\,\, \textbf{Geometric} mean}\\
+\hline\hline
+\textbf{Method} & \textbf{Dense (3)} & \textbf{Mildly sparse (32)} & \textbf{Highly sparse (52)} & \textbf{Extremely sparse (13)} & \textbf{ALL (100)} & \textbf{Wins}\\
 \hline
-dense & \cellcolor{green!35}3/3 & \cellcolor{green!35}32/32 & \cellcolor{green!35}52/52 & \cellcolor{green!35}13/13 & \cellcolor{green!35}100/100 \\
-cuSPARSE (NVIDIA) & \cellcolor{green!35}3/3 & \cellcolor{green!35}32/32 & \cellcolor{yellow!50}43/52 & \cellcolor{green!35}13/13 & \cellcolor{yellow!50}91/100 \\
-OpSparse (2022) & \cellcolor{green!35}3/3 & \cellcolor{green!35}32/32 & \cellcolor{green!35}52/52 & \cellcolor{green!35}13/13 & \cellcolor{green!35}100/100 \\
-HSMU (2025) & \cellcolor{green!35}3/3 & \cellcolor{green!35}32/32 & \cellcolor{green!35}52/52 & \cellcolor{green!35}13/13 & \cellcolor{green!35}100/100 \\
-Ocean (2026) & \cellcolor{green!35}3/3 & \cellcolor{yellow!50}31/32 & \cellcolor{red!35}41/52 & \cellcolor{red!35}9/13 & \cellcolor{yellow!50}84/100 \\
-\bottomrule
+dense\textsuperscript{1} & 1.54$\times$ {\small\color{gray}(0.19)} & 2.12$\times$ {\small\color{gray}(0.29)} & \textbf{7.68$\times$} {\small\color{gray}(1.61)} & \textbf{212$\times$} {\small\color{gray}(47.8)} & \textbf{7.47$\times$} {\small\color{gray}(1.35)} & \textbf{100/100} \\
+cuBLAS\textsuperscript{2} & 2.02$\times$ {\small\color{gray}(0.24)} & 2.34$\times$ {\small\color{gray}(0.33)} & 4.66$\times$ {\small\color{gray}(0.98)} & 69.14$\times$ {\small\color{gray}(15.80)} & 5.18$\times$ {\small\color{gray}(0.93)} & \textbf{100/100} \\
+cuSPARSE\textsuperscript{2} & 2.54$\times$ {\small\color{gray}(0.31)} & 2.25$\times$ {\small\color{gray}(0.31)} & 2.02$\times$ {\small\color{gray}(0.42)} & 2.34$\times$ {\small\color{gray}(0.53)} & 2.14$\times$ {\small\color{gray}(0.39)} & 91/100 \\
+OpSparse\textsuperscript{3} & \textbf{5.77$\times$} {\small\color{gray}(0.71)} & \textbf{5.98$\times$} {\small\color{gray}(0.81)} & 4.11$\times$ {\small\color{gray}(0.86)} & 4.47$\times$ {\small\color{gray}(1.01)} & 4.73$\times$ {\small\color{gray}(0.86)} & \textbf{100/100} \\
+HSMU\textsuperscript{4} & 3.16$\times$ {\small\color{gray}(0.39)} & 2.23$\times$ {\small\color{gray}(0.30)} & 1.96$\times$ {\small\color{gray}(0.41)} & 2.53$\times$ {\small\color{gray}(0.57)} & 2.14$\times$ {\small\color{gray}(0.39)} & \textbf{100/100} \\
+Ocean\textsuperscript{5} & 3.30$\times$ {\small\color{gray}(0.41)} & 1.90$\times$ {\small\color{gray}(0.26)} & 1.40$\times$ {\small\color{gray}(0.29)} & 1.14$\times$ {\small\color{gray}(0.26)} & 1.54$\times$ {\small\color{gray}(0.28)} & 84/100 \\
+\textbf{\textit{Ours (ms)}} & \textbf{\textit{0.12}} & \textbf{\textit{0.14}} & \textbf{\textit{0.21}} & \textbf{\textit{0.23}} & \textbf{\textit{0.18}} &  \\
+\hline\hline
+\multicolumn{7}{l}{\footnotesize\color{gray} \textsuperscript{1} manual.\quad \textsuperscript{2} NVIDIA.\quad \textsuperscript{3} IEEE Access '22.\quad \textsuperscript{4} HPCA '25.\quad \textsuperscript{5} ICS '26.}
 \end{tabular}
-% Win-matrix:每格 = Auto 快过的阵数/该类总数。\cellcolor{green!35}=全胜,\cellcolor{yellow!50}=≥80\%,\cellcolor{red!35}=有明显输。
+\end{table}
+
+
+\end{document}

@@ -19,19 +19,7 @@ bool should_run_method(const char *key) {
     }
 }
 
-// ==========================================================================
-//  自适应 dispatcher(集成进 src):C = A·A 的完整数据流。
-//
-//  多变量调度公式(first100 实测拟合,MinHash-hash + flop_ub-merge3,准确率 95%,阈值调优):
-//    score = -0.4259×log10(flop_proxy) - 0.4215×log10(n) - 0.6441×log10(max_row_nnz)
-//            - 0.6420×log10(skew) + 5.4297
-//    hash iff score < 0
-//  其中 flop_proxy = A_nnz²/n, skew = max_row_nnz / (A_nnz/n)
-//
-//  公式含义:flop 高 / n 大 / 重行 / 高 skew(大阵 + 重 + 不均) -> hash;
-//           反之(小阵 + 轻 + 均匀) -> merge3。
-//  hash 溢出(distinct>HASH_CAP) -> 自动回退 merge3。
-// ==========================================================================
+// 自适应 dispatcher:C = A·A 的分流。score<0 → hash(大阵/重行/高 skew),否则 merge3;hash 溢出回退 merge3。
 
 // env 读取(分流阈值可被环境变量覆盖)
 static int env_int(const char *k, int def) {
@@ -50,10 +38,7 @@ void spgemm_self_product_adaptive(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)
 {
-    // A_buffer 布局:[row_ptr (A_rows+1) | col_idx (A_nnz) | val (A_nnz)]
-    // 分流依据:① 规模 n(中小→merge)② 重行不均(极不平均的重行→hash)
-    //   hash = 大阵(n > ADAPTIVE_SIZE_THR) 或 重行(max_row_nnz > ADAPTIVE_HEAVY_THR 或 skew > ADAPTIVE_SKEW_THR)
-    //   否则 → merge3(中小 + 均衡)
+    // A_buffer 布局:[row_ptr(A_rows+1) | col_idx(A_nnz) | val(A_nnz)]
     const int *row_ptr = (const int *)A_buffer;
     int max_row_nnz = 0;
     for (int i = 0; i < A_rows; i++) {                    // O(n) host 扫描,极廉价
@@ -63,7 +48,7 @@ void spgemm_self_product_adaptive(
     double avg  = A_rows > 0 ? (double)A_nnz / A_rows : 0.0;
     double skew = avg > 0.0 ? (double)max_row_nnz / avg : 0.0;
 
-    // ── 多变量调度公式(100 阵拟合,R²=0.824,准确率 93%) ──
+    // 多变量调度公式(100 阵拟合,R²=0.824,准确率 93%)
     double flop_proxy = (double)A_nnz * A_nnz / std::max(A_rows, 1);
     double lfp = log10(std::max(flop_proxy, 1.0));
     double ln  = log10((double)A_rows);
@@ -99,11 +84,7 @@ void spgemm_self_product_adaptive(
     }
 }
 
-// ==========================================================================
-//  ATT 自适应 dispatcher:C = A·Aᵀ 上三角。同 AA Auto 的分流逻辑(score 公式),
-//  调 att_hash / att_merge3(两者均为 AA 的忠实拷贝,B=Aᵀ(CSC)+ j≥i)。
-//  hash 溢出(distinct>HASH_CAP)→ 自动回退 att_merge3。
-// ==========================================================================
+// ATT 自适应 dispatcher:C = A·Aᵀ 上三角。复用 AA 分流逻辑,调 att_hash/att_merge3,溢出回退 att_merge3。
 void spgemm_att_adaptive(
     void *A_buffer, int A_rows, int A_cols, int A_nnz,
     void **C_buffer_out, int *C_rows, int *C_cols, int *C_nnz)

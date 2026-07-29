@@ -5,9 +5,7 @@
 
 // 运行时开关,默认 false(原路径)。main 启动时按 USE_MEMPOOL 覆盖。
 bool g_use_mempool = false;
-// device arena 独立开关(USE_DEV_POOL,默认关)。device pool 省的是 driver 往返
-// (wall-clock),但实测让 hash 扫描 phase 在小阵上慢 1.5-3×(compute-only 口径)→
-// 对论文 compute-only 对比是负优化,故默认关;需 wall-clock 实验时 USE_DEV_POOL=1 开。
+// device arena 独立开关(USE_DEV_POOL,默认关):省 driver 往返,但拖慢小阵 hash 扫描(compute-only 负优化)。
 bool g_use_dev_pool = false;
 
 // pinned arena 的全部状态。单线程串行使用(benchmark 一矩阵一进程),无需加锁。
@@ -15,14 +13,12 @@ static char*  g_base = nullptr;
 static size_t g_cap  = 0;
 static size_t g_off  = 0;
 
-// device arena(给 spgemm kernel 的 device 临时 buffer 复用,见 mempool.h 注释)。
-//   同 bump-reset 模型:进程启动 cudaMalloc 一大块,dev_pool_reset 把 bump 归零,
-//   dev_alloc 仅步进指针(0 driver call)。所有 buffer 调用局部、随 reset 统一回收。
+// device arena(见 mempool.h):bump-reset 模型,dev_alloc 仅步进指针(0 driver call)。
 static char*  g_dev     = nullptr;
 static size_t g_dev_cap = 0;
 static size_t g_dev_off = 0;
 
-// ---- 内部:从 arena bump 切一块(16 字节对齐)。调用前需保证已 reset 到合适起点 ----
+// 内部:从 arena bump 切一块(16 字节对齐)。调用前需保证已 reset 到合适起点
 static void* arena_alloc(size_t bytes) {
     if (bytes == 0) bytes = 1;
     size_t aligned = (g_off + 15) & ~((size_t)15);
@@ -58,9 +54,7 @@ bool mempool_init(size_t cap_bytes) {
     fprintf(stderr, "[mempool] host pinned arena ready: %zu MB (USE_MEMPOOL=ON)\n",
             g_cap >> 20);
 
-    // device arena:给 spgemm kernel 的 device 临时 buffer 复用,省每调用 ~13 次
-    // cudaMalloc/cudaFree 的 driver 往返(~0.66ms 固定开销)。默认 8GB,MP_DEV_MB 覆盖。
-    // ⚠ 仅 USE_DEV_POOL=1 时分配(默认关:对 compute-only 是负优化,见 g_use_dev_pool 注释)。
+    // device arena:复用 ~13 个 device buffer,省 ~0.66ms driver 往返。默认 8GB(MP_DEV_MB)。仅 USE_DEV_POOL=1 分配。
     if (!g_use_dev_pool) {
         fprintf(stderr, "[mempool] device arena OFF (USE_DEV_POOL unset; compute-only 友好)\n");
         return true;
@@ -94,7 +88,7 @@ void mempool_destroy() {
     g_dev_cap = g_dev_off = 0;
 }
 
-// ---- device arena API(见 mempool.h)----
+// device arena API(见 mempool.h)
 void dev_pool_reset() {
     if (g_use_dev_pool) g_dev_off = 0;
 }
