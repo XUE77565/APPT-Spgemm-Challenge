@@ -36,6 +36,29 @@ bhSparse 的 EM 变体对**重行**已经是"一个 CTA 多线程在行内做 me
 MMSpGEMM),且或为迭代 2-way(bhSparse)或退化为块内排序(MMSpGEMM);本文提出**列值域**切分,
 同列必同桶、免跨块 carry,桶内**单遍 k-way warp 归并**免排序免重复数据移动。"
 
+## 4. "有没有更近的 merge 开源?"——调查结论(2026-08-24):**没有**
+
+真·执行 merge 的开源 GPU SpGEMM,**最近的仍是 bhSparse(2014/15)**。逐个排查:
+
+| 候选 | 年份 | 实际算法(代码实锤) | 是 merge? |
+|---|---|---|---|
+| bhSparse EM | IPDPS'14/JPDC'15 | 迭代 2-way merge-path 归并 | ✅ 真执行 |
+| nsparse | ICPP'17 | 论文有 memory-saving merge 版,**未开源**(repo 只有 hash) | ❌ |
+| TileSpGEMM | PPoPP'22 | 官方源码已拉 `external_sota/TileSpGEMM`:主内核 = **nsparse hash 表**,按 tile 密度四档(TNY32/SML48/LRG160/DNS256)选累加器,grep 无 merge | ❌(密度自适应 hash/dense) |
+| tSparse | 2020 | Tensor Core 化 SpGEMM | ❌ |
+| ACSpGEMM | PPoPP'19(GPUPeople/ACSpGEMM 开源) | 多轮 ESC(sort) | ❌ |
+| MMSpGEMM | PACT'25 | merge-path 只用于**分区**,计算=块内 radix sort | ◐(思想复兴,非执行) |
+| Wang TACO'22(4) | 2025 | SMEM hash + ML 选 sizing 估计器 | ❌(但与 dispatcher 叙事相关,可引) |
+| GAMMA merger | 2021 | **Verilog 硬件** merge 组件(GitHub 唯一 "spgemm merge" 活跃 repo) | ❌(非 GPU) |
+
+GitHub 全量扫(2026-08)近期 SpGEMM repo:sketch-spgemm(2026,Rust)、LeSpGEMM/SparseOps(2026,
+locality)、HSMU/Ocean(已有)、DeltaSparse(HiPC'23 多 GPU)——**全是 hash/sketch/sort 路线,无一 merge**。
+
+**论文价值**:这个空白本身是叙事素材——GPU 上 merge 家族自 bhSparse(2015)后休眠十年,
+2025 年 MMSpGEMM 重拾 merge 思想时计算阶段已退化为块内排序;**值域切分 + 单遍 k-way warp 归并
+是十年来第一次让"真 merge 累加"回到 GPU SpGEMM 竞争序列**(比较对象自然就是两代:bhSparse
+历史代表 + MMSpGEMM 现代代表)。
+
 ## 3. H100/CUDA 12.8 移植清单(参考 nsparse/opSparse 配方)
 
 1. **剥 CUSP**:仅 main.cu(cusp io/poisson)与 ref_spgemm.h(cusp multiply 参考校验)依赖;
