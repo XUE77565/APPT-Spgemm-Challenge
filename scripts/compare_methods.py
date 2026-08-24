@@ -106,7 +106,7 @@ def mtx_header(path):
 def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT):
     """METHOD=method_key 跑 spgemm_test → (compute_only_ms, wall_ms, cnnz, choice) 或 None。"""
     env = dict(os.environ, USE_MEMPOOL="1", METHOD=method_key,
-               MP_HOST_MB=os.environ.get("MP_HOST_MB", "2048"))  # ocean337 大输出:333SP d2h 需 ~878MB
+               MP_HOST_MB=os.environ.get("MP_HOST_MB", "8192"))  # ocean337 大输出:3Dspectralwave 195M nnz 需 2.35GB(2048 不够)
     try:
         r = subprocess.run([BIN, mtx], capture_output=True, text=True, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
