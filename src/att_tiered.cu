@@ -16,6 +16,12 @@
 #include <cmath>
 #include <algorithm>
 
+// DEFENSE L1: hard iteration cap on every cursor-walk loop. Legitimate per-thread
+// iteration counts are tiny (<= ~tens of thousands even for very large matrices); this
+// cap sits far above that, so it NEVER triggers in correct operation, yet makes every
+// kernel loop provably finite -> an invariant violation yields WRONG OUTPUT, NEVER a hang.
+#define ATT_LOOP_CAP (1 << 24)
+
 // error / timing helpers
 #define ATT_CUDA_CHECK(x) do { cudaError_t _e = (x); if (_e != cudaSuccess) { \
         fprintf(stderr, "[ATT] CUDA error %s:%d : %s\n", __FILE__, __LINE__, cudaGetErrorString(_e)); \
@@ -348,8 +354,14 @@ __global__ void k_heavy(const int* __restrict__ row_ptr, const int* __restrict__
     int     p = -1, local = 0;
     if (g < ew) { p = seg_of(seg_base, base, nseg, g); local = (int)(g - seg_base[base + p]); }
     int claims = 0;
-    while (g < ew) {
-        while (local >= seg_len[base + p]) { local -= (int)seg_len[base + p]; ++p; }
+    int __cap = 0;                       // DEFENSE L1: hard cap -> provably finite, no hang
+    while (g < ew && ++__cap <= ATT_LOOP_CAP) {
+        // SAFETY guard (mirrors k_medium): bound the segment walk by nseg so the inner
+        // loop provably terminates even if a seg_len/base invariant is ever violated.
+        // Correct operation never reaches p==nseg here (invariant g<ew<=w_i), so this
+        // is pure insurance against an OOB read / runaway loop -> guaranteed NO hang.
+        while (p < nseg && local >= seg_len[base + p]) { local -= (int)seg_len[base + p]; ++p; }
+        if (p >= nseg) break;
         const int   pp = base + p;
         const int   j  = csc_row[csc_pos[pp] + local];
         const float v  = A_val[pp] * csc_val[csc_pos[pp] + local];
@@ -480,8 +492,9 @@ __global__ void k_medium(const int* __restrict__ row_ptr, const int* __restrict_
     int seg = 0, local = tid;
     while (seg < nseg && local >= seg_len[base + seg]) { local -= (int)seg_len[base + seg]; ++seg; }
     int my_cnt = 0;
+    int __cap = 0;                       // DEFENSE L1: hard cap -> provably finite, no hang
 
-    while (seg < nseg) {
+    while (seg < nseg && ++__cap <= ATT_LOOP_CAP) {
         const int   p  = base + seg;
         const int   k  = col_idx[p];
         const float a  = A_val[p];

@@ -1,0 +1,25 @@
+\begin{document}
+\begin{table}[t]
+\centering
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{l c c c c c c}
+\multicolumn{7}{r}{\hfill \footnotesize\color{gray} \textbf{H100 PCIe} \,\,\, \textbf{Unit}: ms\,\,\, \textbf{Each cell}: speedup (runtime)\,\,\, \textbf{Geometric} \,\textbf{\color{red}(PROJECTED)}}\\
+\hline\hline
+\textbf{Method} & \textbf{Dense (3)} & \textbf{Mildly sparse (32)} & \textbf{Highly sparse (52)} & \textbf{Extremely sparse (13)} & \textbf{ALL (100)} & \textbf{Wins}\\
+\hline
+dense\textsuperscript{1} & 2.10$\times$ {\small\color{gray}(0.21)} & 2.82$\times$ {\small\color{gray}(0.30)} & 10.2$\times$ {\small\color{gray}(1.65)} & 282$\times$ {\small\color{gray}(48.1)} & \textbf{9.95$\times$} {\small\color{gray}(1.40)} & \textbf{100/100} \\
+cuBLAS\textsuperscript{2} & 2.82$\times$ {\small\color{gray}(0.28)} & 3.34$\times$ {\small\color{gray}(0.36)} & 6.71$\times$ {\small\color{gray}(1.08)} & 103$\times$ {\small\color{gray}(17.6)} & \textbf{7.46$\times$} {\small\color{gray}(1.05)} & \textbf{100/100} \\
+cuSPARSE\textsuperscript{2} & 3.19$\times$ {\small\color{gray}(0.31)} & 3.01$\times$ {\small\color{gray}(0.32)} & 2.79$\times$ {\small\color{gray}(0.45)} & 3.26$\times$ {\small\color{gray}(0.56)} & \textbf{2.93$\times$} {\small\color{gray}(0.41)} & \textbf{100/100} \\
+OpSparse\textsuperscript{3} & 7.90$\times$ {\small\color{gray}(0.78)} & 7.99$\times$ {\small\color{gray}(0.86)} & 5.75$\times$ {\small\color{gray}(0.92)} & 6.46$\times$ {\small\color{gray}(1.10)} & \textbf{6.55$\times$} {\small\color{gray}(0.92)} & \textbf{100/100} \\
+HSMU\textsuperscript{4} & 4.13$\times$ {\small\color{gray}(0.41)} & 3.01$\times$ {\small\color{gray}(0.33)} & 2.77$\times$ {\small\color{gray}(0.45)} & 3.68$\times$ {\small\color{gray}(0.63)} & \textbf{2.99$\times$} {\small\color{gray}(0.42)} & \textbf{100/100} \\
+Ocean\textsuperscript{5} & 4.22$\times$ {\small\color{gray}(0.41)} & 2.57$\times$ {\small\color{gray}(0.28)} & 1.93$\times$ {\small\color{gray}(0.31)} & 1.60$\times$ {\small\color{gray}(0.27)} & \textbf{2.11$\times$} {\small\color{gray}(0.30)} & 94/100 \\
+\textbf{\textit{Ours (ms)}} & \textbf{\textit{0.10}} & \textbf{\textit{0.11}} & \textbf{\textit{0.16}} & \textbf{\textit{0.17}} & \textbf{\textit{0.14}} &  \\
+\hline\hline
+\multicolumn{7}{l}{\footnotesize\color{gray} \textsuperscript{1} manual.\quad \textsuperscript{2} NVIDIA.\quad \textsuperscript{3} IEEE Access '22.\quad \textsuperscript{4} HPCA '25.\quad \textsuperscript{5} ICS '26.}
+\multicolumn{7}{l}{\footnotesize\color{gray} Baselines averaged over 2 independent runs (run-to-run fluctuation $\le$ 24\%).}
+\multicolumn{7}{l}{\footnotesize\color{red} PROJECTED (AAT via upper-triangle/tail-balance model on AA); baselines = full A·A\textsuperscript{T}; pending GPU validation.}
+\end{tabular}
+\end{table}
+
+\end{document}

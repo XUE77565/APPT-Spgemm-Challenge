@@ -201,8 +201,58 @@ static CSR gen_multimerge() {
     return build_csr(2,3,t);
 }
 
+// ---- Matrix Market reader (self-contained) for benchmtx mode ----
+// coordinate format -> CSR; mirrors off-diagonal entries when banner says "symmetric".
+static CSR read_mtx(const char* path) {
+    FILE* f = std::fopen(path, "r");
+    if (!f) { std::fprintf(stderr, "[benchmtx] cannot open %s\n", path); std::exit(1); }
+    char line[2048];
+    if (!std::fgets(line, sizeof(line), f)) { std::fclose(f); std::exit(1); }
+    bool symmetric = std::string(line).find("symmetric") != std::string::npos;
+    while (std::fgets(line, sizeof(line), f)) { if (line[0] != '%') break; }
+    int nr=0, nc=0;
+    std::sscanf(line, "%d %d", &nr, &nc);
+    vector<std::tuple<int,int,float>> trips;
+    int r,c; double v;
+    while (std::fgets(line, sizeof(line), f)) {
+        if (line[0]=='%') continue;
+        if (std::sscanf(line, "%d %d %lf", &r,&c,&v)==3) {
+            trips.push_back({r-1,c-1,(float)v});
+            if (symmetric && r!=c) trips.push_back({c-1,r-1,(float)v});
+        } else if (std::sscanf(line, "%d %d", &r,&c)==2) {   // pattern (no value)
+            trips.push_back({r-1,c-1,1.0f});
+            if (symmetric && r!=c) trips.push_back({c-1,r-1,1.0f});
+        }
+    }
+    std::fclose(f);
+    return build_csr(nr, nc, trips);
+}
+
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);   // unbuffered so hangs are localizable
+    // benchmtx <file.mtx>: time att_aat_tiered on a REAL matrix (FP32). Produces the
+    // measured-AAT timing used to cover the projected deliverable. Warmup + timed.
+    if (argc > 2 && string(argv[1])=="benchmtx") {
+        CSR A = read_mtx(argv[2]);
+        int m=A.m;
+        int *d_rp,*d_ci; float *d_val;
+        cudaMalloc(&d_rp,(m+1)*sizeof(int)); cudaMalloc(&d_ci,A.nnz()*sizeof(int)); cudaMalloc(&d_val,A.nnz()*sizeof(float));
+        cudaMemcpy(d_rp,A.rp.data(),(m+1)*sizeof(int),cudaMemcpyHostToDevice);
+        cudaMemcpy(d_ci,A.ci.data(),A.nnz()*sizeof(int),cudaMemcpyHostToDevice);
+        cudaMemcpy(d_val,A.val.data(),A.nnz()*sizeof(float),cudaMemcpyHostToDevice);
+        int*cr=nullptr;int*cc=nullptr;float*cv=nullptr;int64_t cn=0;AttTiming T;AttStats S;
+        att_aat_tiered(d_rp,d_ci,d_val,m,A.n,A.nnz(),&cr,&cc,&cv,&cn,{},&T,&S);   // warmup
+        if(cr)cudaFree(cr);if(cc)cudaFree(cc);if(cv)cudaFree(cv);
+        cr=cc=nullptr;cv=nullptr;cn=0;
+        AttStatus st=att_aat_tiered(d_rp,d_ci,d_val,m,A.n,A.nnz(),&cr,&cc,&cv,&cn,{},&T,&S);
+        std::string fn(argv[2]); size_t sl=fn.rfind('/'); std::string base=(sl==std::string::npos)?fn:fn.substr(sl+1);
+        printf("AAT_MS %s total=%.4f nnzA=%lld nnzC=%lld L/M/H=%d/%d/%d status=%d ovf=%lld\n",
+               base.c_str(), T.total, (long long)A.nnz(), (long long)cn,
+               S.n_light,S.n_medium,S.n_heavy, (int)st, (long long)S.hash_overflow_fallbacks);
+        if(cr)cudaFree(cr);if(cc)cudaFree(cc);if(cv)cudaFree(cv);
+        cudaFree(d_rp);cudaFree(d_ci);cudaFree(d_val);
+        return (st==AttStatus::OK)?0:2;
+    }
     bool run_bench = (argc > 1 && string(argv[1])=="bench");
     int npass=0, nfail=0;
     auto CASE = [&](const string& nm, const CSR& A, float tol){
