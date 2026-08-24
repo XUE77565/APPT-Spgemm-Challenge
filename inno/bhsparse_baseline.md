@@ -74,7 +74,18 @@ locality)、HSMU/Ocean(已有)、DeltaSparse(HiPC'23 多 GPU)——**全是 hash
 **结论不变且更强:真·执行 merge 的开源 GPU SpGEMM,最近仍是 bhSparse(2014/15)。**
 行内并行 merge 的"近年动作"全部发生在硬件线(FPGA/ASIC)或 CPU,恰印证 GPU merge 空白。
 
-## 3. H100/CUDA 12.8 移植清单(参考 nsparse/opSparse 配方)
+## 3. H100/CUDA 12.8 移植 —— ✅ 已完成(2026-08-24,编译干净+正确性全过)
+
+实际改动(全在 `external_sota/bhSparse/SpGEMM_cuda/`,加/改 6 个文件):
+1. **剥 CUSP**:新 `mmread.h`(自写 MatrixMarket reader:general/symmetric/skew + real/pattern/complex取实部,行内排序+重复项求和);重写 `ref_spgemm.h`(cusp::multiply → **串行 host Gustavson 参考**,flops>3e8 自动跳过;csr_sort_indices 保留);重写 `main.cu`(去 cusp/gaussian poisson;**去掉原版"随机数覆写矩阵值"**,保留文件值可对拍;poisson 选项 1-4 报错提示用 .mtx)。
+2. **helper 头替换**:新 `cutil_compat.h`(checkCudaErrors + StopWatchInterface/sdk*Timer chrono shim,**签名用原 cutil 的 `**` 风格**);`common.h` 换 include。
+3. **shfl 修正**:bhsparse_cuda.h 4 处 `__shfl_up` → `__shfl_up_sync(0xffffffff,…)`(全满 warp scan,安全)。
+4. **Makefile**:`/usr/local/cuda/bin/nvcc -O3 -m64 -std=c++14 -arch=sm_90`(c++14 兼容 2014 代码)。
+
+**正确性(全部对串行 host 参考逐值校验)**:内置 4×6 toy ✓(nnzC=6);cage4 ✓(81);**bcsstk30 ✓ nnzC=8946070 与本项目 7 月管线(cuSPARSE/hash/merge3 三方一致)精确吻合**;333SP(371万阶/2222万nnz,pattern+symmetric 路径)✓ nnzC=71961733。
+**计时输出**:`STAGE 1..4 time` + `[ CUDA ] SpGEMM time: X ms. Gflops = Y` + `nnzC = N`。口径 = 4 stage host 计时(含 stage 3 的 Ct 重新分配轮次,bcsstk30 出现 nnzCt_new 两次),输入 h2d / 输出 d2h 在计时外;对照参考(compute-only, double):bcsstk30 bhSparse 8.12ms(S1 0.088/S2 0.477/S3 7.27/S4 0.25)。
+**用法**:`./spgemm -cuda -spgemm <A.mtx>`(B=A);`BH_CHECK=0` 跳过参考校验。
+**⚠ 待办**:first100 矩阵集不在本机(`data/` 只剩 `data/ocean/square/` 337 个 Ocean 基准阵,其中含 bcsstk30/35/36/39、cage13-15、333SP 等)——要出 compare 列须先恢复矩阵集(在 186/187 或重新下载)。
 
 1. **剥 CUSP**:仅 main.cu(cusp io/poisson)与 ref_spgemm.h(cusp multiply 参考校验)依赖;
    换成我们自己的 mtx reader / cuSPARSE 校验即可。
