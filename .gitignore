@@ -1,3 +1,4 @@
+# --- 大体积/可再生目录(不入库) ---
 /results/
 /data/
 .venv/
@@ -7,7 +8,22 @@
 /external_sota/
 /worklog/
 /SOTAsummary/
-/fig/
 /nsparse/
-/ocean/
 /spECK/
+
+# --- 编译产物(不入库,见 Makefile) ---
+/spgemm_test
+/spgemm_dense
+/spgemm_dense_cublas
+/test_att_tiered
+
+# --- Python ---
+__pycache__/
+*.pyc
+
+# --- 杂项 ---
+*.hicsr
+compare/_last_run.log
+compare/methods_cmp_run.log
+compare/hash_vs_merge_run.log
+compare/dense_baseline_run.log
