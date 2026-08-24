@@ -59,6 +59,21 @@ locality)、HSMU/Ocean(已有)、DeltaSparse(HiPC'23 多 GPU)——**全是 hash
 是十年来第一次让"真 merge 累加"回到 GPU SpGEMM 竞争序列**(比较对象自然就是两代:bhSparse
 历史代表 + MMSpGEMM 现代代表)。
 
+### 4.1 第二轮跨站补查(2026-08-24,GitHub 多关键词×8 / DBLP 200 篇 / Semantic Scholar / arXiv / GraphBLAST 源码)
+
+| 新查证对象 | 结论 |
+|---|---|
+| **AiSpGEMM**(DATE'25) | **FPGA**,"Intra-row Parallel Merging"——行内并行 merge 在**硬件线**延续(SpArch→MatRaptor→GAMMA→AiSpGEMM);未找到公开代码;非 GPU,related work 引 |
+| **SaSpGEMM**(ICPP'24) | **多核 CPU**,链表累加器(sorted insertion)免排序——2024 年"免排序保序"在 CPU 上仍有人做;非 GPU |
+| **IA-SpGEMM**(PPoPP'19 系) | NN 选格式+算法的 auto-tuning(CPU/GPU,COO/DIA/ELL,TF1.4)——**与 dispatcher 叙事直接相关,必引**;非 merge |
+| **GraphBLAST**(GPU GraphBLAS) | 读源码定案:标准 mxm **直接包 cuSPARSE**(`cusparseXcsrgemm2Nnz`+`Scsrgemm2`),自定义 kernel 仅 masked 点积(二分+warp 归约)——参考库自己都不实现 SpGEMM |
+| bhSPARSE 库 repo | archived,同为 2015 时代,无更新 merge |
+| GitHub "gustavson"/"spmspm" 扫描 | 仅 CPU MPI/OpenMP、VHDL、PIM、hash 动态调度——无 GPU merge |
+| CSUR'23 系统综述 | "A Systematic Survey of General SpGEMM"(ACM Computing Surveys 2023, 10.1145/3571157)——**taxonomy 必引**,其 merge 分类亦止于 bhSparse/SpArch 一线 |
+
+**结论不变且更强:真·执行 merge 的开源 GPU SpGEMM,最近仍是 bhSparse(2014/15)。**
+行内并行 merge 的"近年动作"全部发生在硬件线(FPGA/ASIC)或 CPU,恰印证 GPU merge 空白。
+
 ## 3. H100/CUDA 12.8 移植清单(参考 nsparse/opSparse 配方)
 
 1. **剥 CUSP**:仅 main.cu(cusp io/poisson)与 ref_spgemm.h(cusp multiply 参考校验)依赖;
