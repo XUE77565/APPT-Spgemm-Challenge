@@ -5,6 +5,11 @@
 > 定位:把本项目**全局创新**(`innovation_points.md`:自适应调度 / 框架 / HLL sizing / profiling)之外,**merge 这条算法线本身**相对文献的独立贡献讲清楚。
 > 日期:2026-07-25
 
+> ⚠ **2026-08-24 查重更新**:发现 **MMSpGEMM(PACT 2025, GT HPArch, 开源)**同样做了"行内切开
+> merge 累加以治重行 straggler"(rank 域等大小切分 + 块内 radix sort),**早于本文发表**。
+> 下文"文献里没有任何一个在行内切开并行"/"我们补上第四个维度是首个"一类表述**失效**,
+> 须按 `mmspgemm_comparison.md` §5 收窄为"值域切分 vs rank 切分"的差异化主张并引用它。
+
 ---
 
 ## 0. 一句话:我们的 merge 新在哪
