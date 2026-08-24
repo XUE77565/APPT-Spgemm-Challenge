@@ -9,6 +9,12 @@
 > merge 累加以治重行 straggler"(rank 域等大小切分 + 块内 radix sort),**早于本文发表**。
 > 下文"文献里没有任何一个在行内切开并行"/"我们补上第四个维度是首个"一类表述**失效**,
 > 须按 `mmspgemm_comparison.md` §5 收窄为"值域切分 vs rank 切分"的差异化主张并引用它。
+>
+> ⚠ **同日补充(更早的先例)**:下表 bhSparse 一行的"长行 merge path(仍是行级)"注释
+> **低估了它**——其 CUDA 源码 EM 变体(`EM_mergepath_global`,重行一个 CTA 多线程
+> merge-path 对角线并行归并)就是 **rank 域行内并行 merge,2014/15 已有**。
+> 故差异化主张应再收窄为:**值域切分 + 单遍 k-way warp 归并 + 免跨块重复**,
+> 与 rank 域先例(bhSparse EM 迭代 2-way、MMSpGEMM 块内 sort)对比,详见 `bhsparse_baseline.md`。
 
 ---
 
