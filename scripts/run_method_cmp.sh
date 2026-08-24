@@ -39,15 +39,17 @@ NO_OPSPARSE=${NO_OPSPARSE:-0}
 NO_DENSE=${NO_DENSE:-0}
 NO_CUBLAS=${NO_CUBLAS:-0}
 NO_OCEAN=${NO_OCEAN:-0}
+NO_BHSPARSE=${NO_BHSPARSE:-0}
 FRESH=${FRESH:-0}
 REPORT_ONLY=${REPORT_ONLY:-0}
 REFRESH=${REFRESH:-}        # cu/Auto/Ocean/opSparse/HSMU/dense
 
-# ---- 稳定产物路径 ----
-CSV=compare/methods_cmp.csv
-REPORT=compare/methods_cmp_report.txt
-BAR=compare/methods_cmp_bar.png
-LOG=compare/methods_cmp_run.log
+# ---- 稳定产物路径(BASE 可覆盖;ocean337 新套件:OUT_CSV=compare/ocean337/methods_cmp) ----
+BASE=${OUT_CSV:-compare/methods_cmp}
+CSV=${BASE}.csv
+REPORT=${BASE}_report.txt
+BAR=${BASE}_bar.png
+LOG=${BASE}_run.log
 
 # ---- HSMU /tmp CSV 备份/恢复(只在真跑 HSMU 时有意义)----
 TS=$(date +%Y%m%d_%H%M%S)
@@ -99,6 +101,7 @@ fi
 ARGS="--out $CSV --dir $MATRIX_DIR"
 [ "$LIMIT" -gt 0 ]       && ARGS="$ARGS --limit $LIMIT"
 [ "$NO_OCEAN" -eq 1 ]    && ARGS="$ARGS --no-ocean"
+[ "$NO_BHSPARSE" -eq 1 ] && ARGS="$ARGS --no-bhsparse"
 [ "$NO_HSMU" -eq 1 ]     && ARGS="$ARGS --no-hsmu"
 [ "$NO_OPSPARSE" -eq 1 ] && ARGS="$ARGS --no-opsparse"
 [ "$NO_DENSE" -eq 1 ]    && ARGS="$ARGS --no-dense"

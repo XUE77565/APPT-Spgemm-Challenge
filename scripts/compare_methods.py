@@ -19,6 +19,8 @@ CUBLAS_BIN = os.path.join(REPO, "spgemm_dense_cublas")   # cuBLAS FP64 dgemm(PED
 HSMU_BIN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/evaluation/script/test")
 HSMU_CSV = "/tmp/NHC_4080S_result.csv"
 OPSPARSE_RUN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/other_spgemm_code/OpSparse/opsparse")
+# bhSparse (Liu & Vinter IPDPS'14, merge 家族 GPU SpGEMM;H100 移植版 2026-08-24)
+BHSPARSE_BIN = os.path.join(REPO, "external_sota/bhSparse/SpGEMM_cuda/spgemm")
 # Ocean (Hui et al., 2025 SOTA hash SpGEMM): convert mtx→csr, run spgemm, sum
 # timing phases from stats.json. h2d/d2h 不在 timing 里 → compute-only,同口径。
 OCEAN_CONV  = os.path.join(REPO, "ocean/convert")
@@ -28,6 +30,9 @@ OCEAN_STATS = os.path.join(REPO, "ocean/stats.json")
 
 CALL_TIMEOUT = int(os.environ.get("TIMEOUT", "200"))
 DENSE_TIMEOUT = int(os.environ.get("DENSE_TIMEOUT", "600"))   # naive dense 大阵慢
+# dense/cuBLAS 大阵护栏:ocean337 有 50+ 个 >100 万阶阵,N³ GEMM 不可行 → 直接判 DNF(big)
+# (n=5 万时 tiled64 FP64 ≈ 30s 量级,仍可真跑;再往上没有意义)
+DENSE_MAX_N = int(os.environ.get("DENSE_MAX_N", "50000"))
 
 # spgemm_test 方法 → cudaEvent prof tag(adaptive 由 choice 决定)
 METHOD_TAG = {"serial": "merge-prof", "merge3": "mrg3-prof", "hash": "hash-prof", "adaptive": None}
@@ -75,7 +80,8 @@ def compute_only_from_dbg(stderr, tag):
 SPGEMM_METHODS = [("cu", "cu"), ("Auto", "adaptive")]
 
 def find_mtx(name):
-    for d in ("data/first100", "data/sota_27_final", "data/sota_27"):
+    # data/ocean/square = 337 阵 Ocean benchmark(2026-08-24 起新套件)
+    for d in ("data/ocean/square", "data/first100", "data/sota_27_final", "data/sota_27"):
         p = os.path.join(REPO, d, name + ".mtx") if not name.endswith(".mtx") else os.path.join(REPO, d, name)
         if os.path.exists(p):
             return p
@@ -171,7 +177,10 @@ def run_ocean(mtx, timeout=CALL_TIMEOUT):
         return None
 
 def run_dense(mtx, timeout=DENSE_TIMEOUT):
-    """spgemm_dense naive scalar GEMM → 'Kernel time' ms,或 'timeout'/'fail'。"""
+    """spgemm_dense naive scalar GEMM → 'Kernel time' ms,或 'timeout'/'fail'/'DNF(big)'。"""
+    n, _sym, _a, _d = mtx_header(mtx)
+    if n > DENSE_MAX_N:
+        return "DNF(big)"
     try:
         r = subprocess.run([DENSE_BIN, mtx, "/tmp/dense_cmp.mtx"],
                            capture_output=True, text=True, timeout=timeout)
@@ -181,7 +190,10 @@ def run_dense(mtx, timeout=DENSE_TIMEOUT):
     return float(m.group(1)) if m else "fail"
 
 def run_cublas(mtx, timeout=DENSE_TIMEOUT):
-    """spgemm_dense_cublas(cuBLAS FP64 dgemm,PEDANTIC 无 TC)→ 'Kernel time' ms,或 'timeout'/'fail'。"""
+    """spgemm_dense_cublas(cuBLAS FP64 dgemm,PEDANTIC 无 TC)→ 'Kernel time' ms,或 'timeout'/'fail'/'DNF(big)'。"""
+    n, _sym, _a, _d = mtx_header(mtx)
+    if n > DENSE_MAX_N:
+        return "DNF(big)"
     try:
         r = subprocess.run([CUBLAS_BIN, mtx, "/tmp/cublas_cmp.mtx"],
                            capture_output=True, text=True, timeout=timeout)
@@ -190,6 +202,19 @@ def run_cublas(mtx, timeout=DENSE_TIMEOUT):
     m = re.search(r"Kernel time:\s*([0-9.]+)\s*ms", r.stdout)
     return float(m.group(1)) if m else "fail"
 
+def run_bhsparse(mtx, timeout=CALL_TIMEOUT):
+    """bhSparse(IPDPS'14,merge/ESC 变体按行长分桶)→ '[ CUDA ] SpGEMM time' ms 或 None。
+    口径 = STAGE1-4 host 计时(含 stage3 Ct 重分配轮次;输入 h2d/输出 d2h 在计时外);
+    BH_CHECK=0 跳过串行参考校验(生产模式)。"""
+    env = dict(os.environ, BH_CHECK="0")
+    try:
+        r = subprocess.run([BHSPARSE_BIN, "-cuda", "-spgemm", os.path.abspath(mtx)],
+                           capture_output=True, text=True, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+    m = re.search(r"SpGEMM time:\s*([0-9.]+)\s*ms", r.stdout)
+    return float(m.group(1)) if m else None
+
 def geomean(xs):
     xs = [x for x in xs if x and x > 0]
     return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else float("nan")
@@ -197,7 +222,7 @@ def geomean(xs):
 def _report_and_summary(rows, args):
     """末尾汇总:几何均值 + Auto 选择 + Auto vs 各基线赢/输(normal flow 和 refresh-col 复用)。"""
     print("\n=== 几何均值(ms) ===")
-    for col in ["cu", "Auto", "Ocean", "opSparse", "HSMU", "dense", "cublas"]:
+    for col in ["cu", "Auto", "Ocean", "opSparse", "HSMU", "bhSparse", "dense", "cublas"]:
         xs = []
         for r in rows:
             try: xs.append(float(r.get(col)))
@@ -230,6 +255,7 @@ def _report_and_summary(rows, args):
     if not args.no_ocean:    vs_section("Ocean", "Ocean")
     if not args.no_opsparse: vs_section("opSparse", "opSparse")
     if not args.no_hsmu:     vs_section("HSMU", "HSMU")
+    if not args.no_bhsparse: vs_section("bhSparse", "bhSparse")
     if not args.no_dense:    vs_section("dense", "dense")
     if not args.no_cublas:   vs_section("cublas", "cuBLAS")
 
@@ -244,6 +270,7 @@ def main():
     ap.add_argument("--no-cublas", action="store_true", help="不比较 cuBLAS dense 基线")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-ocean", action="store_true", help="跳过 Ocean 基线")
+    ap.add_argument("--no-bhsparse", action="store_true", help="跳过 bhSparse 基线")
     ap.add_argument("--refresh-col", default=None,
                     help="只重跑指定列(cu/Auto/Ocean/opSparse/HSMU/dense),保留其余列(改了某个 binary 后用)")
     args = ap.parse_args()
@@ -258,7 +285,7 @@ def main():
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     fieldnames = ["matrix", "n", "sym", "density_pct", "cu", "Auto",
-                  "Auto_choice", "Ocean", "opSparse", "HSMU", "dense", "cublas", "cnnz"]
+                  "Auto_choice", "Ocean", "opSparse", "HSMU", "bhSparse", "dense", "cublas", "cnnz"]
 
     # ---- refresh-col:只重跑某一列,保留其余(改了某 binary 后局部刷新)----
     if args.refresh_col:
@@ -283,6 +310,8 @@ def main():
                 op = run_opsparse(p); return (round(op[0], 3) if op else "DNF", {})
             if c == "HSMU":
                 v = run_hsmu(p, name); return (round(v, 3) if v is not None else "", {})
+            if c == "bhSparse":
+                bh = run_bhsparse(p); return (round(bh, 3) if bh is not None else "DNF", {})
             if c == "dense":
                 d = run_dense(p); return (round(d, 3) if isinstance(d, float) else d, {})
             if c == "cublas":
@@ -321,7 +350,7 @@ def main():
         w.writeheader()
 
     N = len(names)
-    methods_desc = [m[0] for m in SPGEMM_METHODS] + ["Ocean", "opSparse", "HSMU", "dense", "cublas"]
+    methods_desc = [m[0] for m in SPGEMM_METHODS] + ["Ocean", "opSparse", "HSMU", "bhSparse", "dense", "cublas"]
     n_done = len(done)
     print(f"对比 {N} 阵 × {methods_desc} → {args.out}"
           f"{f'  (resume: {n_done} 已存,跳过;FRESH=1 全重跑)' if n_done else ''}\n", flush=True)
@@ -348,6 +377,8 @@ def main():
         if op and op[1] and row.get("cnnz") and str(op[1]) != str(row["cnnz"]):
             print(f"  ⚠ opSparse C.nnz={op[1]} ≠ Auto cnnz={row['cnnz']}", flush=True)
         row["HSMU"] = round(run_hsmu(p, name), 3) if not args.no_hsmu else ""
+        bh = run_bhsparse(p) if not args.no_bhsparse else None
+        row["bhSparse"] = round(bh, 3) if bh is not None else ("" if args.no_bhsparse else "DNF")
         if not args.no_dense:
             d = run_dense(p)
             row["dense"] = round(d, 3) if isinstance(d, float) else d
@@ -359,7 +390,8 @@ def main():
         dense_str = f" dense={row.get('dense','-')!s:>8}" if not args.no_dense else ""
         cublas_str = f" cublas={row.get('cublas','-')!s:>8}" if not args.no_cublas else ""
         print(f"cu={row['cu']!s:>7} Auto={row['Auto']!s:>7}({row.get('Auto_choice','?'):<6}) "
-              f"Ocn={row['Ocean']!s:>7} opSp={row['opSparse']!s:>7} HSMU={row['HSMU']!s:>7}{dense_str}{cublas_str} ({dt:.1f}s)", flush=True)
+              f"Ocn={row['Ocean']!s:>7} opSp={row['opSparse']!s:>7} HSMU={row['HSMU']!s:>7} "
+              f"bhSp={row['bhSparse']!s:>7}{dense_str}{cublas_str} ({dt:.1f}s)", flush=True)
     fout.close()
     print(f"\n完成 → {args.out}")
 
