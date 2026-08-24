@@ -105,7 +105,8 @@ def mtx_header(path):
 
 def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT):
     """METHOD=method_key 跑 spgemm_test → (compute_only_ms, wall_ms, cnnz, choice) 或 None。"""
-    env = dict(os.environ, USE_MEMPOOL="1", METHOD=method_key)
+    env = dict(os.environ, USE_MEMPOOL="1", METHOD=method_key,
+               MP_HOST_MB=os.environ.get("MP_HOST_MB", "2048"))  # ocean337 大输出:333SP d2h 需 ~878MB
     try:
         r = subprocess.run([BIN, mtx], capture_output=True, text=True, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -298,7 +299,7 @@ def main():
         print(f"Refresh 仅 '{col}' 列 × {len(rows)} 阵(DENSE_TIMEOUT={DENSE_TIMEOUT}s)→ {args.out}\n", flush=True)
         def run_one(c, p, name):
             if c == "cu":
-                r = run_spgemm_method(p, "cu"); return (round(r[0], 3) if r else "", {})
+                r = run_spgemm_method(p, "cu"); return (round(r[0], 3) if r else "DNF", {})
             if c == "Auto":
                 r = run_spgemm_method(p, "adaptive")
                 ex = {}
@@ -366,7 +367,9 @@ def main():
         t0 = time.time()
         for label, key in SPGEMM_METHODS:
             r = run_spgemm_method(p, key)
-            row[label] = round(r[0], 3) if r else ""
+            # cu 失败 → DNF(cuSPARSE 12.x workEstimation 在高中间积阵上报 err 11
+            # insufficient resources,ocean337 常见;计为基线弃权,口径同 dense DNF)
+            row[label] = round(r[0], 3) if r else ("DNF" if label == "cu" else "")
             if label == "Auto" and r:
                 row["cnnz"] = r[2]
                 row["Auto_choice"] = r[3]
