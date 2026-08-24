@@ -31,6 +31,21 @@
 **一句话定性:名字里的 "Multiway Merge" 只在分区阶段(merge-path/Varman rank 断点);
 计算内核是 块内 ESC(expand→BlockRadixSort→segmented-reduce),不是 k-way merge。**
 
+### 1.1 补遗(2026-08-24 二读,边界语义与后处理细节)
+
+- **块 = 全局 (行,列) 值序全序列的等大 rank 窗口**:全部中间积概念上按 (row,col) 排成一条序列,
+  每 2048 项一块。`scan_gen_blocks` 的全局 scan 只用行总量(rank 记账,与顺序无关);
+  **值序语义由 `row_splitter` 决定**——断点 b[] 使"各链前缀 = 值排序前 p 名"(tournament tree
+  kth-smallest 精确 rank 选择,非链主序填充)。⇒ 块排序后拼接即全局有序,免全局 sort;
+  链主序枚举(compute 第 2 步)便宜但无序,靠块内 radix sort 把顺序补回来。
+- **跨块同列仅一种**:边界值并列(同列骑界,split 阶段 `compute_carry` 预判)→ compute 后处理
+  `atomicAdd(块i部分和 → 块i+1首项)`(compute.cu:574-581);其余重复全在块内被分段归约吸收。
+- **Phase C 拼装**:compute 里块按完成顺序 atomicAppend(乱序);后处理 `scan(out_sizes)` +
+  `transform_lbs` gather 按全局块序捞回归位并解码 (row,col);`DeviceRunLengthEncode` 出 row_ptr。
+- **两阶段的口径含义**:split 独立二进制写盘(lb_data.bin/lb_block_ptrs.bin)→ 分区可离线复用,
+  compute 计时不含分区。将来对比须对齐:partition 是否摊掉 / float / 预分配 600M。
+- reverse 切分(边界落在行后半程)是选择算法的优化,不改变语义。
+
 ## 2. 我方 merge3(`bucket_merge_flop_kernel`,src/spgemm_merge.cu:636)
 
 - (row, bucket) 一块,32 线程 warp;K=5 个**等宽列值域桶** `[blo,bhi)`;
