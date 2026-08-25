@@ -63,6 +63,11 @@ def main():
         w.writeheader()
 
     print(f"采集 {len(names)} 阵(已有 {len(done)})→ {args.out}")
+    # ⚠ 安全护栏(2026-08-25,GPU1 wedge 教训):病态输入不进 hash/merge3 路径
+    #   fp>15亿 → merge3 gapped buffer int 溢出区(Ga/band_n32000x1024 同款炸弹)
+    #   maxrow>10万 → merge3 行内长循环 + 超时 SIGKILL 在 CUDA teardown = wedge 机制
+    FP_GUARD = int(os.environ.get("DISP_FP_GUARD", "1500000000"))
+    MR_GUARD = int(os.environ.get("DISP_MR_GUARD", "100000"))
     for i, name in enumerate(names, 1):
         if name in done:
             continue
@@ -71,11 +76,19 @@ def main():
         r, out = run_one(p, "adaptive", args.timeout)
         feat = parse_adapt(out) if out else None
         if feat is None:
-            print(f"[{i}/{len(names)}] {name}: adapt 行缺失/失败", flush=True)
+            # adaptive 都没打出特征 = 该阵本身有问题,绝不盲跑 hash/merge3
+            print(f"[{i}/{len(names)}] {name}: adapt 行缺失/失败(跳过,不跑两路径)", flush=True)
             row.update({"t_hash": "", "t_merge3": "", "hash_overflow": ""})
             w.writerow(row); fout.flush()
             continue
         row.update(feat)
+        if feat["fp"] > FP_GUARD or feat["maxrow"] > MR_GUARD:
+            why = "fp" if feat["fp"] > FP_GUARD else "maxrow"
+            print(f"[{i}/{len(names)}] {name}: SKIP({why}={feat['fp'] if why=='fp' else feat['maxrow']}"
+                  f" 超护栏,防 wedge)", flush=True)
+            row.update({"t_hash": "", "t_merge3": "", "hash_overflow": ""})
+            w.writerow(row); fout.flush()
+            continue
         # t_hash
         rh, outh = run_one(p, "hash", args.timeout)
         th = CM.compute_only_from_prof(rh.stderr if rh else "", "hash-prof") if rh else None
