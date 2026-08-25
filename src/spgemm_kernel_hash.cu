@@ -51,7 +51,7 @@ __global__ void count_intermediates_par_kernel(
 #define HASH_CAP 16384         // 重行桶 hash 表最大槽位(→ col+val = 128KB/块)
 #endif
 #define HASH_BLOCK 256
-#define N_BINS 12    // 10 hash ht-buckets(ht=32<<i, i=0..9) + ultra(10,flop≤16) + heavy(11,est>HASH_CAP 走全局表)
+#define N_BINS 13    // 10 hash ht-buckets(ht=32<<i, i=0..9) + ultra(10,flop≤16) + heavy(11,est>HASH_CAP 走全局表)
 #define GLOBAL_HT_MAX_SLOTS (1 << 22)   // 单行全局表上限 4M 槽(50MB);est 超此 → 真溢出回退
 #define AVG_FLOP_THR 64                  // avg_product ≤ 此值 → est=精确 flop 免 MinHash(Ocean Ana1 同款门)
 #define CSORT_HT 1024   // ht≤此值的行(bin0-5)在 accumulate 内 count-sort 写有序;compact 阶段只 copy
@@ -360,6 +360,93 @@ __global__ void hash_dense_window_kernel(
         if (!atomicExch(&row_ovf[i], 1)) { int q = atomicAdd(ovf_cnt, 1); ovf_rows[q] = i; }
     }
     if (tid == 0) row_nnz[i] = (out <= cap) ? out : cap;
+}
+
+// ===================== sub-warp 批量 kernel(2026-08-26 方向B,巨型图第二程) =====================
+// est ≤ 8 的极稀疏行(germany_osm/road 类 avg_product≈5):每行只派 8 线程(4 行/warp),
+// 去重累加在**寄存器**里(≤8 个 col/val 对,零 SMEM 零原子),warp shfl 去重+求和。
+// 对标 Ocean hashNumericSubWarpKernel<4>(它 4 线程/行,hash 表在 SMEM;我们寄存器更轻)。
+#define SUBW_HT 8    // 寄存器表容量(每行 ≤ 8 distinct)
+
+// 干净版:8 线程/行,SMEM 小表(32 slot),warp 内 4 行不共享表
+__global__ void hash_subwarp8_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
+    const int *bucket_rows, int n_in_bucket,
+    const long long *row_off, const int *est,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag,
+    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+{
+    int lane = threadIdx.x & 31;
+    int row_slot = lane >> 3;                    // 0-3
+    int sub_lane = lane & 7;                     // 0-7
+    int rows_per_warp = 32 >> 3;                 // 4
+    int row_idx = ((blockIdx.x * blockDim.x + threadIdx.x) >> 5) * rows_per_warp + row_slot;
+    if (row_idx >= n_in_bucket) return;
+    int i = bucket_rows[row_idx];
+
+    // SMEM 表:每 warp 4 行 × 32 slot × 12B = 1.5KB/warp,256 线程 8 warp = 12KB
+    __shared__ int s_col[8][4][32];              // [warp][row_slot][slot]
+    __shared__ double s_val[8][4][32];
+    int warp = threadIdx.x >> 5;
+    int *my_col = s_col[warp][row_slot];
+    double *my_val = s_val[warp][row_slot];
+    for (int s = sub_lane; s < 32; s += 8) { my_col[s] = -1; my_val[s] = 0.0; }
+    __syncwarp(0xFFu << (row_slot * 8));         // 同行 8 线程同步(warp 内子组)
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    for (int p = rs; p < re; p++) {
+        int k = A_col_idx[p];
+        double a = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + sub_lane; q < ke; q += 8) {
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            double v = a * B_val[q];
+            unsigned slot = ((unsigned)(j * 2654435761u)) & 31;
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&my_col[slot], -1, j);
+                if (old == -1 || old == j) { atomicAdd(&my_val[slot], v); break; }
+                slot = (slot + 1) & 31;
+                if (++probes >= 32) {
+                    atomicExch(overflow_flag, 1);
+                    if (!atomicExch(&row_ovf[i], 1)) { int p2 = atomicAdd(ovf_cnt, 1); ovf_rows[p2] = i; }
+                    break;
+                }
+            }
+        }
+    }
+    __syncwarp(0xFFu << (row_slot * 8));
+
+    // 提取 + 插入排序(单线程,8 线程中 sub_lane==0 做)
+    long long base = row_off[i];
+    long long cap = row_off[i + 1] - row_off[i];
+    if (sub_lane == 0) {
+        int cols[32]; double vals[32]; int cnt = 0;
+        for (int s = 0; s < 32; s++) {
+            if (my_col[s] >= 0) { cols[cnt] = my_col[s]; vals[cnt] = my_val[s]; cnt++; }
+        }
+        // 插入排序
+        for (int t = 1; t < cnt; t++) {
+            int c = cols[t]; double v = vals[t];
+            int s2 = t - 1;
+            while (s2 >= 0 && cols[s2] > c) { cols[s2+1] = cols[s2]; vals[s2+1] = vals[s2]; s2--; }
+            cols[s2+1] = c; vals[s2+1] = v;
+        }
+        if (cnt > cap) {
+            atomicExch(overflow_flag, 1);
+            if (!atomicExch(&row_ovf[i], 1)) { int p2 = atomicAdd(ovf_cnt, 1); ovf_rows[p2] = i; }
+            cnt = (int)cap;
+        }
+        for (int t = 0; t < cnt; t++) {
+            tmp_key[base + t] = ((unsigned long long)i << 32) | (unsigned int)cols[t];
+            tmp_val[base + t] = vals[t];
+        }
+        row_nnz[i] = cnt;
+    }
 }
 
 // ===================== 小行批量 kernel(2026-08-26,Phase 2 主杠杆) =====================
@@ -1018,7 +1105,9 @@ __global__ void compute_bucket_kernel(
         // 批量 kernel 门(2026-08-26):est≤64 且行长≤32(k 短,warp 串行 k 才划算;
         // 3Dspectralwave2 的 est 小但 k 数百的长链行回归教训)→ bin0(BATCH_HT=128 覆盖 est≤64);
         // 否则走原 per-row 梯。333SP 教训:门须独立于 2× 表目标的梯子(否则 est~36 被推到 bi2)
-        if (e <= 64) {
+        if (false) {  // subwarp8 否决(germany_osm 49→55ms,warp idle 不是瓶颈;kernel 保留待查)
+            bid = N_BINS;
+        } else if (e <= 64) {
             int rk = A_row_ptr[i + 1] - A_row_ptr[i];
             bid = (rk <= 32) ? 0 : bi;
         } else {
@@ -1343,7 +1432,13 @@ static void hash_product(
             int n = h_cnt[bi];
             if (n == 0) continue;
             int *rows_ptr = d_sort + h_off[bi];
-            if (bi == 0) {
+            if (bi == N_BINS - 1) {
+                // subwarp8(est≤8):8 线程/行 × 4 行/warp,SMEM 小表 32 slot(方向B 巨型图第二程)
+                hash_subwarp8_kernel<<<(n + 3) / 4, 256>>>(
+                    dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                    rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
+                    d_ovf_rows, d_ovf_cnt, d_row_ovf);
+            } else if (bi == 0) {
                 // 小行批量(est≤64 且行长≤32):warp-per-row + 私有表 + 融合有序 extract(2026-08-26)
                 hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
@@ -1573,7 +1668,7 @@ static void hash_product(
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_scr_key, d_scr_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else {
-                // ultra(行≤32,kernel 内已插入排序):warp copy
+                // ultra(行≤32)和 subwarp8(bin12):kernel 内已插入排序 → warp copy
                 hash_compact_copy_warp_kernel<<<(n + 7) / 8, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());
             }
