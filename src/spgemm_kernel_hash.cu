@@ -714,6 +714,96 @@ __global__ void hash_global_kernel(
     }
 }
 
+// heavy 混合版(2026-08-26,Step2):keys 进 SMEM(ht ≤ HYBRID_HT_MAX,128KB)、values 留全局
+// arena —— SMEM atomicCAS 比全局快 ~4-8×,治 TSOPF 类 heavy 全局表 3.86× 的主源。
+// 对标 Ocean HYBRID_HASHMAP(keys SMEM + values 全局池)。smem 每 launch 均一 →
+// host 按 ht ≤ HYBRID_HT_MAX 分两批launch。
+#define HYBRID_HT_MAX 32768
+
+__global__ void hash_global_hybrid_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
+    const int *bucket_rows, int n_in_bucket,
+    const long long *row_ht, const long long *tab_off,
+    int *tab_col_global, double *tab_val,     // tab_val 全局;tab_col_global 仅大行用(此 kernel 不写)
+    const long long *row_off, const int *est, long long tmp_total,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag,
+    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+{
+    int idx = blockIdx.x;
+    if (idx >= n_in_bucket) return;
+    int i = bucket_rows[idx];
+    int tid = threadIdx.x;
+    int ht_size = (int)row_ht[idx];
+    int mask = ht_size - 1;
+    double *sh_val = tab_val + tab_off[idx];               // 值:全局(与纯全局版共用 arena)
+    extern __shared__ __align__(8) int hkey[];             // 键:SMEM [ht_size]
+    for (int s = tid; s < ht_size; s += blockDim.x) hkey[s] = -1;
+    __syncthreads();
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int G = 32, num_groups = blockDim.x / G, my_group = tid / G, my_id = tid % G;
+    for (int p = rs + my_group; p < re; p += num_groups) {
+        int k = A_col_idx[p];
+        double a = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + my_id; q < ke; q += G) {
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            double v = a * B_val[q];
+            unsigned slot = ((unsigned)(j * 2654435761u)) & mask;
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&hkey[slot], -1, j);                   // SMEM CAS
+                if (old == -1 || old == j) { atomicAdd(&sh_val[slot], v); break; }  // 全局 val
+                slot = (slot + 1) & mask;
+                if (++probes >= ht_size) {
+                    atomicExch(overflow_flag, 1);
+                    int p2 = atomicAdd(ovf_cnt, 1); if (!atomicExch(&row_ovf[i], 1)) ovf_rows[p2] = i;
+                    break;
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    __shared__ int cnt;
+    if (tid == 0) cnt = 0;
+    __syncthreads();
+    long long base = row_off[i];
+    int cap = est[i];
+    for (int s = tid; s < ht_size; s += blockDim.x) {
+        int c = hkey[s];
+        if (c >= 0) {
+            int pos = atomicAdd(&cnt, 1);
+            if (pos >= cap) { atomicExch(overflow_flag, 1); continue; }
+            tmp_key[base + pos] = ((unsigned long long)i << 32) | (unsigned int)c;
+            tmp_val[base + pos] = sh_val[s];
+        }
+    }
+    __syncthreads();
+    if (tid == 0) {
+        if (cnt > cap && !atomicExch(&row_ovf[i], 1)) { int p2 = atomicAdd(ovf_cnt, 1); ovf_rows[p2] = i; }
+        row_nnz[i] = cnt > cap ? cap : cnt;
+    }
+}
+
+// heavy 拆分辅助:从全表 gather (ht, tab_off) 到子表(按子表行号)
+__global__ void heavy_gather_kernel(
+    int *sub_rows, int n_sub, const int *full_rows,
+    const long long *full_ht, const long long *full_off,
+    long long *sub_ht, long long *sub_off)
+{
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n_sub) return;
+    int idx = sub_rows[t];          // heavy 表内位置
+    sub_ht[t] = full_ht[idx];
+    sub_off[t] = full_off[idx];
+    sub_rows[t] = full_rows[idx];   // 原地换成真实行号(kernel 按此读 A/B)
+}
+
 // heavy 行分段排序的 begin/end 偏移(基于 gapped d_off + 真实 row_nnz)
 __global__ void heavy_seg_kernel(
     const int *rows, int n, const long long *row_off, const int *row_nnz,
