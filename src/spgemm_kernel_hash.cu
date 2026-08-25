@@ -1117,7 +1117,7 @@ static void hash_product(
             size_t dsm = ((size_t)A_cols * 9 + 3) / 4 * 4 + (size_t)A_cols * sizeof(int);
             if (dsm > 48 * 1024)
                 CHECK_CUDA(cudaFuncSetAttribute(hash_dense_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)dsm));
-            hash_dense_kernel<<<A_rows, HASH_BLOCK, dsm>>>(
+            hash_dense_kernel<<<A_rows, 512, dsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                 d_ovf_rows, d_ovf_cnt, d_row_ovf);
