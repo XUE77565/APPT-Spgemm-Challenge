@@ -129,6 +129,7 @@ __global__ void mh_merge_kernel(
     const int *A_row_ptr, const int *A_col_ind,
     int A_rows,
     const unsigned int *b_mh,           // [B_rows * MH_M] uint32 from Phase 1
+    const int *row_flop,                // [A_rows] 每行精确乘积数(精确上界,封顶 MinHash 高估)
     int *est_nnz)                       // [A_rows] output
 {
     int row = blockIdx.x;
@@ -186,11 +187,15 @@ __global__ void mh_merge_kernel(
         int est;
         if (temp <= EST_ULTRA_THR) {                                      // ultra:线性 kernel,est 保留紧 temp
             est = temp;
-        } else {                                                          // snap 到 next_pow2 × 2 余量;上限放开到全局表容量
-            int ht = 32;                                                  // (2× 余量治小/中行 MinHash 低估 → 运行时表满:
-            while (ht < 2 * temp && ht < GLOBAL_HT_MAX_SLOTS) ht <<= 1;   //  3Dspectralwave2 row=175839 est=512 真值>512;
-            est = ht;                                                     //  >HASH_CAP 交 heavy 全局表 bin)
+        } else {                                                          // snap 到 next_pow2 × 2 余量
+            int ht = 32;                                                  // (2× 余量治小/中行低估表满;>HASH_CAP 交 heavy)
+            while (ht < 2 * temp && ht < GLOBAL_HT_MAX_SLOTS) ht <<= 1;
+            est = ht;
         }
+        // flop = 每行乘积数 = distinct 的【精确上界】→ 封顶 MinHash 高估(TSOPF:Σest 从 147亿 → ≤Σflop,
+        // 兼治 int 前缀和溢出)。min() 不引入新低估:flop ≥ distinct 恒真,低估风险仅剩原 2×snap 自身。
+        int fl = row_flop[row];
+        if (fl > 0 && est > fl) est = fl;
         est_nnz[row] = est;
     }
 }
@@ -201,7 +206,7 @@ __global__ void hash_spa_kernel(
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,   // 内层 j 来源:AA=A,ATT=Aᵀ(CSC)
     int upper_tri,                                                      // 0=自乘;1=ATT 只算 j≥i
     const int *bucket_rows, int n_in_bucket, int ht_size,
-    const int *row_off,
+    const long long *row_off,
     unsigned long long *tmp_key, double *tmp_val,
     int *row_nnz, int *overflow_flag)
 {
@@ -238,8 +243,7 @@ __global__ void hash_spa_kernel(
                 slot = (slot + 1) & mask;                            // 线性探测
                 if (++probes >= ht_size) {                          // 溢出
                     atomicExch(overflow_flag, 1);
-                    printf("[ovf-spa] row=%d ht=%d tid=%d\n", i, ht_size, tid);   // TEMP DEBUG(不限 lane)
-                    break;
+                                       break;
                 }
             }
         }
@@ -250,7 +254,7 @@ __global__ void hash_spa_kernel(
     __shared__ int cnt;
     if (tid == 0) cnt = 0;
     __syncthreads();
-    int base = row_off[i];
+    long long base = row_off[i];
     if (ht_size <= CSORT_HT) {
         // compact 到前部:chunked 读进寄存器→sync→写前部(read-before-write 防 race)
         for (int it = 0; it < (ht_size + HASH_BLOCK - 1) / HASH_BLOCK; it++) {
@@ -289,7 +293,7 @@ __global__ void hash_spa_kernel(
 __global__ void hash_spa_priv_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *bucket_rows, int n_in_bucket, int ht_size, int W,
-    const int *row_off,
+    const long long *row_off,
     unsigned long long *tmp_key, double *tmp_val,
     int *row_nnz, int *overflow_flag)
 {
@@ -355,7 +359,7 @@ __global__ void hash_spa_priv_kernel(
     __shared__ int cnt;
     if (tid == 0) cnt = 0;
     __syncthreads();
-    int base = row_off[i];
+    long long base = row_off[i];
     if (ht_size <= CSORT_HT) {
         for (int it = 0; it < (ht_size + blockDim.x - 1) / blockDim.x; it++) {
             int s = it * blockDim.x + tid;
@@ -394,7 +398,7 @@ __global__ void hash_ultra_kernel(
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
     int upper_tri,
     const int *ultra_rows, int n_ultra,
-    const int *row_off,
+    const long long *row_off,
     unsigned long long *tmp_key, double *tmp_val, int *row_nnz, int *overflow_flag)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -413,12 +417,12 @@ __global__ void hash_ultra_kernel(
             for (int t = 0; t < u_cnt; t++) if (u_col[t] == j) { pos = t; break; }
             if (pos >= 0) u_val[pos] += v;
             else {
-                if (u_cnt >= CAP) { atomicExch(overflow_flag, 1); printf("[ovf-ultra] row=%d est<=16 但 distinct>32\n", i); return; }   // 超 CAP → 回退 merge3
+                if (u_cnt >= CAP) { atomicExch(overflow_flag, 1); return; }   // 超 CAP → 回退 merge3
                 u_col[u_cnt] = j; u_val[u_cnt] = v; u_cnt++;
             }
         }
     }
-    int base = row_off[i];
+    long long base = row_off[i];
     for (int t = 0; t < u_cnt; t++) {
         tmp_key[base + t] = ((unsigned long long)i << 32) | (unsigned int)u_col[t];
         tmp_val[base + t] = u_val[t];
@@ -442,8 +446,7 @@ __global__ void heavy_prep_kernel(
     if (e > GLOBAL_HT_MAX_SLOTS) {            // 超过单表上限:真溢出,走原回退语义
         row_ht[t] = 0;
         atomicExch(overflow_flag, 1);
-        if (t == 0 || (t & 255) == 0) printf("[ovf-prep] row=%d est=%d > MAX_SLOTS\n", rows[t], e);   // TEMP DEBUG
-        return;
+        if (t == 0 || (t & 255) == 0)        return;
     }
     long long h = 2 * HASH_CAP;               // 最小 32768
     while (h < 2LL * e) h <<= 1;              // 2× 余量:est 低估(MinHash 误差)时不炸
@@ -457,7 +460,7 @@ __global__ void hash_global_kernel(
     const int *bucket_rows, int n_in_bucket,
     const long long *row_ht, const long long *tab_off,
     int *tab_col, double *tab_val,
-    const int *row_off, const int *est, long long tmp_total,
+    const long long *row_off, const int *est, long long tmp_total,
     unsigned long long *tmp_key, double *tmp_val,
     int *row_nnz, int *overflow_flag)
 {
@@ -466,12 +469,6 @@ __global__ void hash_global_kernel(
     int i = bucket_rows[idx];
     int tid = threadIdx.x;
     int ht_size = (int)row_ht[idx];
-    // TEMP DEBUG:抓非法参数(est 污染/偏移越界)
-    if (tid == 0) {
-        if (ht_size <= 0 || (long long)row_off[i] + est[i] > tmp_total || est[i] <= 0)
-            printf("[HG-OOB] row=%d ht=%d base=%d est=%d total=%lld\n",
-                   i, ht_size, row_off[i], est[i], tmp_total);
-    }
     int mask = ht_size - 1;
     int *sh_col = tab_col + tab_off[idx];      // 本行的全局表段
     double *sh_val = tab_val + tab_off[idx];
@@ -506,7 +503,7 @@ __global__ void hash_global_kernel(
     __shared__ int cnt;
     if (tid == 0) cnt = 0;
     __syncthreads();
-    int base = row_off[i];
+    long long base = row_off[i];
     int cap = est[i];
     for (int s = tid; s < ht_size; s += HASH_BLOCK) {
         int c = sh_col[s];
@@ -519,14 +516,13 @@ __global__ void hash_global_kernel(
     }
     __syncthreads();
     if (tid == 0) {
-        if (cnt > cap) printf("[ovf-hg] row=%d est_cap=%d true_cnt=%d ratio=%.2f\n", i, cap, cnt, (double)cnt / cap);   // TEMP DEBUG
-        row_nnz[i] = cnt > cap ? cap : cnt;
+               row_nnz[i] = cnt > cap ? cap : cnt;
     }
 }
 
 // heavy 行分段排序的 begin/end 偏移(基于 gapped d_off + 真实 row_nnz)
 __global__ void heavy_seg_kernel(
-    const int *rows, int n, const int *row_off, const int *row_nnz,
+    const int *rows, int n, const long long *row_off, const int *row_nnz,
     int *seg_beg, int *seg_end)
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
@@ -538,13 +534,13 @@ __global__ void heavy_seg_kernel(
 
 // compact:每行 row_nnz 项从 tmp(row_off 起)拷到连续 CSR(C_row_ptr 起)
 __global__ void hash_compact_kernel(
-    int A_rows, const int *row_off, const int *row_nnz, const int *C_row_ptr,
+    int A_rows, const long long *row_off, const int *row_nnz, const int *C_row_ptr,
     const unsigned long long *tmp_key, const double *tmp_val,
     unsigned long long *out_key, double *out_val)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
-    int src = row_off[i], dst = C_row_ptr[i], n = row_nnz[i];
+    long long src = row_off[i]; int dst = C_row_ptr[i], n = row_nnz[i];
     for (int t = 0; t < n; t++) {
         out_key[dst + t] = tmp_key[src + t];
         out_val[dst + t] = tmp_val[src + t];
@@ -561,7 +557,7 @@ __global__ void split_key_kernel(const unsigned long long *key, int *col, int n)
 template<int TPB, int IPT>
 __global__ void hash_compact_sort_kernel(
     const int *rows, int n_rows,
-    const int *row_off, const int *row_nnz, const int *row_ptr,
+    const long long *row_off, const int *row_nnz, const int *row_ptr,
     const unsigned long long *tmp_key, const double *tmp_val,
     int *out_col, double *out_val)
 {
@@ -571,7 +567,7 @@ __global__ void hash_compact_sort_kernel(
         *reinterpret_cast<typename BlockRadixSort::TempStorage *>(csort_smem);
     if (blockIdx.x >= n_rows) return;
     int row = rows[blockIdx.x];
-    int start = row_off[row];
+    long long start = row_off[row];
     int n = row_nnz[row];
     int out_start = row_ptr[row];
 
@@ -631,14 +627,17 @@ __global__ void scatter_rows_kernel(
 }
 
 // 单 block inclusive prefix-sum(Hillis-Steele);小阵专用,替 thrust::inclusive_scan
-__global__ void scan_inclusive_kernel(const int *x, int *y, int n) {
-    extern __shared__ int ss[];
+// T = int(cnnz)/ long long(est:ocean337 Σest 超 2^31)
+template <typename T>
+__global__ void scan_inclusive_kernel(const int *x, T *y, int n) {
+    extern __shared__ unsigned char scan_smem_raw[];
+    T *ss = (T*)scan_smem_raw;
     int tid = threadIdx.x;
     int N = blockDim.x;
-    ss[tid] = (tid < n) ? x[tid] : 0;
+    ss[tid] = (tid < n) ? (T)x[tid] : (T)0;
     __syncthreads();
     for (int off = 1; off < N; off <<= 1) {
-        int v = (tid >= off) ? ss[tid - off] : 0;
+        T v = (tid >= off) ? ss[tid - off] : (T)0;
         __syncthreads();
         ss[tid] += v;
         __syncthreads();
@@ -649,13 +648,13 @@ __global__ void scan_inclusive_kernel(const int *x, int *y, int n) {
 // 小行专用:accumulate 已在 SMEM 内 count-sort 写有序,这里只把 tmp(gapped)→ CSR(packed) 纯 copy。
 __global__ void hash_compact_copy_kernel(
     const int *rows, int n_rows,
-    const int *row_off, const int *row_nnz, const int *row_ptr,
+    const long long *row_off, const int *row_nnz, const int *row_ptr,
     const unsigned long long *tmp_key, const double *tmp_val,
     int *out_col, double *out_val)
 {
     if (blockIdx.x >= n_rows) return;
     int row = rows[blockIdx.x];
-    int src = row_off[row], n = row_nnz[row], dst = row_ptr[row];
+    long long src = row_off[row]; int n = row_nnz[row], dst = row_ptr[row];
     for (int t = threadIdx.x; t < n; t += blockDim.x) {
         out_col[dst + t] = (int)(tmp_key[src + t] & 0xffffffffu);
         out_val[dst + t] = tmp_val[src + t];
@@ -664,7 +663,7 @@ __global__ void hash_compact_copy_kernel(
 
 // launch helper:按 config 查 BlockRadixSort TempStorage 大小,>48KB 自动 opt-in 动态 shared(H100 可 ~228KB)。
 template<int TPB, int IPT>
-static void launch_csort(int n, const int *rows_ptr, const int *d_off, const int *d_row_nnz,
+static void launch_csort(int n, const int *rows_ptr, const long long *d_off, const int *d_row_nnz,
                          const int *dC_rp, const unsigned long long *d_tmp_key, const double *d_tmp_val,
                          int *dC_ci, double *d_val) {
     using BRS = cub::BlockRadixSort<unsigned int, TPB, IPT, double>;
@@ -720,25 +719,28 @@ static void hash_product(
     }
     const int upper_tri = att ? 1 : 0;
 
-    // Stage 1: row_off 由 est 的 scan 给出
-    int *d_off; d_off = decltype(d_off)(dev_alloc((A_rows + 1) * sizeof(int)));
+    // Stage 1: row_off 由 est 的 scan 给出(64 位:ocean337 上 Σest 可超 2^31,TSOPF 教训)
+    long long *d_off; d_off = decltype(d_off)(dev_alloc((A_rows + 1) * sizeof(long long)));
 
     // 估计每行 distinct(2026-08-25 重构,对标 Ocean Ana1):
     //   ① 全阵先算每行精确乘积数 flop(O(nnz) count,兼作 avg_product 门);
     //   ② avg_product ≤ AVG_FLOP_THR(64) → est = flop【精确上界,零低估】+ 免 MinHash
     //      (均度低的行 dup 因子≈1,上界即准界 —— 333SP 型省 mh 两遍,Ocean 同款免估计路径);
-    //   ③ 否则 MinHash 两阶段(表 snap 带 2× 余量,治小行低估溢出:3Dspectralwave2 row=175839 教训)
+    //   ③ 否则 MinHash 两阶段(est = min(2×snap(E), flop):flop 封顶 MinHash 高估 —— TSOPF
+    //      Σest 曾爆到 147 亿 = int 溢出 + 74× 过分配;min 不引入新低估:flop ≥ distinct 恒真)
     int *d_est; d_est = decltype(d_est)(dev_alloc(A_rows * sizeof(int)));
+    int *d_flop; d_flop = decltype(d_flop)(dev_alloc(A_rows * sizeof(int)));
     long long total_flop = 0;
     prof("count_flop", [&]{
-        count_intermediates_par_kernel<<<A_rows, 256>>>(dB_rp, dB_ci, A_rows, d_est);
+        count_intermediates_par_kernel<<<A_rows, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
         CHECK_CUDA(cudaGetLastError());
-        total_flop = thrust::reduce(thrust::device_ptr<int>(d_est), thrust::device_ptr<int>(d_est + A_rows), 0LL);
+        total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
     double avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
     dbg("[%s] avg_product=%.1f (total_flop=%lld)\n", tag, avg_product, total_flop);
     if (avg_product <= AVG_FLOP_THR) {
         dbg("[%s] 低均度 → est=精确 flop(免 MinHash)\n", tag);
+        CHECK_CUDA(cudaMemcpy(d_est, d_flop, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToDevice));
     } else {
         // MinHash 两阶段(partition bottom-k sketch;机制见 mh_construct/mh_merge)
         unsigned int *d_mh; d_mh = decltype(d_mh)(dev_alloc((size_t)A_rows * MH_M * sizeof(unsigned int)));
@@ -756,25 +758,25 @@ static void hash_product(
         int smem_p2 = MH_M * sizeof(unsigned int);   // [MH_M] uint32(smem_merge)
         prof("mh_merge", [&]{
             mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                dA_rp, dA_ci, A_rows, d_mh, d_est);
+                dA_rp, dA_ci, A_rows, d_mh, d_flop, d_est);
             CHECK_CUDA(cudaGetLastError());
         });
         dev_free(d_mh);
     }
-    int total_est;
+    long long total_est;
     prof("est_scan", [&]{
-        CHECK_CUDA(cudaMemset(d_off, 0, sizeof(int)));
+        CHECK_CUDA(cudaMemset(d_off, 0, sizeof(long long)));
         if (A_rows <= 1024) {
             int b = 1; while (b < A_rows) b <<= 1;                       // 小阵:单 block scan(1 launch)
-            scan_inclusive_kernel<<<1, b, b * sizeof(int)>>>(d_est, d_off + 1, A_rows);
+            scan_inclusive_kernel<long long><<<1, b, b * sizeof(long long)>>>(d_est, d_off + 1, A_rows);
         } else {
             thrust::inclusive_scan(thrust::device_ptr<int>(d_est),
                                    thrust::device_ptr<int>(d_est + A_rows),
-                                   thrust::device_ptr<int>(d_off + 1));
+                                   thrust::device_ptr<long long>(d_off + 1));
         }
-        CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入计时
+        CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));   // D2H 纳入计时
     });
-    dbg("[hash] total_est=%d\n", total_est);
+    dbg("[hash] total_est=%lld\n", total_est);
 
     // Stage 2: GPU 端分桶(全 device,无 host 往返)+ 预分配大 buffer(零 per-bucket malloc/free)
     int *d_row_nnz; d_row_nnz = decltype(d_row_nnz)(dev_alloc(A_rows * sizeof(int)));
@@ -857,21 +859,6 @@ static void hash_product(
                 CHECK_CUDA(cudaMemcpy(&total_slots, d_heavy_tab_off + (n - 1), sizeof(long long), cudaMemcpyDeviceToHost));
                 CHECK_CUDA(cudaMemcpy(&last_ht, d_heavy_ht + (n - 1), sizeof(long long), cudaMemcpyDeviceToHost));
                 total_slots += last_ht;
-                {   // TEMP DEBUG:验尸 tab_off/row_ht 头尾
-                    if (n <= 0 || n > 1000000) { fprintf(stderr, "[heavy-dbg] n 异常 %d\n", n); }
-                    else {
-                        long long h0, h1, hl, tn; long long t0, t1, tl;
-                        cudaMemcpy(&t0, d_heavy_tab_off + 0, 8, cudaMemcpyDeviceToHost);
-                        cudaMemcpy(&t1, d_heavy_tab_off + 1, 8, cudaMemcpyDeviceToHost);
-                        cudaMemcpy(&tl, d_heavy_tab_off + (n - 1), 8, cudaMemcpyDeviceToHost);
-                        cudaMemcpy(&tn, d_heavy_tab_off + n, 8, cudaMemcpyDeviceToHost);
-                        cudaMemcpy(&h0, d_heavy_ht + 0, 8, cudaMemcpyDeviceToHost);
-                        cudaMemcpy(&h1, d_heavy_ht + 1, 8, cudaMemcpyDeviceToHost);
-                        cudaMemcpy(&hl, d_heavy_ht + (n - 1), 8, cudaMemcpyDeviceToHost);
-                        fprintf(stderr, "[heavy-dbg] n=%d tab_off[0,1,n-1,n]=%lld,%lld,%lld,%lld ht[0,1,n-1]=%lld,%lld,%lld arena=%lld\n",
-                                n, t0, t1, tl, tn, h0, h1, hl, total_slots);
-                    }
-                }
                 long long ght_cap = 24LL << 30;                       // SAFETY:表区 arena 上限(字节)
                 if (const char *e = getenv("GHT_MAX_BYTES")) ght_cap = atoll(e);
                 dbg("[hash] heavy rows=%d slots=%lld arena=%.2fGB\n", n, total_slots,
@@ -891,12 +878,8 @@ static void hash_product(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, d_heavy_ht, d_heavy_tab_off, d_tab_col, d_tab_val,
                         d_off, d_est, (long long)total_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
-                    CHECK_CUDA(cudaDeviceSynchronize());   // TEMP:定位非确定 illegal access
-                    CHECK_CUDA(cudaGetLastError());
                     heavy_seg_kernel<<<(n + 255) / 256, 256>>>(
                         rows_ptr, n, d_off, d_row_nnz, d_seg_beg, d_seg_end);
-                    CHECK_CUDA(cudaDeviceSynchronize());   // TEMP
-                    CHECK_CUDA(cudaGetLastError());
                     size_t cub_bytes = 0;
                     CHECK_CUDA(cub::DeviceSegmentedRadixSort::SortPairs(
                         nullptr, cub_bytes, d_tmp_key, d_scr_key, d_tmp_val, d_scr_val,
@@ -905,8 +888,6 @@ static void hash_product(
                     CHECK_CUDA(cub::DeviceSegmentedRadixSort::SortPairs(
                         d_cub_tmp, cub_bytes, d_tmp_key, d_scr_key, d_tmp_val, d_scr_val,
                         total_est, n, d_seg_beg, d_seg_end));
-                    CHECK_CUDA(cudaDeviceSynchronize());   // TEMP
-                    CHECK_CUDA(cudaGetLastError());
                 }
             } else {
                 int ht = 32 << bi;
@@ -922,7 +903,6 @@ static void hash_product(
                         rows_ptr, n, ht, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
                 }
-                CHECK_CUDA(cudaDeviceSynchronize());   // TEMP:钉住崩溃到具体 bin
             }
         }
         CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入
@@ -946,7 +926,7 @@ static void hash_product(
         CHECK_CUDA(cudaMemset(dC_rp, 0, sizeof(int)));
         if (A_rows <= 1024) {
             int b = 1; while (b < A_rows) b <<= 1;                       // 小阵:单 block scan(1 launch)
-            scan_inclusive_kernel<<<1, b, b * sizeof(int)>>>(d_row_nnz, dC_rp + 1, A_rows);
+            scan_inclusive_kernel<int><<<1, b, b * sizeof(int)>>>(d_row_nnz, dC_rp + 1, A_rows);
         } else {
             thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz),
                                    thrust::device_ptr<int>(d_row_nnz + A_rows),
