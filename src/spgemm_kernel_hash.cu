@@ -196,6 +196,84 @@ __global__ void mh_merge_kernel(
     }
 }
 
+// ===================== dense 累积器路径(2026-08-26,超越点) =====================
+// 触发:n ≤ DENSE_MAX_N 且 输出足够稠密(avg_est/n ≥ DENSE_MIN_FRAC)—— exdata_1 类
+// (6001²,est 1878/行 = 31% 稠密,76× dup)。SMEM 直接寻址表 vals[n]+flags[n]:
+// 零探测、零 CAS(槽位即列号),纯 atomicAdd —— 高 dup 下原子链是 hash 与 Ocean 共有的
+// 结构瓶颈,稠密阵直接绕开。对标 Ocean AccumulatorDense(他们的 FAT 工作流)。
+// 有序性免费:j 升序扫 flags → 输出行有序,compact 全走 copy。
+#define DENSE_MAX_N 14980            // SMEM 预算:8n + n + 4n ≈ 190KB
+#define DENSE_MIN_FRAC 0.15          // avg_est/n ≥ 此值才走 dense
+
+__global__ void hash_dense_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri, int A_rows, int n,
+    const long long *row_off, const int *est,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag,
+    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+{
+    int i = blockIdx.x;
+    if (i >= A_rows) return;
+    int tid = threadIdx.x;
+    extern __shared__ __align__(8) unsigned char dsmem[];
+    double *dval = (double*)dsmem;                    // [n]
+    unsigned char *dflag = dsmem + (size_t)n * sizeof(double);   // [n]
+    int *dpref = (int*)(dsmem + (((size_t)n * 9) + 3) / 4 * 4);  // [n](9n 向上 4 对齐;exdata n=6001 曾错位崩)
+    for (int j = tid; j < n; j += blockDim.x) { dval[j] = 0.0; dflag[j] = 0; }
+    __syncthreads();
+
+    // 累加:warp 取 k(stride nwarps),lane 并行 j;k 内 B 行列唯一 → 同 warp 内无同 j;
+    // 跨 warp 同 j → atomicAdd(链长 = dup 因子,已是下界)。
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
+    for (int p = rs + warp; p < re; p += nw) {
+        int k = A_col_idx[p];
+        double a = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            atomicAdd(&dval[j], a * B_val[q]);
+            dflag[j] = 1;                              // 幂等字节写,无竞争语义
+        }
+    }
+    __syncthreads();
+
+    // 有序 extract:warp0 做 flags 的全局 exclusive 前缀(分段串行 + warp 段基址扫),全块写
+    if (warp == 0) {
+        int seglen = (n + 31) / 32;
+        int lo = lane * seglen, hi = min(lo + seglen, n);
+        int run = 0;
+        for (int j = lo; j < hi; j++) { dpref[j] = run; run += dflag[j]; }
+        int excl = run;
+        for (int off = 1; off < 32; off <<= 1) {
+            int v = __shfl_up_sync(0xffffffff, excl, off);
+            if (lane >= off) excl += v;
+        }
+        // excl(lane) = lanes < lane 的段和总和 → 写最终 dpref
+        for (int j = lo; j < hi; j++) dpref[j] += excl - run;   // excl - run = 前面所有段之和
+    }
+    __syncthreads();
+    int total_nz = dpref[n - 1] + dflag[n - 1];
+    long long base2 = row_off[i];
+    int cap = est[i];
+    for (int j = tid; j < n; j += blockDim.x) {
+        if (dflag[j]) {
+            int rank = dpref[j];
+            if (rank >= cap) {                          // SAFETY:欠估守卫(同族)
+                if (!atomicExch(&row_ovf[i], 1)) { int q = atomicAdd(ovf_cnt, 1); ovf_rows[q] = i; }
+                atomicExch(overflow_flag, 1);
+                continue;
+            }
+            tmp_key[base2 + rank] = ((unsigned long long)i << 32) | (unsigned int)j;
+            tmp_val[base2 + rank] = dval[j];
+        }
+    }
+    if (tid == 0) row_nnz[i] = (total_nz <= cap) ? total_nz : cap;
+}
+
 // ===================== 小行批量 kernel(2026-08-26,Phase 2 主杠杆) =====================
 // est ≤ 64 的行(bin0-1):warp-per-row + SMEM warp 私有表(128 槽,2× 余量)+ 融合有序 extract。
 // 治"1 CTA/行×256 线程伺候 ~6 个积"的每行固定开销(333SP 型 accumulate 55% 差距源);
@@ -1026,6 +1104,26 @@ static void hash_product(
     const int PRIV_W = g_privW;
     // 2c: per-bin launch(hash 插入 + extract;prof 内部已 sync);memset+overflow D2H 纳入计时
     int overflow;
+    // dense 累积器门(2026-08-26,exdata_1 类):小 n + 输出 ≥15% 稠密 → 直接寻址免探测免 CAS
+    const bool dense_mode = (A_cols <= DENSE_MAX_N) && A_rows > 0 &&
+        ((double)total_est / ((double)A_rows * A_cols) >= DENSE_MIN_FRAC);
+    if (dense_mode) {
+        dbg("[%s] dense 累积器路径(n=%d, est 占比 %.1f%%)\n", tag, A_cols,
+            100.0 * total_est / ((double)A_rows * A_cols));
+        prof("accumulate", [&]{
+            CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
+            CHECK_CUDA(cudaMemset(d_ovf_cnt, 0, sizeof(int)));
+            CHECK_CUDA(cudaMemset(d_row_ovf, 0, (size_t)A_rows * sizeof(int)));
+            size_t dsm = ((size_t)A_cols * 9 + 3) / 4 * 4 + (size_t)A_cols * sizeof(int);
+            if (dsm > 48 * 1024)
+                CHECK_CUDA(cudaFuncSetAttribute(hash_dense_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)dsm));
+            hash_dense_kernel<<<A_rows, HASH_BLOCK, dsm>>>(
+                dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
+                d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
+                d_ovf_rows, d_ovf_cnt, d_row_ovf);
+            CHECK_CUDA(cudaGetLastError());
+        });
+    } else
     prof("accumulate", [&]{
         CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
         CHECK_CUDA(cudaMemset(d_ovf_cnt, 0, sizeof(int)));
@@ -1234,10 +1332,17 @@ static void hash_product(
     d_val        = (double*)(cb + C_rp_al + C_ci_al);
     prof("compact+sort", [&]{
         CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));   // row_ptr 落位(~A_rows ints,微秒级,纳入计时)
-        for (int bi = 0; bi < N_BINS; bi++) {
-            int n = h_cnt[bi];
-            if (n == 0) continue;
-            int *rows_ptr = d_sort + h_off[bi];
+        for (int bi = 0; bi < (dense_mode ? 1 : N_BINS); bi++) {
+            int n = dense_mode ? A_rows : h_cnt[bi];
+            int *rows_ptr = dense_mode ? nullptr : (d_sort + h_off[bi]);
+            if (dense_mode) {
+                // dense 输出全局有序:identity 行表 + 一趟 warp-batched copy
+                int *d_all = decltype(d_all)(dev_alloc((size_t)A_rows * sizeof(int)));
+                thrust::sequence(thrust::device_ptr<int>(d_all), thrust::device_ptr<int>(d_all + A_rows));
+                hash_compact_copy_warp_kernel<<<(A_rows + 7) / 8, 256>>>(
+                    d_all, A_rows, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                break;
+            }
             if (bi == 0) {
                 // 批量行(est≤64 且 k≤32):warp-per-row copy
                 hash_compact_copy_warp_kernel<<<(n + 7) / 8, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
