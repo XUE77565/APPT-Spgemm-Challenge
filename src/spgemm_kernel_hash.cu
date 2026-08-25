@@ -762,7 +762,11 @@ __global__ void compute_bucket_kernel(
         }
     }
     bucket_id[i] = bid;
-    atomicAdd(&counts[bid], 1);
+    // warp 聚合:同 warp 内同 bin 的行由 leader 一次 atomicAdd(3.7M 行×12 计数器争用 → 333SP 2.9ms 教训)
+    unsigned mask = __activemask();
+    unsigned peers = __match_any_sync(mask, (unsigned)bid);
+    int leader = __ffs(peers) - 1;
+    if ((int)(threadIdx.x & 31) == leader) atomicAdd(&counts[bid], __popc(peers));
 }
 
 // scatter:把行号按 bucket 写到预分配大 buffer 的对应位置
@@ -773,8 +777,16 @@ __global__ void scatter_rows_kernel(
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
     int bid = bucket_id[i];
-    int slot = offsets[bid] + atomicAdd(&pos[bid], 1);
-    sorted_rows[slot] = i;
+    // warp 聚合取槽:leader 一次 atomicAdd(popc),成员按 warp 内 rank 分配(0.65→聚合后原子减 ~32×)
+    unsigned mask = __activemask();
+    unsigned peers = __match_any_sync(mask, (unsigned)bid);
+    int leader = __ffs(peers) - 1;
+    int lane = threadIdx.x & 31;
+    int base = 0;
+    if (lane == leader) base = atomicAdd(&pos[bid], __popc(peers));
+    base = __shfl_sync(mask, base, leader);
+    int rank = __popc(peers & ((1u << lane) - 1));    // 同 bid 组内低于自己的 lane 数
+    sorted_rows[offsets[bid] + base + rank] = i;
 }
 
 // 单 block inclusive prefix-sum(Hillis-Steele);小阵专用,替 thrust::inclusive_scan
@@ -808,6 +820,25 @@ __global__ void hash_compact_copy_kernel(
     if (skip && skip[row]) return;               // 行级重试的行:数据在重试区,主区跳过
     long long src = row_off[row]; int n = row_nnz[row], dst = row_ptr[row];
     for (int t = threadIdx.x; t < n; t += blockDim.x) {
+        out_col[dst + t] = (int)(tmp_key[src + t] & 0xffffffffu);
+        out_val[dst + t] = tmp_val[src + t];
+    }
+}
+
+// warp-per-row 批量 copy(小行,2026-08-26):bin0 的 ~3M 行×19 项,1CTA/行 launch-bound → 8 行/CTA
+__global__ void hash_compact_copy_warp_kernel(
+    const int *rows, int n_rows,
+    const long long *row_off, const int *row_nnz, const int *row_ptr,
+    const unsigned long long *tmp_key, const double *tmp_val,
+    int *out_col, double *out_val, const int *skip)
+{
+    int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    int lane = threadIdx.x & 31;
+    if (warp >= n_rows) return;
+    int row = rows[warp];
+    if (skip && skip[row]) return;
+    long long src = row_off[row]; int n = row_nnz[row], dst = row_ptr[row];
+    for (int t = lane; t < n; t += 32) {
         out_col[dst + t] = (int)(tmp_key[src + t] & 0xffffffffu);
         out_val[dst + t] = tmp_val[src + t];
     }
@@ -1207,7 +1238,10 @@ static void hash_product(
             int n = h_cnt[bi];
             if (n == 0) continue;
             int *rows_ptr = d_sort + h_off[bi];
-            if (bi <= 5) {
+            if (bi == 0) {
+                // 批量行(est≤64 且 k≤32):warp-per-row copy
+                hash_compact_copy_warp_kernel<<<(n + 7) / 8, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+            } else if (bi <= 5) {
                 // 小行(ht≤CSORT_HT):accumulate 已 count-sort,这里只 compact_copy(tmp→CSR)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
             } else if (bi <= 7) {
