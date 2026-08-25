@@ -193,6 +193,85 @@ __global__ void mh_merge_kernel(
     }
 }
 
+// ===================== 小行批量 kernel(2026-08-26,Phase 2 主杠杆) =====================
+// est ≤ 64 的行(bin0-1):warp-per-row + SMEM warp 私有表(128 槽,2× 余量)+ 融合有序 extract。
+// 治"1 CTA/行×256 线程伺候 ~6 个积"的每行固定开销(333SP 型 accumulate 55% 差距源);
+// 有序直写 tmp → compact 阶段走 copy 免排序。设计:`inno/hash_batched_kernel_design.md`。
+#define BATCH_HT 128        // per-warp 表槽(est≤64 → 2× 余量)
+#define BATCH_WPB 8         // warp 数/CTA(256 线程)
+
+__global__ void hash_spa_batched_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
+    const int *bucket_rows, int n_in_bucket,
+    const long long *row_off, const int *est,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag)
+{
+    int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    int lane = threadIdx.x & 31;
+    if (warp >= n_in_bucket) return;
+    int i = bucket_rows[warp];
+
+    // 静态 SMEM:每 warp 段 = col[128] | val[128](8B 对齐,段首 512B✓) | pack_col[128] | pack_slot[128]
+    __shared__ int bsmem[BATCH_WPB][4 * BATCH_HT];
+    __shared__ int w_cnt[BATCH_WPB];
+    int *t_col = bsmem[warp & (BATCH_WPB - 1)];
+    double *t_val = (double*)(bsmem[warp & (BATCH_WPB - 1)] + BATCH_HT);
+    int *pack_col = bsmem[warp & (BATCH_WPB - 1)] + 2 * BATCH_HT;
+    int *pack_slot = bsmem[warp & (BATCH_WPB - 1)] + 3 * BATCH_HT;
+
+    if (lane == 0) w_cnt[warp & (BATCH_WPB - 1)] = 0;
+    for (int s = lane; s < BATCH_HT; s += 32) { t_col[s] = -1; t_val[s] = 0.0; }
+    __syncwarp();
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    for (int p = rs; p < re; p++) {                     // k 串行(小行 k 少)
+        int k = A_col_idx[p];
+        double a = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {      // j 32 路并行
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            double v = a * B_val[q];
+            unsigned slot = ((unsigned)(j * 2654435761u)) & (BATCH_HT - 1);
+            int probes = 0;                             // 有界探测:必终止
+            while (true) {
+                int old = atomicCAS(&t_col[slot], -1, j);
+                if (old == -1 || old == j) { atomicAdd(&t_val[slot], v); break; }
+                slot = (slot + 1) & (BATCH_HT - 1);
+                if (++probes >= BATCH_HT) { atomicExch(overflow_flag, 1); break; }
+            }
+        }
+    }
+    __syncwarp();
+
+    // extract:pack 非空槽 → count-rank 排序 → 有序写 tmp(rank 是 0..n-1 置换)
+    long long base = row_off[i];
+    int cap = est[i];                                   // SAFETY:mh 低估时 n 可超 est → 守卫
+    for (int s = lane; s < BATCH_HT; s += 32) {
+        int c = t_col[s];
+        if (c >= 0) {
+            int pos = atomicAdd(&w_cnt[warp & (BATCH_WPB - 1)], 1);
+            if (pos < BATCH_HT) { pack_col[pos] = c; pack_slot[pos] = s; }
+        }
+    }
+    __syncwarp();
+    int n = w_cnt[warp & (BATCH_WPB - 1)];
+    if (n > BATCH_HT) n = BATCH_HT;                     // pack 溢出截断(此时必已置 overflow)
+    for (int idx = lane; idx < n; idx += 32) {
+        int c = pack_col[idx];
+        int rank = 0;
+        for (int m = 0; m < n; m++) if (pack_col[m] < c) rank++;
+        if (rank >= cap) { atomicExch(overflow_flag, 1); continue; }
+        tmp_key[base + rank] = ((unsigned long long)i << 32) | (unsigned int)c;
+        tmp_val[base + rank] = t_val[pack_slot[idx]];
+    }
+    __syncwarp();
+    if (lane == 0) row_nnz[i] = (n <= cap) ? n : cap;
+}
+
 // 按桶跑:ht_size = 该桶 hash 表大小;轻行小表、重行大表,distinct>ht_size → overflow_flag
 __global__ void hash_spa_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
@@ -590,7 +669,8 @@ __global__ void hash_compact_sort_kernel(
 
 // GPU 端分桶(无 host 往返):每行算 bucket_id 并直方图计数(融合省 1 launch)
 __global__ void compute_bucket_kernel(
-    const int *est, int A_rows, int ultra_thr, int *bucket_id, int *counts)
+    const int *est, const int *A_row_ptr, int A_rows, int ultra_thr,
+    int *bucket_id, int *counts)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
@@ -603,7 +683,15 @@ __global__ void compute_bucket_kernel(
         // 小行表 2× 松弛(est=flop 紧界 → 满载原子争用,333SP accumulate +8ms 教训;槽位不变只放大表)
         int target = (e <= 4096) ? 2 * e : e;
         while (ht < target && ht < HASH_CAP) { ht <<= 1; bi++; }
-        bid = bi;
+        // 批量 kernel 门(2026-08-26):est≤64 且行长≤32(k 短,warp 串行 k 才划算;
+        // 3Dspectralwave2 的 est 小但 k 数百的长链行回归 62→81ms 教训)→ bin0;
+        // est≤64 但 k>32 → bin1 走原 per-row hash_spa(64 组 k 并行)
+        if (e <= 64 && bi <= 1) {
+            int rk = A_row_ptr[i + 1] - A_row_ptr[i];
+            bid = (rk <= 32) ? 0 : 1;
+        } else {
+            bid = bi;
+        }
     }
     bucket_id[i] = bid;
     atomicAdd(&counts[bid], 1);
@@ -798,7 +886,7 @@ static void hash_product(
     void *d_cub_tmp = nullptr;
     prof("binning", [&]{
         CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));   // 先清零(fused kernel 内 atomicAdd 累加)
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, EST_ULTRA_THR, d_bkid, d_cnt);
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_bkid, d_cnt);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
@@ -836,7 +924,12 @@ static void hash_product(
             int n = h_cnt[bi];
             if (n == 0) continue;
             int *rows_ptr = d_sort + h_off[bi];
-            if (bi == N_BINS - 2) {
+            if (bi == 0) {
+                // 小行批量(est≤64 且行长≤32):warp-per-row + 私有表 + 融合有序 extract(2026-08-26)
+                hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32>>>(
+                    dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                    rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
+            } else if (bi == N_BINS - 2) {
                 // ultra(est≤EST_ULTRA_THR):线性,免 hash
                 hash_ultra_kernel<<<(n + 255) / 256, 256>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
