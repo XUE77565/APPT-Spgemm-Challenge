@@ -9,6 +9,11 @@
 
 // Serial k-way Merge 版自乘 C=A·A:对行内有序列链做 merge,省掉 sort+reduce。
 
+// DEFENSE(2026-08-25,GPU wedge 三连教训):warp-merge 主循环硬上界。
+// 每次迭代至少消费 1 个中间积 ⇒ 合法迭代数 ≤ 行 flop,远低于此 cap;
+// 不变量破坏时输出错误而非挂死 —— 保证 kernel 必然终止(同 att_tiered 的 ATT_LOOP_CAP 手法)。
+#define MRG3_LOOP_CAP (1 << 28)
+
 #define CHECK_CUDA(call) do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
@@ -535,16 +540,18 @@ __global__ void bucket_count_kernel(
 }
 
 // 行内桶偏移:bucket_off[i*K+b] = 行内 exclusive scan;row_nnz[i] = 行总和
+// T = int(精确 nnz 路)/ long long(flop 路:Σflop 可超 int,ocean337 的 Ga/band 族)
+template <typename T>
 __global__ void bucket_scan_kernel(int A_rows, int K, const int *bucket_nnz,
-                                   int *bucket_off, int *row_nnz) {
+                                   int *bucket_off, T *row_sum) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
-    int acc = 0;
+    T acc = 0;
     for (int b = 0; b < K; b++) {
-        bucket_off[i * K + b] = acc;
-        acc += bucket_nnz[i * K + b];
+        bucket_off[i * K + b] = (int)acc;
+        acc += (T)bucket_nnz[i * K + b];
     }
-    row_nnz[i] = acc;
+    row_sum[i] = acc;
 }
 
 // (row,bucket) 一块:warp-merge 该桶子区间,写 (col, val) 到全局偏移
@@ -575,7 +582,7 @@ __global__ void bucket_merge_kernel(
     __syncwarp();
     int base = C_row_ptr[i] + bucket_off[i * K + b];
     int out_idx = 0;
-    while (true) {
+    for (int __guard = 0; __guard < MRG3_LOOP_CAP; ++__guard) {   // 硬上界:必终止
         int mymin = 0x7fffffff;
         for (int p = lane; p < num_k; p += 32) {
             int pos = seg_ptr[p];
@@ -637,7 +644,7 @@ __global__ void bucket_merge_flop_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
     int upper_tri,
-    int A_rows, int A_cols, int K, const int *row_off, const int *bucket_flop_off,
+    int A_rows, int A_cols, int K, const long long *row_off, const int *bucket_flop_off,
     int *out_col, double *out_val, int *bucket_real_nnz)   // [A_rows*K]
 {
     int i = blockIdx.x, b = blockIdx.y;
@@ -660,9 +667,9 @@ __global__ void bucket_merge_flop_kernel(
         weight[p]  = A_val[rs + p];                              // a_ik(外层 A)
     }
     __syncwarp();
-    int base = row_off[i] + bucket_flop_off[i * K + b];
+    long long base = (long long)row_off[i] + bucket_flop_off[i * K + b];   // 64位:Σflop 可超 int
     int out_idx = 0;
-    while (true) {
+    for (int __guard = 0; __guard < MRG3_LOOP_CAP; ++__guard) {   // 硬上界:必终止
         int mymin = 0x7fffffff;
         for (int p = lane; p < num_k; p += 32) {
             int pos = seg_ptr[p];
@@ -694,14 +701,14 @@ __global__ void bucket_merge_flop_kernel(
 
 // (C-3) compact:把每 (row,bucket) 的真实项从 gapped flop 区拷到精确 CSR(base = C_row_ptr + bucket_off_exact)。
 __global__ void bucket_compact_kernel(
-    int A_rows, int K, const int *row_off, const int *bucket_flop_off,
+    int A_rows, int K, const long long *row_off, const int *bucket_flop_off,
     const int *bucket_real_nnz, const int *C_row_ptr, const int *bucket_off_exact,
     const int *in_col, const double *in_val, int *out_col, double *out_val)
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
     int lane = threadIdx.x;
-    int src = row_off[i] + bucket_flop_off[i * K + b];
+    long long src = (long long)row_off[i] + bucket_flop_off[i * K + b];
     int dst = C_row_ptr[i] + bucket_off_exact[i * K + b];
     int n = bucket_real_nnz[i * K + b];
     for (int t = lane; t < n; t += 32) {
@@ -777,24 +784,34 @@ static void merge3_product(
 
     if (g_flop) {
         // flop_ub path:省 count 的 merge 迭代,代价 = gapped buffer + compact
-        int *d_bflop, *d_bflop_off, *d_row_flop, *d_row_off;
+        int *d_bflop, *d_bflop_off;
+        long long *d_row_flop, *d_row_off;   // 64 位:ocean337 上 Σflop > 2^31(Ga/band 族),int 会变负 → 灾难分配
         CHECK_CUDA(cudaMalloc(&d_bflop, (size_t)A_rows * K * sizeof(int)));
         CHECK_CUDA(cudaMalloc(&d_bflop_off, (size_t)A_rows * K * sizeof(int)));
-        CHECK_CUDA(cudaMalloc(&d_row_flop, A_rows * sizeof(int)));
-        CHECK_CUDA(cudaMalloc(&d_row_off, (A_rows + 1) * sizeof(int)));
-        int total_flop;
+        CHECK_CUDA(cudaMalloc(&d_row_flop, A_rows * sizeof(long long)));
+        CHECK_CUDA(cudaMalloc(&d_row_off, (A_rows + 1) * sizeof(long long)));
+        long long total_flop;
         prof("flop", [&]{   // (C-1) 每 (row,bucket) flop_ub(lower_bound+sum,无 merge 迭代)
             bucket_flop_kernel<<<grid, block32, smem_count>>>(dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, d_bflop);
             CHECK_CUDA(cudaGetLastError());
         });
         prof("fscan", [&]{  // 行内 scan(flop)→ bucket_flop_off + row_flop;全局 scan → row_off(gapped) + total_flop
-            bucket_scan_kernel<<<(A_rows + block - 1) / block, block>>>(A_rows, K, d_bflop, d_bflop_off, d_row_flop);
-            CHECK_CUDA(cudaMemset(d_row_off, 0, sizeof(int)));
-            thrust::inclusive_scan(thrust::device_ptr<int>(d_row_flop), thrust::device_ptr<int>(d_row_flop + A_rows),
-                                   thrust::device_ptr<int>(d_row_off + 1));
-            CHECK_CUDA(cudaMemcpy(&total_flop, d_row_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+            bucket_scan_kernel<long long><<<(A_rows + block - 1) / block, block>>>(A_rows, K, d_bflop, d_bflop_off, d_row_flop);
+            CHECK_CUDA(cudaMemset(d_row_off, 0, sizeof(long long)));
+            thrust::inclusive_scan(thrust::device_ptr<long long>(d_row_flop), thrust::device_ptr<long long>(d_row_flop + A_rows),
+                                   thrust::device_ptr<long long>(d_row_off + 1));
+            CHECK_CUDA(cudaMemcpy(&total_flop, d_row_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
         });
-        // gapped out buffer [total_flop](=Σflop,大阵 ~2GB,H100 可容)
+        // SAFETY:分配前 sanity —— 非法/超界 total_flop 干净报错退出,绝不把天文数字送进 cudaMalloc
+        // (2026-08-25 GPU1 wedge 的根因之一:int 溢出 → (size_t)负数 → 灾难分配)。
+        long long mrg3_max = 3000000000LL;   // 3e9 项 ≈ 36GB gapped,80GB 卡的上限
+        if (const char *e = getenv("MRG3_MAX_ENTRIES")) mrg3_max = atoll(e);
+        if (total_flop <= 0 || total_flop > mrg3_max) {
+            fprintf(stderr, "[mrg3] SAFETY: total_flop=%lld 非法/超界(cap=%lld,MRG3_MAX_ENTRIES 可调)"
+                            " → 干净退出,不进分配\n", total_flop, mrg3_max);
+            exit(EXIT_FAILURE);
+        }
+        // gapped out buffer [total_flop](=Σflop,64位计;大阵数 GB,H100 可容)
         int *d_gcol; double *d_gval; int *d_breal;
         CHECK_CUDA(cudaMalloc(&d_gcol, (size_t)total_flop * sizeof(int)));
         CHECK_CUDA(cudaMalloc(&d_gval, (size_t)total_flop * sizeof(double)));
@@ -809,7 +826,7 @@ static void merge3_product(
         CHECK_CUDA(cudaMalloc(&d_boff_ex, (size_t)A_rows * K * sizeof(int)));
         CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
         prof("rscan", [&]{  // scan(真实数)→ exact bucket_off + row_nnz → C_row_ptr + C_nnz
-            bucket_scan_kernel<<<(A_rows + block - 1) / block, block>>>(A_rows, K, d_breal, d_boff_ex, d_row_nnz);
+            bucket_scan_kernel<int><<<(A_rows + block - 1) / block, block>>>(A_rows, K, d_breal, d_boff_ex, d_row_nnz);
             CHECK_CUDA(cudaMemset(dC_row_ptr, 0, sizeof(int)));
             thrust::inclusive_scan(thrust::device_ptr<int>(d_row_nnz), thrust::device_ptr<int>(d_row_nnz + A_rows),
                                    thrust::device_ptr<int>(dC_row_ptr + 1));
