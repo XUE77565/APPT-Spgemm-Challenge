@@ -44,6 +44,29 @@ scatter_rows      grid    14,504 × 256线程    2.8ms
 | binning | 5.1 | 16% | compute_bucket+scatter_rows 逐行分桶 3.7M 行;Ocean analysis 仅 0.69 |
 | compact+sort | 3.7 | 11% | compact_copy 同样 1 CTA/行 |
 
+## 3.5 Ocean "没有 sizing" 的真相:Ana1 内部分流器(源码 SpGEMM.cuh:429-515)
+
+Ocean 在 analysis 阶段就算出**每行精确乘积数**(Σ_k len(B[k,:]),即每行 flop 上界)与
+avg_product = 总乘积/行数,然后**按 avg_product 分流工作流**:
+
+```
+avg_product ≤ usparse_avg_product_threshold(=64, Utils.h:29)
+   → ana1_type=0 "ultrasparse/spark" 工作流:
+     ✗ 不跑 HLL(整个 estimation 相位为 0 —— 333SP/AS365 即此)
+     ✓ sizing 直接用每行乘积数(均度低的行 dup 因子≈1,上界≈准界,免费)
+     ✓ numeric = sparseKernelLauncher:每 CTA NUMERIC_USPARSE_K_ROWS_PER_BLOCK 行
+       × 每行 spark_kernel_size 线程(16/32 按 avg 档;另有 4 线程/行 sub-warp hash 变体)
+     ✓ 超过 avg 的行由 classifyOutlierRows 挑出走单独 padded kernel(spark_outlier)
+avg_product > 64 → ana1_type=1:HLL 估计 + numeric.hash(pwtk 走此路,estimation 0.56ms)
+```
+
+**⇒ Ocean 本身就是个矩阵内 dispatcher**(avg_product 阈值 64 选工作流);我方差距的
+sizing/accumulate/binning 三项全部源于没有这条 ultrasparse 分支:
+- 我方 STREAMLINE_NNZ 门按【总 nnz】(100k),333SP 22M nnz → MinHash 全额征收;
+  应学它按【avg_product ≤ 64】免 sizing(用 flop_ub);
+- 我方 hash_spa 1 CTA/行×256 线程 vs 它的【多行/CTA × 按均度定每行线程数 + outlier 分流】;
+  sparseKernelLauncher 里甚至有 hashNumericSubWarpKernel<4>(4 线程/行)。
+
 ## 4. 修复路线图(按 ROI)
 
 1. **小行批量路径(主攻,55%)**:对 ht_size ≤ 阈值(如 64)的行,每 CTA 处理
