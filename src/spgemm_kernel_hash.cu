@@ -752,11 +752,11 @@ __global__ void compute_bucket_kernel(
         int target = (e <= 4096) ? 2 * e : e;
         while (ht < target && ht < HASH_CAP) { ht <<= 1; bi++; }
         // 批量 kernel 门(2026-08-26):est≤64 且行长≤32(k 短,warp 串行 k 才划算;
-        // 3Dspectralwave2 的 est 小但 k 数百的长链行回归 62→81ms 教训)→ bin0;
-        // est≤64 但 k>32 → bin1 走原 per-row hash_spa(64 组 k 并行)
-        if (e <= 64 && bi <= 1) {
+        // 3Dspectralwave2 的 est 小但 k 数百的长链行回归教训)→ bin0(BATCH_HT=128 覆盖 est≤64);
+        // 否则走原 per-row 梯。333SP 教训:门须独立于 2× 表目标的梯子(否则 est~36 被推到 bi2)
+        if (e <= 64) {
             int rk = A_row_ptr[i + 1] - A_row_ptr[i];
-            bid = (rk <= 32) ? 0 : 1;
+            bid = (rk <= 32) ? 0 : bi;
         } else {
             bid = bi;
         }
