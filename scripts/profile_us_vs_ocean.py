@@ -34,7 +34,7 @@ OURS_GROUPS = {
 
 
 def run_ours(mtx):
-    env = dict(os.environ, USE_MEMPOOL="1", METHOD="hash", MP_HOST_MB="8192")
+    env = dict(os.environ, USE_MEMPOOL="1", METHOD="hash", MP_HOST_MB="8192", CU_REF="0")
     try:
         r = subprocess.run([CM.BIN, mtx], capture_output=True, text=True, env=env, timeout=900)
     except subprocess.TimeoutExpired:
@@ -101,8 +101,11 @@ def main():
         print(f"{'— 其余 numeric 明细 —':<26}")
         for k, v in sorted(oce["numeric"].items(), key=lambda kv: -kv[1]):
             if v > 0.01: print(f"  numeric.{k:<20}{v:>8.3f} ms")
-        print(f"{'COMPUTE-ONLY 合计':<26}{ocomp:>10.3f}{ocomp2:>11.3f}"
-              f"{(ocomp/ocomp2 if ocomp2 else 0):>8.2f}x")
+        if ocomp is None or ocomp2 is None or not ocomp2:
+            print(f"{'COMPUTE-ONLY 合计':<26}  我方={'复跑失败/无TOTAL' if ocomp is None else f'{ocomp:.3f}'}  Ocean={ocomp2}")
+        else:
+            print(f"{'COMPUTE-ONLY 合计':<26}{ocomp:>10.3f}{ocomp2:>11.3f}"
+                  f"{(ocomp/ocomp2):>8.2f}x")
 
 
 if __name__ == "__main__":

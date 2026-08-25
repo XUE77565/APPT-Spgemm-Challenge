@@ -932,6 +932,7 @@ static void launch_csort(int n, const int *rows_ptr, const long long *d_off, con
     if (smem > 48 * 1024)
         CHECK_CUDA(cudaFuncSetAttribute((const void*)hash_compact_sort_kernel<TPB, IPT>,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem));
+    if (getenv("CSORT_DBG")) fprintf(stderr, "[csort-dbg] TPB=%d IPT=%d n=%d smem=%zu\n", TPB, IPT, n, smem);
     hash_compact_sort_kernel<TPB, IPT><<<n, TPB, smem>>>(
         rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, skip);
 }
@@ -1343,28 +1344,35 @@ static void hash_product(
                     d_all, A_rows, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
                 break;
             }
+            if (n == 0) continue;               // 空 bin 免 <<<0,TPB>>> 非法 launch(dense 重构曾吃掉此守卫)
             if (bi == 0) {
                 // 批量行(est≤64 且 k≤32):warp-per-row copy
                 hash_compact_copy_warp_kernel<<<(n + 7) / 8, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else if (bi <= 5) {
                 // 小行(ht≤CSORT_HT):accumulate 已 count-sort,这里只 compact_copy(tmp→CSR)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
             } else if (bi <= 7) {
                 launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else if (bi <= 9) {
                 launch_csort<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else if (bi == N_BINS - 1) {
                 // heavy:accumulate 内已分段排序(compact 读 scratch)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_scr_key, d_scr_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else {
                 // ultra(行≤32,无序):小 config sort
                 launch_csort<64, 1>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             }
         }
         if (d_retry_n > 0) {   // 行级重试的行:从重试区(已分段排序)拷到 CSR
-            hash_compact_copy_kernel<<<d_retry_n, 256>>>(
-                d_retry_rows, d_retry_n, d_retry_off, d_row_nnz, dC_rp,
-                d_retry_key, d_retry_val, dC_ci, d_val, nullptr);
+            if (d_retry_n > 0 && d_retry_n <= A_rows)   // TEMP:守卫+定位
+                hash_compact_copy_kernel<<<d_retry_n, 256>>>(
+                    d_retry_rows, d_retry_n, d_retry_off, d_row_nnz, dC_rp,
+                    d_retry_key, d_retry_val, dC_ci, d_val, nullptr);
         }
         CHECK_CUDA(cudaGetLastError());
     });
