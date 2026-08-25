@@ -23,29 +23,22 @@
 extern __global__ void count_intermediates_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub);
 
-// 并行 count flop_ub:每行一 block,Σ nnz(row k)+归约;小阵替 MinHash 两阶段,flop_ub 是确定性上界
+// 并行 count flop_ub:warp-per-row(2026-08-25 重映射;旧版每行一 block,3.7M 行矩阵 launch 5.4ms → 此版 O(rows/8) blocks)
 __global__ void count_intermediates_par_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int *ub)
 {
-    int i = blockIdx.x;
+    int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    int lane = threadIdx.x & 31;
+    int i = warp;
     if (i >= A_rows) return;
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int s = 0;
-    for (int p = rs + threadIdx.x; p < re; p += blockDim.x) {
+    for (int p = rs + lane; p < re; p += 32) {
         int k = A_col_idx[p];
         s += A_row_ptr[k + 1] - A_row_ptr[k];
     }
-    for (int off = 16; off > 0; off >>= 1) s += __shfl_down_sync(0xFFFFFFFF, s, off);   // warp 归约
-    __shared__ int warp_s[32];
-    int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
-    if (lane == 0) warp_s[warp] = s;
-    __syncthreads();
-    int nwarps = blockDim.x >> 5;
-    if (warp == 0) {
-        s = (lane < nwarps) ? warp_s[lane] : 0;
-        for (int off = 16; off > 0; off >>= 1) s += __shfl_down_sync(0xFFFFFFFF, s, off);
-        if (lane == 0) ub[i] = s;
-    }
+    for (int off = 16; off > 0; off >>= 1) s += __shfl_down_sync(0xFFFFFFFF, s, off);
+    if (lane == 0) ub[i] = s;
 }
 
 #ifndef HASH_CAP
@@ -607,7 +600,9 @@ __global__ void compute_bucket_kernel(
     else if (e > HASH_CAP) bid = N_BINS - 1;         // heavy:全局表(2026-08-25,不再回退 merge)
     else {
         int bi = 0, ht = 32;
-        while (ht < e) { ht <<= 1; bi++; }           // e ≤ HASH_CAP ⇒ bi ≤ 9
+        // 小行表 2× 松弛(est=flop 紧界 → 满载原子争用,333SP accumulate +8ms 教训;槽位不变只放大表)
+        int target = (e <= 4096) ? 2 * e : e;
+        while (ht < target && ht < HASH_CAP) { ht <<= 1; bi++; }
         bid = bi;
     }
     bucket_id[i] = bid;
@@ -732,7 +727,7 @@ static void hash_product(
     int *d_flop; d_flop = decltype(d_flop)(dev_alloc(A_rows * sizeof(int)));
     long long total_flop = 0;
     prof("count_flop", [&]{
-        count_intermediates_par_kernel<<<A_rows, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
+        count_intermediates_par_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
         CHECK_CUDA(cudaGetLastError());
         total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
