@@ -153,15 +153,15 @@ __global__ void mh_merge_kernel(
     }
     __syncthreads();
 
-    // 估计 reduce(单 warp):sum_inv = Σ 1/min_j(非空);V = 非空 partition 数
-    double sum_inv = 0.0;
+    // 估计 reduce(单 warp):sum_min = Σ min_j(非空);V = 非空 partition 数
+    double sum_min = 0.0;
     int V = 0;
     for (int k = 0; k < 4; k++) {
         unsigned int mv = smem_merge[base_i + k];
-        if (mv != MH_EMPTY) { sum_inv += 1.0 / (double)mv; V++; }
+        if (mv != MH_EMPTY) { sum_min += (double)mv; V++; }
     }
     for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {
-        sum_inv += __shfl_down_sync(0xFFFFFFFF, sum_inv, off);
+        sum_min += __shfl_down_sync(0xFFFFFFFF, sum_min, off);
         V += __shfl_down_sync(0xFFFFFFFF, V, off);
     }
 
@@ -171,9 +171,12 @@ __global__ void mh_merge_kernel(
         if (v == 0) {
             E = 0.0;                                                      // 空行
         } else if (v < MH_M) {
-            E = (double)MH_M * log((double)MH_M / (double)(MH_M - v));   // linear counting(小范围,偏保守上界)
+            E = (double)MH_M * log((double)MH_M / (double)(MH_M - v));   // linear counting(小范围)
         } else {
-            E = (double)0x100000000LL * sum_inv - (double)MH_M;           // 2^32·Σ(1/min_j) − m
+            // min_j/2^32 ~ Exp(1/(D/m)) ⇒ E[min_j] = m·2^32/D ⇒ D ≈ m²·2^32/Σmin_j(算术均值,无偏)。
+            // 旧式 2^32·Σ(1/min_j) 是调和均值,Jensen 高估 ~ln 倍(exdata_1 17.85×/TSOPF 20× 根因);
+            // 首版修正漏了因子 m(低 EST 128 倍,exdata_1 est 254k vs C 11.3M)——都已修(2026-08-26)。
+            E = (double)MH_M * MH_M * 0x100000000LL / sum_min;
         }
         int temp = (int)(E * EST_EXPAND);
         if (temp < 1) temp = 1;
