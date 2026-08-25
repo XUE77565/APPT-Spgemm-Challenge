@@ -1,0 +1,454 @@
+对比 337 阵 × ['cu', 'Auto', 'Ocean', 'opSparse', 'HSMU', 'bhSparse', 'dense', 'cublas'] → compare/ocean337/methods_cmp.csv  (resume: 5 已存,跳过;FRESH=1 全重跑)
+
+[4/337] 3dtube         n=45330    cu= 21.179 Auto=  9.546(hash  ) Ocn=  3.769 opSp=  8.817 HSMU= 11.329 bhSp= 32.044 dense= 21202.0 cublas= 5495.58 (89.7s)
+[5/337] AS365          n=3799275   cu= 10.058 Auto= 41.149(hash  ) Ocn=  7.324 opSp= 13.874 HSMU= 20.689 bhSp= 88.818 dense=DNF(big) cublas=DNF(big) (53.3s)
+[6/337] BenElechi1     n=245874   cu=457.152 Auto=   9.91(hash  ) Ocn=  7.019 opSp=  9.407 HSMU= 12.131 bhSp= 20.466 dense=DNF(big) cublas=DNF(big) (42.1s)
+[7/337] Bump_2911      n=2911419   cu=    DNF Auto=111.514(hash  ) Ocn= 77.818 opSp=109.568 HSMU=129.238 bhSp=288.741 dense=DNF(big) cublas=DNF(big) (275.5s)
+[8/337] CO             n=221119   cu= 35.805 Auto=  20.37(hash  ) Ocn= 13.712 opSp= 12.976 HSMU= 16.908 bhSp= 50.008 dense=DNF(big) cublas=DNF(big) (33.6s)
+[9/337] Chevron4       n=711450   cu=  3.074 Auto=  8.329(hash  ) Ocn=  2.048 opSp=  5.156 HSMU=  4.898 bhSp= 17.871 dense=DNF(big) cublas=DNF(big) (36.1s)
+[10/337] CoupCons3D     n=416800   cu=759.245 Auto= 18.898(hash  ) Ocn= 14.509 opSp= 20.714 HSMU= 23.521 bhSp=  44.35 dense=DNF(big) cublas=DNF(big) (90.1s)
+[11/337] Cube_Coup_dt0  n=2164760   cu=    DNF Auto=126.776(hash  ) Ocn= 89.579 opSp=123.885 HSMU=134.361 bhSp=283.363 dense=DNF(big) cublas=DNF(big) (304.4s)
+[12/337] CurlCurl_2     n=806529   cu= 11.526 Auto=  8.315(hash  ) Ocn=  3.028 opSp=   4.99 HSMU=  6.704 bhSp= 24.435 dense=DNF(big) cublas=DNF(big) (32.9s)
+[13/337] CurlCurl_3     n=1219574   cu= 17.526 Auto= 13.629(hash  ) Ocn=  4.422 opSp=  7.405 HSMU=  9.688 bhSp= 35.505 dense=DNF(big) cublas=DNF(big) (46.3s)
+[14/337] CurlCurl_4     n=2380515   cu= 34.696 Auto= 25.419(hash  ) Ocn=  8.705 opSp= 13.916 HSMU= 19.242 bhSp= 88.267 dense=DNF(big) cublas=DNF(big) (106.2s)
+[15/337] Dubcova3       n=146689   cu= 14.322 Auto=   3.31(hash  ) Ocn=  1.692 opSp=  3.044 HSMU=  4.134 bhSp=  9.551 dense=DNF(big) cublas=DNF(big) (21.7s)
+[16/337] Emilia_923     n=923136   cu=1319.189 Auto= 37.347(hash  ) Ocn= 25.266 opSp= 38.229 HSMU= 42.495 bhSp= 83.294 dense=DNF(big) cublas=DNF(big) (97.6s)
+[17/337] F1             n=343791   cu=    DNF Auto=       (?     ) Ocn= 36.508 opSp= 67.155 HSMU= 66.218 bhSp=157.437 dense=DNF(big) cublas=DNF(big) (75.0s)
+[18/337] F2             n=71505    cu= 127.54 Auto= 54.783(merge3(回退)) Ocn=  7.426 opSp= 11.744 HSMU= 12.679 bhSp= 26.925 dense=DNF(big) cublas=DNF(big) (25.3s)
+[19/337] FEM_3D_thermal2 n=147900   cu= 11.592 Auto=  2.386(hash  ) Ocn=   1.38 opSp=  2.315 HSMU=  3.184 bhSp=  9.483 dense=DNF(big) cublas=DNF(big) (25.4s)
+[20/337] Fault_639      n=638802   cu=939.259 Auto= 26.391(hash  ) Ocn= 17.806 opSp= 26.526 HSMU= 30.903 bhSp= 64.785 dense=DNF(big) cublas=DNF(big) (73.8s)
+[21/337] Flan_1565      n=1564794   cu=    DNF Auto=137.242(hash  ) Ocn= 85.998 opSp=145.443 HSMU=147.112 bhSp=330.125 dense=DNF(big) cublas=DNF(big) (257.4s)
+[22/337] Freescale1     n=3428755   cu=   6.92 Auto=   34.8(hash  ) Ocn=  5.047 opSp=  8.077 HSMU= 12.294 bhSp= 73.578 dense=DNF(big) cublas=DNF(big) (84.9s)
+[23/337] Ga10As10H30    n=113081   cu=698.749 Auto=179.432(merge3(回退)) Ocn= 12.503 opSp= 31.595 HSMU= 33.896 bhSp= 98.511 dense=DNF(big) cublas=DNF(big) (32.5s)
+[24/337] Ga19As19H42    n=133123   cu=1523.107 Auto=315.473(merge3(回退)) Ocn= 19.427 opSp= 57.509 HSMU= 57.333 bhSp=154.708 dense=DNF(big) cublas=DNF(big) (46.6s)
+[25/337] Ga3As3H12      n=61349    cu=    DNF Auto=       (?     ) Ocn= 37.131 opSp=195.629 HSMU= 198.07 bhSp=193.694 dense=DNF(big) cublas=DNF(big) (31.4s)
+[26/337] Ga41As41H72    n=268096   cu=    DNF Auto=       (?     ) Ocn= 43.451 opSp=125.002 HSMU=137.282 bhSp=322.619 dense=DNF(big) cublas=DNF(big) (63.3s)
+[27/337] GaAsH6         n=61349    cu=    DNF Auto= 51.634(hash  ) Ocn= 14.652 opSp= 66.798 HSMU= 70.938 bhSp= 84.651 dense=DNF(big) cublas=DNF(big) (22.5s)
+[28/337] Ge87H76        n=112985   cu=1094.866 Auto=251.655(merge3(回退)) Ocn= 15.474 opSp=   42.5 HSMU= 42.486 bhSp=105.246 dense=DNF(big) cublas=DNF(big) (53.3s)
+[29/337] Ge99H100       n=112985   cu=1226.216 Auto=277.999(merge3(回退)) Ocn= 16.835 opSp= 46.931 HSMU=  46.81 bhSp=113.557 dense=DNF(big) cublas=DNF(big) (45.8s)
+[30/337] Geo_1438       n=1437960   cu=    DNF Auto= 56.615(hash  ) Ocn= 37.693 opSp= 56.481 HSMU= 64.374 bhSp=122.841 dense=DNF(big) cublas=DNF(big) (146.1s)
+[31/337] H2O            n=67024    cu= 10.388 Auto=   5.19(hash  ) Ocn=  3.789 opSp=  3.893 HSMU=  4.967 bhSp=  9.934 dense=DNF(big) cublas=DNF(big) (20.5s)
+[32/337] HTC_336_4438   n=226340   cu= 43.911 Auto=1065.954(merge3(回退)) Ocn= 14.337 opSp=162.527 HSMU= 35.513 bhSp=240.517 dense=DNF(big) cublas=DNF(big) (36.5s)
+[33/337] HTC_336_9129   n=226340   cu= 37.352 Auto=1080.665(merge3(回退)) Ocn= 13.275 opSp=146.841 HSMU= 31.849 bhSp=211.355 dense=DNF(big) cublas=DNF(big) (35.5s)
+[34/337] Hook_1498      n=1498023   cu=    DNF Auto= 60.827(hash  ) Ocn=  40.86 opSp=  54.55 HSMU=  66.42 bhSp=146.711 dense=DNF(big) cublas=DNF(big) (149.8s)
+[35/337] Long_Coup_dt6  n=1470152   cu=    DNF Auto= 93.719(hash  ) Ocn= 64.706 opSp= 90.979 HSMU= 98.011 bhSp=294.121 dense=DNF(big) cublas=DNF(big) (206.6s)
+[36/337] M6             n=3501776   cu=  8.629 Auto= 37.669(hash  ) Ocn=  6.751 opSp= 12.681 HSMU= 16.464 bhSp=109.117 dense=DNF(big) cublas=DNF(big) (56.1s)
+[37/337] ML_Laplace     n=377002   cu=1449.605 Auto= 27.957(hash  ) Ocn= 19.145 opSp= 29.533 HSMU= 32.225 bhSp= 92.913 dense=DNF(big) cublas=DNF(big) (137.8s)
+[38/337] NLR            n=4163763   cu=   11.4 Auto= 44.841(hash  ) Ocn=   8.14 opSp= 14.678 HSMU= 21.562 bhSp= 97.119 dense=DNF(big) cublas=DNF(big) (65.7s)
+[39/337] Reuters911     n=13332    cu=  9.999 Auto=123.995(merge3(回退)) Ocn=  2.833 opSp= 23.359 HSMU= 11.093 bhSp= 39.783 dense=  545.54 cublas=  139.58 (35.7s)
+[40/337] Serena         n=1391349   cu=    DNF Auto= 64.599(hash  ) Ocn= 47.011 opSp= 63.134 HSMU= 74.472 bhSp= 185.21 dense=DNF(big) cublas=DNF(big) (201.5s)
+[41/337] Si10H16        n=17077    cu=  9.484 Auto= 22.993(merge3(回退)) Ocn=  2.003 opSp=  4.147 HSMU=  4.764 bhSp= 15.528 dense= 1150.94 cublas= 299.475 (36.2s)
+[42/337] Si34H36        n=97569    cu=452.057 Auto= 135.13(merge3(回退)) Ocn=  9.622 opSp= 21.775 HSMU= 23.176 bhSp=  75.45 dense=DNF(big) cublas=DNF(big) (36.3s)
+[43/337] Si41Ge41H72    n=185639   cu=    DNF Auto=       (?     ) Ocn= 45.682 opSp=116.339 HSMU=153.325 bhSp=269.902 dense=DNF(big) cublas=DNF(big) (67.4s)
+[44/337] Si87H76        n=240369   cu=493.433 Auto=180.484(merge3(回退)) Ocn= 18.969 opSp= 31.924 HSMU= 34.922 bhSp= 99.157 dense=DNF(big) cublas=DNF(big) (55.6s)
+[45/337] SiO            n=33401    cu= 18.007 Auto= 29.401(merge3(回退)) Ocn=  2.725 opSp=  5.054 HSMU=  5.871 bhSp= 18.783 dense=  8473.7 cublas=  2213.5 (62.1s)
+[46/337] SiO2           n=155331   cu=    DNF Auto=494.955(hash  ) Ocn=236.557 opSp=2359.639 HSMU=857.513 bhSp=846.135 dense=DNF(big) cublas=DNF(big) (85.3s)
+[47/337] Stanford_Berkeley n=683446   cu= 48.449 Auto=       (?     ) Ocn=111.848 opSp=3384.43 HSMU=204.384 bhSp=5837.17 dense=DNF(big) cublas=DNF(big) (104.8s)
+[48/337] StocF-1465     n=1465137   cu= 41.386 Auto= 18.897(hash  ) Ocn=  6.811 opSp= 11.828 HSMU= 17.525 bhSp= 85.281 dense=DNF(big) cublas=DNF(big) (81.0s)
+[49/337] TSC_OPF_1047   n=8140     cu=1096.18 Auto= 24.196(hash  ) Ocn=  6.409 opSp= 11.958 HSMU= 16.306 bhSp= 42.763 dense= 129.316 cublas=  35.347 (42.6s)
+[50/337] TSC_OPF_300    n=9774     cu=298.656 Auto= 11.754(hash  ) Ocn=  4.628 opSp= 31.338 HSMU=  8.255 bhSp= 45.214 dense=  220.85 cublas=  60.524 (48.9s)
+[51/337] TSOPF_FS_b300  n=29214    cu=    DNF Auto=       (?     ) Ocn=123.967 opSp=1019.558 HSMU=203.864 bhSp=2863.08 dense= 5709.72 cublas= 1493.86 (293.3s)
+[52/337] TSOPF_FS_b300_c2 n=56814    cu=    DNF Auto=       (?     ) Ocn=400.219 opSp=    DNF HSMU= 753.27 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (649.5s)
+[53/337] TSOPF_FS_b39_c7 n=28216    cu=    DNF Auto=1572.811(merge3(回退)) Ocn= 20.888 opSp= 713.83 HSMU= 40.895 bhSp=2629.66 dense= 5140.53 cublas= 1292.83 (213.3s)
+[54/337] TSOPF_FS_b9_c6 n=14454    cu= 25.598 Auto=  14.49(hash  ) Ocn=  3.601 opSp=100.021 HSMU=  7.846 bhSp= 86.495 dense= 699.945 cublas= 182.693 (60.2s)
+[55/337] TSOPF_RS_b2052_c1 n=25626    cu=  8.679 Auto=  24.32(hash  ) Ocn=  3.751 opSp= 11.443 HSMU= 13.362 bhSp= 66.358 dense= 3862.37 cublas= 1001.92 (76.5s)
+[56/337] TSOPF_RS_b2383 n=38120    cu= 18.798 Auto= 56.674(hash  ) Ocn=  8.105 opSp= 36.188 HSMU=   40.1 bhSp=150.594 dense= 12660.8 cublas= 3155.93 (172.6s)
+[57/337] TSOPF_RS_b2383_c1 n=38120    cu=  18.81 Auto= 56.676(hash  ) Ocn=  8.109 opSp= 36.297 HSMU=  40.25 bhSp=152.261 dense= 12651.5 cublas= 3176.58 (171.8s)
+[58/337] TSOPF_RS_b678_c2 n=35696    cu=  9.924 Auto= 30.191(hash  ) Ocn=  3.475 opSp= 11.889 HSMU= 14.915 bhSp= 56.886 dense= 10327.9 cublas= 2428.99 (107.5s)
+[59/337] Zd_Jac2        n=22835    cu= 12.428 Auto= 42.513(merge3(回退)) Ocn=  2.331 opSp=  7.014 HSMU=  9.462 bhSp= 27.439 dense= 2725.39 cublas= 715.277 (41.2s)
+[60/337] Zd_Jac2_db     n=22835    cu=  4.723 Auto=  2.396(hash  ) Ocn=  0.935 opSp=  1.865 HSMU=  2.832 bhSp=  7.306 dense= 2723.82 cublas= 712.377 (27.2s)
+[61/337] Zd_Jac3        n=22835    cu= 19.628 Auto=   53.9(merge3(回退)) Ocn=    3.1 opSp=  9.148 HSMU= 12.362 bhSp= 32.815 dense= 2725.09 cublas= 713.852 (45.7s)
+[62/337] Zd_Jac3_db     n=22835    cu=   5.28 Auto=  2.496(hash  ) Ocn=  0.964 opSp=  1.707 HSMU=  2.895 bhSp=  7.382 dense= 2723.37 cublas= 713.399 (27.3s)
+[63/337] Zd_Jac6        n=22835    cu= 13.971 Auto= 46.086(merge3(回退)) Ocn=  2.509 opSp=  6.888 HSMU=  9.722 bhSp= 29.616 dense= 2725.35 cublas=  716.01 (40.7s)
+[64/337] Zd_Jac6_db     n=22835    cu=  4.884 Auto=  2.406(hash  ) Ocn=  0.846 opSp=  1.575 HSMU=  2.842 bhSp=  7.179 dense= 2723.28 cublas= 712.896 (29.5s)
+[65/337] a0nsdsil       n=80016    cu=  30.57 Auto=608.697(merge3(回退)) Ocn= 15.765 opSp=278.263 HSMU= 18.823 bhSp=369.689 dense=DNF(big) cublas=DNF(big) (32.3s)
+[66/337] a2nnsnsl       n=80016    cu= 28.201 Auto=573.661(merge3(回退)) Ocn= 14.682 opSp=193.291 HSMU= 33.051 bhSp=182.838 dense=DNF(big) cublas=DNF(big) (28.7s)
+[67/337] a5esindl       n=60008    cu= 26.848 Auto=1041.697(merge3(回退)) Ocn= 10.252 opSp=356.449 HSMU= 16.928 bhSp=1842.56 dense=DNF(big) cublas=DNF(big) (43.5s)
+[68/337] af_0_k101      n=503625   cu=383.272 Auto= 11.929(hash  ) Ocn=  7.637 opSp=  9.644 HSMU= 12.205 bhSp= 31.654 dense=DNF(big) cublas=DNF(big) (51.7s)
+[69/337] af_1_k101      n=503625   cu=382.998 Auto= 11.999(hash  ) Ocn=  7.628 opSp=  9.627 HSMU= 12.249 bhSp= 31.316 dense=DNF(big) cublas=DNF(big) (51.7s)
+[70/337] af_2_k101      n=503625   cu=381.758 Auto= 11.947(hash  ) Ocn=  7.634 opSp=  9.486 HSMU= 12.286 bhSp= 31.237 dense=DNF(big) cublas=DNF(big) (51.4s)
+[71/337] af_3_k101      n=503625   cu=380.608 Auto= 11.925(hash  ) Ocn=  7.638 opSp=  9.785 HSMU= 12.274 bhSp= 31.414 dense=DNF(big) cublas=DNF(big) (51.3s)
+[72/337] af_4_k101      n=503625   cu= 382.56 Auto= 12.006(hash  ) Ocn=  7.685 opSp=  9.382 HSMU= 12.327 bhSp= 31.359 dense=DNF(big) cublas=DNF(big) (51.3s)
+[73/337] af_5_k101      n=503625   cu= 380.94 Auto= 12.004(hash  ) Ocn=  7.674 opSp=  9.635 HSMU= 12.317 bhSp=  31.63 dense=DNF(big) cublas=DNF(big) (51.5s)
+[74/337] af_shell1      n=504855   cu=378.529 Auto= 11.723(hash  ) Ocn=  7.838 opSp= 10.051 HSMU= 12.463 bhSp= 31.852 dense=DNF(big) cublas=DNF(big) (47.9s)
+[75/337] af_shell10     n=1508065   cu=1384.612 Auto=  32.13(hash  ) Ocn= 23.215 opSp= 26.425 HSMU= 35.148 bhSp= 92.683 dense=DNF(big) cublas=DNF(big) (125.5s)
+[76/337] af_shell2      n=504855   cu=380.692 Auto= 11.627(hash  ) Ocn=  7.799 opSp=  9.624 HSMU= 12.365 bhSp= 31.645 dense=DNF(big) cublas=DNF(big) (48.2s)
+[77/337] af_shell3      n=504855   cu=382.541 Auto= 11.628(hash  ) Ocn=  7.823 opSp= 10.249 HSMU= 12.495 bhSp= 32.071 dense=DNF(big) cublas=DNF(big) (48.0s)
+[78/337] af_shell4      n=504855   cu=381.771 Auto= 11.714(hash  ) Ocn=  7.848 opSp=  9.935 HSMU= 12.499 bhSp= 31.586 dense=DNF(big) cublas=DNF(big) (48.2s)
+[79/337] af_shell5      n=504855   cu=383.081 Auto= 11.725(hash  ) Ocn=  7.842 opSp= 10.555 HSMU= 12.434 bhSp= 31.731 dense=DNF(big) cublas=DNF(big) (47.9s)
+[80/337] af_shell6      n=504855   cu=381.117 Auto= 11.661(hash  ) Ocn=  7.847 opSp= 10.295 HSMU= 12.421 bhSp= 31.713 dense=DNF(big) cublas=DNF(big) (48.3s)
+[81/337] af_shell7      n=504855   cu=382.029 Auto= 11.728(hash  ) Ocn=  7.851 opSp= 10.595 HSMU= 12.425 bhSp= 31.523 dense=DNF(big) cublas=DNF(big) (48.7s)
+[82/337] af_shell8      n=504855   cu=382.641 Auto= 11.722(hash  ) Ocn=  7.845 opSp=  9.688 HSMU= 12.467 bhSp= 31.932 dense=DNF(big) cublas=DNF(big) (49.2s)
+[83/337] af_shell9      n=504855   cu= 381.31 Auto= 11.748(hash  ) Ocn=  7.854 opSp=  9.696 HSMU= 12.452 bhSp= 31.864 dense=DNF(big) cublas=DNF(big) (48.1s)
+[84/337] appu           n=14000    cu= 42.282 Auto= 27.143(hash  ) Ocn=  5.842 opSp=311.744 HSMU= 19.174 bhSp=122.021 dense= 634.228 cublas= 158.301 (121.3s)
+[85/337] atmosmodd      n=1270432   cu=  3.882 Auto=  12.71(hash  ) Ocn=  2.107 opSp=  5.412 HSMU=  6.719 bhSp= 28.289 dense=DNF(big) cublas=DNF(big) (43.1s)
+[86/337] atmosmodj      n=1270432   cu=  3.974 Auto= 12.732(hash  ) Ocn=  2.096 opSp=  5.175 HSMU=  6.865 bhSp= 28.498 dense=DNF(big) cublas=DNF(big) (43.0s)
+[87/337] atmosmodl      n=1489752   cu=  4.486 Auto= 13.609(hash  ) Ocn=  2.438 opSp=  5.858 HSMU=  7.827 bhSp= 33.635 dense=DNF(big) cublas=DNF(big) (42.6s)
+[88/337] atmosmodm      n=1489752   cu=  4.553 Auto= 13.604(hash  ) Ocn=  2.432 opSp=  5.905 HSMU=  7.989 bhSp= 33.284 dense=DNF(big) cublas=DNF(big) (41.5s)
+[89/337] audikw_1       n=943695   cu=    DNF Auto=       (?     ) Ocn=  96.77 opSp= 179.39 HSMU= 186.84 bhSp=391.934 dense=DNF(big) cublas=DNF(big) (192.1s)
+[90/337] auto           n=448695   cu= 14.392 Auto=  6.686(hash  ) Ocn=  2.722 opSp=  4.877 HSMU=  7.552 bhSp=  22.02 dense=DNF(big) cublas=DNF(big) (24.3s)
+[91/337] av41092        n=41092    cu=  9.309 Auto=121.444(merge3(回退)) Ocn=  4.426 opSp= 27.545 HSMU= 10.962 bhSp= 37.587 dense= 15844.9 cublas= 4038.71 (90.8s)
+[92/337] bbmat          n=38744    cu=  7.738 Auto=  4.927(hash  ) Ocn=  2.086 opSp=  3.352 HSMU=  3.712 bhSp=  10.03 dense= 13287.2 cublas= 3318.35 (72.5s)
+[94/337] bcsstk35       n=30237    cu=   5.88 Auto=  1.488(hash  ) Ocn=  1.304 opSp=  2.119 HSMU=  2.677 bhSp=  4.644 dense= 6299.69 cublas= 1657.69 (39.5s)
+[95/337] bcsstk36       n=23052    cu=  5.108 Auto=  1.241(hash  ) Ocn=  1.238 opSp=  3.245 HSMU=  2.341 bhSp=  3.783 dense=  2800.0 cublas= 711.421 (36.0s)
+[96/337] bcsstk39       n=46772    cu=  8.317 Auto=  1.963(hash  ) Ocn=  1.539 opSp=   3.17 HSMU=   2.48 bhSp=  4.259 dense= 23274.9 cublas= 5929.03 (89.9s)
+[97/337] bloweya        n=30004    cu= 15.811 Auto=868.625(merge3(回退)) Ocn=  4.525 opSp=253.618 HSMU=  9.989 bhSp=223.141 dense=  6150.9 cublas= 1574.74 (113.5s)
+[98/337] bloweybl       n=30003    cu= 15.603 Auto= 842.24(merge3(回退)) Ocn=  3.638 opSp=248.755 HSMU=  7.245 bhSp= 151.05 dense= 6167.13 cublas= 1616.97 (107.0s)
+[99/337] bloweybq       n=10001    cu= 15.081 Auto= 21.451(hash  ) Ocn=  3.168 opSp=243.156 HSMU=  7.635 bhSp= 69.021 dense=  236.34 cublas=  64.398 (22.0s)
+[100/337] bmw3_2         n=227362   cu=383.562 Auto= 10.419(hash  ) Ocn=  6.922 opSp=  9.883 HSMU= 12.433 bhSp= 28.695 dense=DNF(big) cublas=DNF(big) (36.4s)
+[101/337] bmw7st_1       n=141347   cu= 26.477 Auto=  7.199(hash  ) Ocn=  4.795 opSp=  6.675 HSMU=   8.66 bhSp= 18.773 dense=DNF(big) cublas=DNF(big) (31.7s)
+[102/337] bmwcra_1       n=148770   cu=525.991 Auto= 72.145(merge3(回退)) Ocn=    9.9 opSp= 14.139 HSMU= 15.666 bhSp= 40.366 dense=DNF(big) cublas=DNF(big) (42.9s)
+[103/337] bone010        n=986703   cu=    DNF Auto= 83.353(hash  ) Ocn= 60.927 opSp= 86.904 HSMU= 90.743 bhSp=205.059 dense=DNF(big) cublas=DNF(big) (152.0s)
+[104/337] boneS01        n=127224   cu= 25.238 Auto=  6.817(hash  ) Ocn=  4.977 opSp=  7.289 HSMU=  9.033 bhSp= 22.142 dense=DNF(big) cublas=DNF(big) (39.9s)
+[105/337] boneS10        n=914898   cu=    DNF Auto= 58.244(hash  ) Ocn=  41.69 opSp= 62.159 HSMU= 68.011 bhSp=157.101 dense=DNF(big) cublas=DNF(big) (151.9s)
+[106/337] brainpc2       n=27607    cu=138.905 Auto=1261.005(merge3(回退)) Ocn=  9.137 opSp=876.298 HSMU= 13.925 bhSp=2145.79 dense= 4847.83 cublas= 1277.77 (265.1s)
+[107/337] bundle1        n=10581    cu=321.059 Auto= 19.344(hash  ) Ocn=  4.341 opSp= 19.843 HSMU= 13.669 bhSp= 33.742 dense= 281.944 cublas=  76.952 (60.3s)
+[108/337] c-43           n=11125    cu= 10.341 Auto=  5.631(hash  ) Ocn=  1.803 opSp=   7.95 HSMU=  8.137 bhSp= 28.239 dense=  323.91 cublas=  87.504 (30.6s)
+[109/337] c-45           n=13206    cu= 15.596 Auto=  8.251(hash  ) Ocn=   2.59 opSp=  8.915 HSMU= 10.567 bhSp= 30.395 dense= 536.783 cublas= 140.217 (39.4s)
+[110/337] c-53           n=30235    cu= 31.427 Auto= 16.394(hash  ) Ocn=  5.235 opSp= 54.584 HSMU=  15.58 bhSp= 85.356 dense= 6338.81 cublas=  1676.5 (83.9s)
+[111/337] c-57           n=37833    cu=373.787 Auto=1207.143(merge3(回退)) Ocn= 14.882 opSp=537.426 HSMU= 22.157 bhSp=526.254 dense= 12426.1 cublas= 3229.72 (270.2s)
+[112/337] c-58           n=37595    cu=  9.942 Auto=484.392(merge3(回退)) Ocn=  5.621 opSp= 57.719 HSMU= 15.369 bhSp= 88.644 dense= 12184.7 cublas= 3173.67 (104.8s)
+[113/337] c-62           n=41731    cu=   8.08 Auto=522.844(merge3(回退)) Ocn=  5.199 opSp= 52.527 HSMU=  12.81 bhSp= 96.406 dense= 16620.3 cublas= 4352.07 (110.8s)
+[114/337] c-62ghs        n=41731    cu=  8.421 Auto= 526.35(merge3(回退)) Ocn=  5.225 opSp= 52.676 HSMU= 13.397 bhSp=101.367 dense= 16611.2 cublas= 4348.16 (109.0s)
+[115/337] c-64           n=51035    cu=    DNF Auto=1120.334(merge3(回退)) Ocn= 18.642 opSp=372.263 HSMU= 36.393 bhSp=  344.9 dense=DNF(big) cublas=DNF(big) (41.1s)
+[116/337] c-64b          n=51035    cu=    DNF Auto=1120.518(merge3(回退)) Ocn= 18.548 opSp= 371.69 HSMU= 36.747 bhSp=324.039 dense=DNF(big) cublas=DNF(big) (41.0s)
+[117/337] c-66           n=49989    cu=  9.972 Auto=293.194(merge3(回退)) Ocn=  4.772 opSp= 53.377 HSMU= 12.823 bhSp=108.109 dense= 28572.9 cublas= timeout (1323.0s)
+[118/337] c-66b          n=49989    cu=    DNF Auto=       (?     ) Ocn=    DNF opSp=    DNF HSMU= 12.587 bhSp= 97.004 dense= 28609.2 cublas= 7449.16 (4464.7s)
+[119/337] c-67           n=57975    cu= 16.355 Auto=137.722(merge3(回退)) Ocn=  4.269 opSp= 32.346 HSMU= 19.714 bhSp= 82.481 dense=DNF(big) cublas=DNF(big) (17.6s)
+[120/337] c-67b          n=57975    cu= 16.403 Auto=137.057(merge3(回退)) Ocn=  4.299 opSp= 32.212 HSMU= 19.583 bhSp= 82.524 dense=DNF(big) cublas=DNF(big) (17.8s)
+[121/337] c-71           n=76638    cu= 11.059 Auto=1239.988(merge3(回退)) Ocn=  8.385 opSp= 110.39 HSMU= 15.849 bhSp=158.143 dense=DNF(big) cublas=DNF(big) (33.3s)
+[122/337] c-73           n=169422   cu=    DNF Auto=       (?     ) Ocn= 77.247 opSp=    DNF HSMU=120.955 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (546.7s)
+[123/337] c-73b          n=169422   cu=    DNF Auto=       (?     ) Ocn= 77.295 opSp=    DNF HSMU=121.399 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (545.9s)
+[124/337] c-big          n=345241   cu= 83.197 Auto=       (?     ) Ocn= 56.174 opSp=    DNF HSMU= 77.865 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (78.1s)
+[125/337] cage13         n=445315   cu=  21.85 Auto=   9.83(hash  ) Ocn=  4.842 opSp=  7.472 HSMU= 10.365 bhSp= 37.383 dense=DNF(big) cublas=DNF(big) (54.7s)
+[126/337] cage14         n=1505785   cu=164.495 Auto= 38.372(hash  ) Ocn= 18.483 opSp= 26.226 HSMU= 36.651 bhSp= 129.46 dense=DNF(big) cublas=DNF(big) (162.9s)
+[127/337] cage15         n=5154859   cu=    DNF Auto=       (?     ) Ocn= 76.216 opSp=100.322 HSMU=138.029 bhSp= 422.42 dense=DNF(big) cublas=DNF(big) (470.9s)
+[128/337] cant           n=62451    cu= 14.596 Auto=  4.495(hash  ) Ocn=  3.936 opSp=  5.554 HSMU=  5.774 bhSp= 11.323 dense=DNF(big) cublas=DNF(big) (20.1s)
+[129/337] case39         n=40216    cu=    DNF Auto=       (?     ) Ocn= 35.583 opSp=    DNF HSMU= 61.428 bhSp=    DNF dense= 14785.0 cublas= 3734.75 (434.6s)
+[130/337] case9          n=14454    cu= 25.616 Auto= 13.586(hash  ) Ocn=    3.6 opSp=  99.43 HSMU=  7.827 bhSp=  87.07 dense=  699.65 cublas= 182.928 (60.9s)
+[131/337] cfd2           n=123440   cu= 10.564 Auto=   2.44(hash  ) Ocn=  1.415 opSp=  2.864 HSMU=  3.105 bhSp=  8.116 dense=DNF(big) cublas=DNF(big) (20.5s)
+[132/337] circuit_4      n=80209    cu= 14.994 Auto=  985.7(merge3(回退)) Ocn=  9.604 opSp=116.879 HSMU= 30.866 bhSp=170.038 dense=DNF(big) cublas=DNF(big) (32.8s)
+[133/337] cnr-2000       n=325557   cu=    DNF Auto=221.023(merge3(回退)) Ocn=  3.595 opSp=  9.918 HSMU= 10.654 bhSp= 50.401 dense=DNF(big) cublas=DNF(big) (20.3s)
+[134/337] conf5_4-8x8-05 n=49152    cu=  8.406 Auto=   2.48(hash  ) Ocn=  1.353 opSp=  2.709 HSMU=  2.659 bhSp=  3.993 dense= 26886.8 cublas= 6165.45 (97.1s)
+[135/337] conf5_4-8x8-10 n=49152    cu=  8.373 Auto=  2.485(hash  ) Ocn=  1.354 opSp=  2.659 HSMU=  2.656 bhSp=  3.992 dense= 26690.8 cublas= 6150.57 (97.1s)
+[136/337] conf5_4-8x8-15 n=49152    cu=  8.289 Auto=  2.482(hash  ) Ocn=  1.346 opSp=   2.93 HSMU=  2.941 bhSp=  5.613 dense= 26889.8 cublas= 6163.79 (102.8s)
+[137/337] conf5_4-8x8-20 n=49152    cu=  8.378 Auto=  2.488(hash  ) Ocn=  1.352 opSp=  2.696 HSMU=  2.635 bhSp=  4.002 dense= 26879.8 cublas= 6165.63 (101.3s)
+[138/337] conf6_0-8x8-20 n=49152    cu=  8.686 Auto=  2.501(hash  ) Ocn=  1.374 opSp=  3.513 HSMU=  2.774 bhSp=  4.475 dense= 26885.6 cublas= 6165.93 (113.7s)
+[139/337] conf6_0-8x8-30 n=49152    cu=  9.095 Auto=  2.497(hash  ) Ocn=  1.381 opSp=  4.154 HSMU=   2.75 bhSp=  4.607 dense= 26907.1 cublas= 6166.87 (113.2s)
+[140/337] conf6_0-8x8-80 n=49152    cu= 10.272 Auto=  2.508(hash  ) Ocn=  1.373 opSp=  3.327 HSMU=  2.767 bhSp=  4.508 dense= 26875.9 cublas= 6165.05 (114.2s)
+[141/337] consph         n=83334    cu=130.618 Auto=  7.729(hash  ) Ocn=  5.701 opSp=   8.36 HSMU=  8.883 bhSp= 20.866 dense=DNF(big) cublas=DNF(big) (35.8s)
+[142/337] cop20k_A       n=121192   cu=    DNF Auto=   3.41(hash  ) Ocn=  2.014 opSp=  3.325 HSMU=  4.282 bhSp= 10.227 dense=DNF(big) cublas=DNF(big) (25.4s)
+[143/337] crankseg_1     n=52804    cu=    DNF Auto=       (?     ) Ocn= 18.414 opSp= 50.531 HSMU=  52.56 bhSp=103.963 dense=DNF(big) cublas=DNF(big) (50.6s)
+[144/337] crankseg_2     n=63838    cu=    DNF Auto=       (?     ) Ocn= 27.843 opSp= 86.083 HSMU=  80.51 bhSp= 159.67 dense=DNF(big) cublas=DNF(big) (64.6s)
+[145/337] crplat2        n=18010    cu=  4.313 Auto=  1.134(hash  ) Ocn=   1.07 opSp=  2.293 HSMU=  1.847 bhSp=  2.468 dense= 1345.59 cublas= 344.495 (26.4s)
+[146/337] crystk02       n=13965    cu=  4.756 Auto=  1.776(hash  ) Ocn=  1.294 opSp=  3.691 HSMU=  2.214 bhSp=  3.699 dense=  636.55 cublas= 167.944 (27.9s)
+[147/337] crystk03       n=24696    cu=  8.408 Auto=  2.315(hash  ) Ocn=  1.855 opSp=  4.057 HSMU=   3.22 bhSp=  6.014 dense= 3439.64 cublas= 849.735 (41.3s)
+[148/337] ct20stif       n=52329    cu= 10.524 Auto=  2.853(hash  ) Ocn=  2.317 opSp=  3.637 HSMU=  4.323 bhSp=  8.868 dense=DNF(big) cublas=DNF(big) (24.4s)
+[149/337] delaunay_n21   n=2097152   cu=  5.879 Auto= 19.756(hash  ) Ocn=  3.383 opSp=  8.432 HSMU=   8.18 bhSp= 67.526 dense=DNF(big) cublas=DNF(big) (45.4s)
+[150/337] delaunay_n22   n=4194304   cu=  10.24 Auto= 39.432(hash  ) Ocn=  6.567 opSp= 14.434 HSMU= 16.405 bhSp=127.619 dense=DNF(big) cublas=DNF(big) (70.1s)
+[151/337] delaunay_n23   n=8388608   cu= 24.299 Auto=  77.95(hash  ) Ocn= 12.965 opSp= 26.855 HSMU=  35.31 bhSp=251.162 dense=DNF(big) cublas=DNF(big) (120.8s)
+[152/337] delaunay_n24   n=16777216   cu=199.229 Auto=156.812(hash  ) Ocn= 25.692 opSp= 50.938 HSMU= 50.115 bhSp=503.037 dense=DNF(big) cublas=DNF(big) (236.0s)
+[153/337] dielFilterV2clx n=607232   cu=865.454 Auto= 35.583(hash  ) Ocn= 21.195 opSp= 30.836 HSMU= 36.939 bhSp= 100.86 dense=DNF(big) cublas=DNF(big) (114.7s)
+[154/337] dielFilterV2real n=1157456   cu=    DNF Auto=  60.94(hash  ) Ocn= 37.814 opSp= 56.122 HSMU=  67.29 bhSp=176.065 dense=DNF(big) cublas=DNF(big) (185.5s)
+[155/337] dielFilterV3clx n=420408   cu=    DNF Auto=       (?     ) Ocn= 44.123 opSp= 75.068 HSMU= 74.264 bhSp=168.918 dense=DNF(big) cublas=DNF(big) (142.3s)
+[156/337] dielFilterV3real n=1102824   cu=    DNF Auto=       (?     ) Ocn=121.578 opSp=205.864 HSMU=206.745 bhSp= 461.85 dense=DNF(big) cublas=DNF(big) (329.0s)
+[157/337] email-Enron    n=36692    cu=  7.832 Auto= 83.262(merge3(回退)) Ocn=  3.311 opSp= 24.596 HSMU= 10.942 bhSp= 59.813 dense= 11330.8 cublas= 2892.53 (79.0s)
+[158/337] eu-2005        n=862664   cu=    DNF Auto=1275.631(merge3(回退)) Ocn= 30.215 opSp= 66.773 HSMU= 68.545 bhSp=267.879 dense=DNF(big) cublas=DNF(big) (90.8s)
+[159/337] ex11           n=16614    cu=  5.366 Auto=  1.405(hash  ) Ocn=  1.466 opSp=  2.964 HSMU=  2.563 bhSp=   4.43 dense=  1059.0 cublas= 270.562 (34.0s)
+[161/337] fcondp2        n=201822   cu=413.786 Auto=  9.643(hash  ) Ocn=  6.805 opSp= 10.168 HSMU=  11.27 bhSp= 24.415 dense=DNF(big) cublas=DNF(big) (41.9s)
+[162/337] fem_filter     n=74062    cu= 43.687 Auto= 10.185(hash  ) Ocn=   2.66 opSp=  7.683 HSMU=  6.893 bhSp= 20.373 dense=DNF(big) cublas=DNF(big) (27.9s)
+[163/337] fem_hifreq_circuit n=491100   cu=570.909 Auto= 25.529(hash  ) Ocn= 15.285 opSp= 23.258 HSMU= 27.017 bhSp= 76.275 dense=DNF(big) cublas=DNF(big) (139.6s)
+[164/337] filter3D       n=106437   cu= 11.265 Auto=  3.717(hash  ) Ocn=  2.184 opSp=  4.194 HSMU=  4.645 bhSp= 12.755 dense=DNF(big) cublas=DNF(big) (24.5s)
+[165/337] fp             n=7548     cu= 34.872 Auto= 31.528(merge3(回退)) Ocn=  3.196 opSp=  7.414 HSMU=  7.185 bhSp= 19.428 dense= 101.349 cublas=  28.231 (35.0s)
+[166/337] fullb          n=199187   cu=450.823 Auto= 10.917(hash  ) Ocn=  7.799 opSp= 12.014 HSMU= 13.209 bhSp= 27.017 dense=DNF(big) cublas=DNF(big) (38.3s)
+[167/337] gearbox        n=153746   cu=364.996 Auto= 10.277(hash  ) Ocn=  6.572 opSp= 11.381 HSMU= 10.693 bhSp= 21.483 dense=DNF(big) cublas=DNF(big) (30.4s)
+[168/337] germany_osm    n=11548845   cu=    DNF Auto= 99.651(hash  ) Ocn=  5.333 opSp=  5.832 HSMU= 21.228 bhSp=212.723 dense=DNF(big) cublas=DNF(big) (52.1s)
+[169/337] gsm_106857     n=589446   cu=567.302 Auto= 29.157(hash  ) Ocn= 15.557 opSp= 24.718 HSMU= 32.552 bhSp= 66.653 dense=DNF(big) cublas=DNF(big) (68.1s)
+[170/337] gupta1         n=31802    cu=    DNF Auto=       (?     ) Ocn= 48.859 opSp=845.492 HSMU= 73.544 bhSp=4174.97 dense= 7360.42 cublas= 1929.73 (246.3s)
+[171/337] gupta2         n=62064    cu=    DNF Auto=       (?     ) Ocn=100.272 opSp=    DNF HSMU=152.096 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (30.9s)
+[172/337] gupta3         n=16783    cu=    DNF Auto=       (?     ) Ocn= 224.11 opSp=1588.874 HSMU=424.095 bhSp=    DNF dense= 1110.49 cublas= 298.853 (250.1s)
+[173/337] gyro           n=17361    cu=  5.153 Auto=  2.863(hash  ) Ocn=  1.655 opSp=  2.758 HSMU=  3.414 bhSp=  6.343 dense= 1215.14 cublas= 313.884 (24.3s)
+[174/337] gyro_k         n=17361    cu=  5.133 Auto=  2.819(hash  ) Ocn=  1.654 opSp=  2.508 HSMU=  3.429 bhSp=  6.301 dense= 1215.89 cublas= 313.733 (23.2s)
+[175/337] halfb          n=224617   cu=452.918 Auto= 10.512(hash  ) Ocn=  7.529 opSp= 11.355 HSMU= 12.971 bhSp= 24.732 dense=DNF(big) cublas=DNF(big) (29.0s)
+[176/337] hangGlider_3   n=10260    cu= 13.321 Auto=  18.14(hash  ) Ocn=  3.511 opSp=187.774 HSMU=  7.887 bhSp= 74.637 dense= 256.824 cublas=  69.723 (79.8s)
+[177/337] hangGlider_4   n=15561    cu= 29.681 Auto=   40.7(hash  ) Ocn=  7.837 opSp=651.546 HSMU=  16.53 bhSp=177.689 dense=  883.71 cublas= 236.198 (162.3s)
+[178/337] hangGlider_5   n=16011    cu= 32.314 Auto= 42.989(hash  ) Ocn=  6.424 opSp=1055.944 HSMU= 17.103 bhSp=185.202 dense= 962.046 cublas= 257.543 (176.3s)
+[179/337] hood           n=220542   cu=357.947 Auto=  9.737(hash  ) Ocn=  6.482 opSp=  9.386 HSMU= 11.427 bhSp=  16.82 dense=DNF(big) cublas=DNF(big) (34.0s)
+[180/337] hugebubbles-00000 n=18318143   cu=    DNF Auto=       (?     ) Ocn= 11.074 opSp=  9.935 HSMU=  29.91 bhSp=332.672 dense=DNF(big) cublas=DNF(big) (101.7s)
+[181/337] hugebubbles-00010 n=19458087   cu=    DNF Auto=       (?     ) Ocn=  14.48 opSp= 12.433 HSMU= 41.993 bhSp=357.562 dense=DNF(big) cublas=DNF(big) (111.0s)
+[182/337] hugebubbles-00020 n=21198119   cu=    DNF Auto=       (?     ) Ocn= 15.529 opSp= 13.981 HSMU= 44.826 bhSp=393.874 dense=DNF(big) cublas=DNF(big) (121.0s)
+[183/337] hugetrace-00010 n=12057441   cu=    DNF Auto=111.819(hash  ) Ocn=  7.318 opSp=  6.869 HSMU= 24.909 bhSp=223.696 dense=DNF(big) cublas=DNF(big) (68.9s)
+[184/337] hugetrace-00020 n=16002413   cu=    DNF Auto=148.933(hash  ) Ocn=  10.24 opSp=  9.151 HSMU= 32.475 bhSp=294.836 dense=DNF(big) cublas=DNF(big) (90.7s)
+[185/337] hugetric-00010 n=6592765   cu=   5.06 Auto= 62.238(hash  ) Ocn=  4.504 opSp=  4.486 HSMU= 14.629 bhSp=123.952 dense=DNF(big) cublas=DNF(big) (43.9s)
+[186/337] hugetric-00020 n=7122792   cu=  5.598 Auto= 67.583(hash  ) Ocn=  4.903 opSp=   4.53 HSMU= 15.716 bhSp=130.994 dense=DNF(big) cublas=DNF(big) (46.1s)
+[187/337] iChem_Jacobian n=274087   cu=  8.939 Auto=  3.669(hash  ) Ocn=  1.655 opSp=  3.031 HSMU=  4.109 bhSp= 14.238 dense=DNF(big) cublas=DNF(big) (27.6s)
+[188/337] in-2004        n=1382908   cu=    DNF Auto=101.506(hash  ) Ocn= 31.836 opSp= 75.382 HSMU= 866.07 bhSp=220.457 dense=DNF(big) cublas=DNF(big) (51.5s)
+[189/337] inline_1       n=503712   cu=    DNF Auto=       (?     ) Ocn= 47.534 opSp= 68.357 HSMU= 72.019 bhSp=  175.4 dense=DNF(big) cublas=DNF(big) (101.8s)
+[190/337] invextr1_new   n=30412    cu= 10.332 Auto=  4.867(hash  ) Ocn=  2.659 opSp=  3.765 HSMU=  4.574 bhSp=  8.276 dense= 6416.75 cublas= 1644.75 (48.2s)
+[191/337] kim2           n=456976   cu= 35.303 Auto=  7.139(hash  ) Ocn=  3.659 opSp=  5.351 HSMU=  8.667 bhSp= 26.153 dense=DNF(big) cublas=DNF(big) (57.3s)
+[192/337] kkt_power      n=2063494   cu= 26.344 Auto= 27.115(hash  ) Ocn=  7.594 opSp=  9.923 HSMU= 19.896 bhSp= 82.758 dense=DNF(big) cublas=DNF(big) (45.6s)
+[193/337] laminar_duct3D n=67173    cu= 15.879 Auto=   4.85(hash  ) Ocn=  5.385 opSp=  5.279 HSMU=  5.957 bhSp= 11.238 dense=DNF(big) cublas=DNF(big) (25.8s)
+[194/337] largebasis     n=440020   cu=  3.808 Auto=  5.511(hash  ) Ocn=  1.745 opSp=  3.188 HSMU=  4.075 bhSp= 15.758 dense=DNF(big) cublas=DNF(big) (31.6s)
+[195/337] ldoor          n=952203   cu=    DNF Auto= 40.989(hash  ) Ocn= 26.322 opSp= 36.412 HSMU= 43.203 bhSp= 84.024 dense=DNF(big) cublas=DNF(big) (106.1s)
+[196/337] li             n=22695    cu=  6.468 Auto=  3.285(hash  ) Ocn=  2.073 opSp=  2.806 HSMU=  3.461 bhSp=  6.216 dense= 2692.31 cublas= 708.534 (30.3s)
+[197/337] lowThrust_10   n=18260    cu= 15.122 Auto= 219.71(merge3(回退)) Ocn=  3.512 opSp= 96.605 HSMU=  6.227 bhSp= 87.773 dense= 1407.54 cublas= 355.474 (62.5s)
+[198/337] lowThrust_11   n=18368    cu= 15.367 Auto=241.552(merge3(回退)) Ocn=  3.551 opSp= 96.301 HSMU=  6.343 bhSp= 88.948 dense= 1412.25 cublas=  334.08 (63.7s)
+[199/337] lowThrust_12   n=18458    cu= 15.531 Auto=221.793(merge3(回退)) Ocn=  3.035 opSp=100.702 HSMU=  8.568 bhSp= 89.362 dense= 1449.65 cublas= 373.232 (64.1s)
+[200/337] lowThrust_13   n=18476    cu= 15.591 Auto=227.488(merge3(回退)) Ocn=  2.955 opSp=100.886 HSMU=  8.612 bhSp= 89.483 dense= 1451.45 cublas= 368.388 (64.2s)
+[201/337] lowThrust_4    n=13562    cu=  8.059 Auto=  8.694(hash  ) Ocn=  2.302 opSp= 40.578 HSMU=  4.763 bhSp=  46.91 dense= 577.304 cublas= 151.613 (37.8s)
+[202/337] lowThrust_5    n=16262    cu= 11.544 Auto= 11.381(hash  ) Ocn=   3.08 opSp= 67.958 HSMU=  5.589 bhSp=  62.13 dense= 997.093 cublas= 260.001 (49.1s)
+[203/337] lowThrust_6    n=16928    cu=  12.55 Auto= 11.998(hash  ) Ocn=  2.681 opSp= 75.622 HSMU=  7.677 bhSp= 65.373 dense= 1111.51 cublas= 265.355 (53.8s)
+[204/337] lowThrust_7    n=17378    cu= 13.256 Auto=203.045(merge3(回退)) Ocn=  3.402 opSp=   81.1 HSMU=  6.949 bhSp= 68.754 dense= 1211.43 cublas= 311.633 (56.0s)
+[205/337] lowThrust_8    n=17702    cu= 13.785 Auto= 221.37(merge3(回退)) Ocn=   3.02 opSp= 86.758 HSMU=  5.705 bhSp= 84.369 dense= 1280.63 cublas= 330.154 (58.7s)
+[206/337] lowThrust_9    n=18044    cu= 14.601 Auto= 220.26(merge3(回退)) Ocn=  3.106 opSp= 92.529 HSMU=  5.881 bhSp= 86.142 dense= 1346.22 cublas= 341.468 (61.5s)
+[207/337] m14b           n=214765   cu=  8.018 Auto=   3.18(hash  ) Ocn=  1.457 opSp=  3.598 HSMU=   4.06 bhSp= 12.063 dense=DNF(big) cublas=DNF(big) (16.1s)
+[208/337] m_t1           n=97578    cu=687.867 Auto= 15.555(hash  ) Ocn=  9.146 opSp= 13.698 HSMU= 15.608 bhSp= 30.514 dense=DNF(big) cublas=DNF(big) (34.6s)
+[209/337] mixtank_new    n=29957    cu= 12.127 Auto=  6.048(hash  ) Ocn=  2.836 opSp=  4.315 HSMU=  4.767 bhSp=  9.009 dense= 6177.95 cublas= 1622.07 (45.9s)
+[210/337] mono_500Hz     n=169410   cu= 24.386 Auto=  8.233(hash  ) Ocn=  4.681 opSp=  6.684 HSMU=  9.004 bhSp= 23.772 dense=DNF(big) cublas=DNF(big) (37.3s)
+[211/337] mouse_gene     n=45101    cu=    DNF Auto=       (?     ) Ocn=1721.526 opSp=    DNF HSMU=2882.645 bhSp=    DNF dense= 20911.8 cublas= 5498.58 (650.1s)
+[212/337] msc10848       n=10848    cu=   9.08 Auto=  6.131(hash  ) Ocn=  2.223 opSp=  4.359 HSMU=  5.278 bhSp= 11.604 dense=  295.55 cublas=  72.233 (34.5s)
+[213/337] msc23052       n=23052    cu=  5.351 Auto=  1.438(hash  ) Ocn=  1.211 opSp=  2.285 HSMU=  2.388 bhSp=  3.658 dense= 2821.79 cublas= 712.738 (32.9s)
+[214/337] msdoor         n=415863   cu=666.567 Auto= 18.216(hash  ) Ocn= 11.838 opSp= 17.099 HSMU=  20.15 bhSp= 41.413 dense=DNF(big) cublas=DNF(big) (83.4s)
+[215/337] mult_dcop_01   n=25187    cu=152.768 Auto=       (?     ) Ocn= 12.296 opSp=    DNF HSMU= 27.969 bhSp=    DNF dense= 3664.71 cublas= 987.134 (646.6s)
+[216/337] mult_dcop_02   n=25187    cu= 97.578 Auto=       (?     ) Ocn= 12.024 opSp=    DNF HSMU= 28.369 bhSp=    DNF dense=  3694.3 cublas= 985.437 (643.5s)
+[217/337] mult_dcop_03   n=25187    cu= 98.104 Auto=       (?     ) Ocn= 11.979 opSp=    DNF HSMU= 27.776 bhSp=    DNF dense= 3697.05 cublas= 986.484 (477.4s)
+[218/337] nasasrb        n=54870    cu=  9.599 Auto=  2.789(hash  ) Ocn=  1.884 opSp=  2.893 HSMU=  3.496 bhSp=  6.991 dense=DNF(big) cublas=DNF(big) (16.7s)
+[219/337] nd12k          n=36000    cu=    DNF Auto=       (?     ) Ocn= 34.059 opSp= 102.99 HSMU= 87.034 bhSp= 224.21 dense= 10588.9 cublas= 2456.75 (151.3s)
+[220/337] nd24k          n=72000    cu=    DNF Auto=       (?     ) Ocn= 79.679 opSp=212.014 HSMU=179.094 bhSp=455.405 dense=DNF(big) cublas=DNF(big) (75.2s)
+[221/337] nd3k           n=9000     cu=846.799 Auto=116.934(merge3(回退)) Ocn=  7.128 opSp= 16.912 HSMU= 18.669 bhSp= 49.376 dense= 170.384 cublas=  45.282 (41.2s)
+[222/337] nd6k           n=18000    cu=    DNF Auto=       (?     ) Ocn= 14.521 opSp= 44.804 HSMU= 41.358 bhSp=106.202 dense= 1327.35 cublas= 317.857 (67.7s)
+[223/337] nemeth01       n=9506     cu=  2.868 Auto=   0.75(hash  ) Ocn=  0.742 opSp=  1.643 HSMU=  1.573 bhSp=  2.223 dense= 200.902 cublas=  54.717 (16.1s)
+[224/337] nemeth18       n=9506     cu=  2.924 Auto=  0.758(hash  ) Ocn=  0.715 opSp=  1.962 HSMU=  1.471 bhSp=  2.022 dense= 200.491 cublas=   54.71 (15.5s)
+[225/337] nemeth19       n=9506     cu=  3.188 Auto=  0.834(hash  ) Ocn=  0.821 opSp=  1.766 HSMU=  1.673 bhSp=  2.459 dense= 200.839 cublas=  54.585 (16.1s)
+[226/337] nemeth20       n=9506     cu=  4.137 Auto=  1.049(hash  ) Ocn=  0.949 opSp=  1.677 HSMU=  2.005 bhSp=  2.879 dense= 201.205 cublas=  54.766 (16.8s)
+[227/337] nemeth21       n=9506     cu=  5.355 Auto=  1.441(hash  ) Ocn=  1.191 opSp=  1.793 HSMU=  2.604 bhSp=  4.475 dense= 200.951 cublas=  54.782 (17.5s)
+[228/337] nemeth22       n=9506     cu=  8.473 Auto=  1.835(hash  ) Ocn=   1.35 opSp=  2.575 HSMU=  3.064 bhSp=  5.769 dense= 200.807 cublas=  54.823 (18.5s)
+[229/337] nemeth23       n=9506     cu= 10.254 Auto=  2.488(hash  ) Ocn=  1.482 opSp=  2.441 HSMU=  3.513 bhSp=   6.62 dense= 200.665 cublas=   54.73 (19.2s)
+[230/337] nemeth24       n=9506     cu= 10.359 Auto=  2.459(hash  ) Ocn=  1.477 opSp=  2.692 HSMU=  3.537 bhSp=  6.647 dense= 200.702 cublas=  54.887 (19.2s)
+[231/337] nemeth25       n=9506     cu= 10.455 Auto=   2.48(hash  ) Ocn=  1.475 opSp=  2.997 HSMU=  3.527 bhSp=  6.616 dense= 200.693 cublas=    54.8 (19.1s)
+[232/337] nemeth26       n=9506     cu= 10.504 Auto=  2.488(hash  ) Ocn=   1.48 opSp=  3.218 HSMU=  3.558 bhSp=  6.676 dense= 200.839 cublas=   54.74 (19.1s)
+[233/337] net100         n=29920    cu= 24.094 Auto= 30.483(hash  ) Ocn=  7.882 opSp=203.364 HSMU= 19.828 bhSp= 84.118 dense= 6094.74 cublas= 1417.72 (105.3s)
+[234/337] net125         n=36720    cu= 35.716 Auto= 38.162(hash  ) Ocn= 10.783 opSp=334.029 HSMU= 27.332 bhSp=129.289 dense= 11240.8 cublas= 2646.85 (150.2s)
+[235/337] net150         n=43520    cu=208.455 Auto= 53.371(hash  ) Ocn= 15.487 opSp=525.461 HSMU= 43.124 bhSp=203.494 dense= 18689.0 cublas= 4323.79 (212.4s)
+[236/337] net50          n=16320    cu=  8.938 Auto= 14.351(hash  ) Ocn=  3.423 opSp= 29.994 HSMU= 14.196 bhSp= 25.813 dense= 991.386 cublas= 235.617 (42.6s)
+[237/337] net75          n=23120    cu= 15.554 Auto= 20.627(hash  ) Ocn=  4.509 opSp= 91.788 HSMU= 17.971 bhSp= 53.212 dense= 2820.84 cublas= 670.063 (85.3s)
+[238/337] nlpkkt120      n=3542400   cu=    DNF Auto= 73.884(hash  ) Ocn= 44.532 opSp= 58.176 HSMU= 84.423 bhSp=269.662 dense=DNF(big) cublas=DNF(big) (265.2s)
+[239/337] nlpkkt80       n=1062400   cu=448.055 Auto= 37.507(hash  ) Ocn=  13.76 opSp=  18.73 HSMU= 25.815 bhSp= 79.767 dense=DNF(big) cublas=DNF(big) (96.1s)
+[240/337] ns3Da          n=20414    cu= 14.168 Auto= 22.588(merge3(回退)) Ocn=  3.049 opSp=  5.869 HSMU=  6.404 bhSp= 11.941 dense= 1931.54 cublas=  494.49 (47.7s)
+[241/337] offshore       n=259789   cu= 10.476 Auto=  3.841(hash  ) Ocn=  2.084 opSp=  4.777 HSMU=  4.965 bhSp= 20.639 dense=DNF(big) cublas=DNF(big) (31.8s)
+[242/337] ohne2          n=181343   cu=463.199 Auto=309.763(merge3(回退)) Ocn= 12.037 opSp= 27.845 HSMU= 34.362 bhSp= 82.546 dense=DNF(big) cublas=DNF(big) (75.3s)
+[243/337] oilpan         n=73752    cu= 13.266 Auto=  2.891(hash  ) Ocn=  2.504 opSp=  3.994 HSMU=  4.323 bhSp=   6.86 dense=DNF(big) cublas=DNF(big) (26.7s)
+[244/337] olafu          n=16146    cu=  5.159 Auto=  1.251(hash  ) Ocn=  1.325 opSp=  2.492 HSMU=  2.218 bhSp=  3.694 dense= 976.162 cublas= 251.151 (29.4s)
+[245/337] opt1           n=15449    cu= 12.882 Auto= 17.959(merge3(回退)) Ocn=  2.593 opSp=  4.543 HSMU=  5.519 bhSp= 11.238 dense= 855.636 cublas=  225.07 (30.7s)
+[246/337] para-10        n=155924   cu= 29.898 Auto= 30.114(hash  ) Ocn=  7.834 opSp=106.531 HSMU= 24.334 bhSp= 91.156 dense=DNF(big) cublas=DNF(big) (46.4s)
+[247/337] para-4         n=153226   cu=  27.35 Auto= 22.827(hash  ) Ocn=  6.618 opSp= 64.508 HSMU=  20.97 bhSp= 74.417 dense=DNF(big) cublas=DNF(big) (44.1s)
+[248/337] para-5         n=155924   cu= 32.047 Auto= 30.106(hash  ) Ocn=  7.829 opSp=106.503 HSMU= 25.046 bhSp= 91.702 dense=DNF(big) cublas=DNF(big) (44.5s)
+[249/337] para-6         n=155924   cu= 29.645 Auto= 30.167(hash  ) Ocn=  7.828 opSp=108.049 HSMU= 24.431 bhSp= 95.885 dense=DNF(big) cublas=DNF(big) (46.7s)
+[250/337] para-7         n=155924   cu= 29.923 Auto= 30.117(hash  ) Ocn=  7.866 opSp=106.833 HSMU= 23.776 bhSp= 93.374 dense=DNF(big) cublas=DNF(big) (46.0s)
+[251/337] para-8         n=155924   cu=  30.12 Auto= 30.139(hash  ) Ocn=  8.025 opSp=106.536 HSMU= 24.635 bhSp= 95.457 dense=DNF(big) cublas=DNF(big) (47.4s)
+[252/337] para-9         n=155924   cu= 29.615 Auto= 29.943(hash  ) Ocn=  7.788 opSp=105.553 HSMU= 24.466 bhSp= 90.804 dense=DNF(big) cublas=DNF(big) (45.0s)
+[253/337] patents        n=3774768   cu=    DNF Auto= 37.136(hash  ) Ocn=  7.917 opSp=  8.605 HSMU= 19.353 bhSp=110.213 dense=DNF(big) cublas=DNF(big) (74.8s)
+[254/337] pattern1       n=19242    cu=    DNF Auto=       (?     ) Ocn= 76.301 opSp= 706.58 HSMU=286.062 bhSp=1431.44 dense=  1648.8 cublas= 426.918 (258.6s)
+[255/337] pcrystk02      n=13965    cu=  4.781 Auto=  1.782(hash  ) Ocn=  1.314 opSp=  3.554 HSMU=  2.228 bhSp=  3.715 dense= 636.691 cublas= 167.882 (25.3s)
+[256/337] pcrystk03      n=24696    cu=  7.919 Auto=  2.362(hash  ) Ocn=  1.853 opSp=  3.733 HSMU=  3.464 bhSp=  5.905 dense= 3439.38 cublas= 850.546 (38.1s)
+[257/337] pct20stif      n=52329    cu= 10.859 Auto=  2.885(hash  ) Ocn=  2.285 opSp=  3.891 HSMU=  4.346 bhSp=  8.774 dense=DNF(big) cublas=DNF(big) (21.3s)
+[258/337] pdb1HYS        n=36417    cu=  360.4 Auto= 14.996(hash  ) Ocn=  5.082 opSp=  7.914 HSMU=  9.543 bhSp= 19.186 dense= 11048.8 cublas= 2895.81 (86.1s)
+[259/337] pf2177         n=9728     cu=  7.658 Auto= 10.806(hash  ) Ocn=  1.974 opSp=  8.989 HSMU=  7.517 bhSp= 16.539 dense= 214.548 cublas=  54.107 (39.5s)
+[260/337] pkustk01       n=22044    cu=  4.805 Auto=  1.614(hash  ) Ocn=  1.285 opSp=  2.007 HSMU=  2.397 bhSp=  4.509 dense= 2456.97 cublas= 626.423 (28.1s)
+[261/337] pkustk02       n=10800    cu=  4.447 Auto=  1.194(hash  ) Ocn=   1.26 opSp=  2.638 HSMU=  2.322 bhSp=  3.251 dense= 291.241 cublas=   72.68 (23.0s)
+[262/337] pkustk03       n=63336    cu= 11.199 Auto=  3.124(hash  ) Ocn=   2.22 opSp=  4.603 HSMU=   3.93 bhSp=   8.53 dense=DNF(big) cublas=DNF(big) (20.0s)
+[263/337] pkustk04       n=55590    cu=592.368 Auto= 76.176(hash  ) Ocn= 17.036 opSp=129.595 HSMU= 72.762 bhSp=  119.7 dense=DNF(big) cublas=DNF(big) (34.2s)
+[264/337] pkustk05       n=37164    cu=  9.031 Auto=   3.18(hash  ) Ocn=  2.206 opSp=  3.704 HSMU=  4.065 bhSp=  8.457 dense= 11678.4 cublas= 2980.53 (59.0s)
+[265/337] pkustk06       n=43164    cu= 10.534 Auto=   3.55(hash  ) Ocn=  2.539 opSp=  5.396 HSMU=  4.359 bhSp=  9.051 dense= 18255.0 cublas= 4675.81 (78.3s)
+[266/337] pkustk07       n=16860    cu= 22.506 Auto= 35.232(merge3(回退)) Ocn=  3.737 opSp=  6.357 HSMU=  8.278 bhSp= 15.826 dense= 1103.47 cublas=  279.91 (38.5s)
+[267/337] pkustk08       n=22209    cu=355.723 Auto= 47.014(merge3(回退)) Ocn=  4.706 opSp=  9.359 HSMU= 10.795 bhSp= 20.053 dense= 2522.07 cublas= 666.905 (50.6s)
+[268/337] pkustk09       n=33960    cu=   6.48 Auto=  1.735(hash  ) Ocn=  1.365 opSp=  3.132 HSMU=  2.554 bhSp=  4.444 dense= 8908.21 cublas= 2224.62 (45.9s)
+[269/337] pkustk10       n=80676    cu= 15.436 Auto=  4.223(hash  ) Ocn=  2.927 opSp=  5.454 HSMU=  4.774 bhSp=  9.164 dense=DNF(big) cublas=DNF(big) (23.6s)
+[270/337] pkustk11       n=87804    cu= 20.473 Auto=  6.769(hash  ) Ocn=  4.491 opSp=  7.606 HSMU=   7.88 bhSp= 16.589 dense=DNF(big) cublas=DNF(big) (26.4s)
+[271/337] pkustk12       n=94653    cu=    DNF Auto=182.399(hash  ) Ocn= 60.427 opSp=686.313 HSMU=202.463 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (52.8s)
+[272/337] pkustk13       n=94893    cu=351.011 Auto= 14.826(hash  ) Ocn=  7.805 opSp= 11.175 HSMU= 12.433 bhSp= 28.528 dense=DNF(big) cublas=DNF(big) (29.8s)
+[273/337] pkustk14       n=151926   cu=1269.742 Auto=174.416(merge3(回退)) Ocn= 15.736 opSp=  26.26 HSMU=  29.88 bhSp= 64.266 dense=DNF(big) cublas=DNF(big) (53.7s)
+[274/337] pli            n=22695    cu=    7.0 Auto=  3.326(hash  ) Ocn=  2.178 opSp=  5.162 HSMU=  3.531 bhSp=  6.811 dense= 2689.34 cublas= 708.378 (36.0s)
+[275/337] poisson3Db     n=85623    cu=  11.22 Auto=  4.123(hash  ) Ocn=  2.468 opSp=  3.955 HSMU=   5.23 bhSp= 14.275 dense=DNF(big) cublas=DNF(big) (29.9s)
+[276/337] pre2           n=659033   cu= 63.207 Auto=       (?     ) Ocn= 12.978 opSp=  43.87 HSMU= 52.497 bhSp=116.105 dense=DNF(big) cublas=DNF(big) (56.5s)
+[277/337] pwtk           n=217918   cu=399.327 Auto=  8.396(hash  ) Ocn=  6.904 opSp=  9.091 HSMU= 10.944 bhSp= 25.261 dense=DNF(big) cublas=DNF(big) (53.9s)
+[278/337] raefsky3       n=21200    cu=  5.693 Auto=  1.137(hash  ) Ocn=   1.31 opSp=  3.351 HSMU=  2.391 bhSp=  3.762 dense= 2172.97 cublas= 516.704 (34.8s)
+[279/337] raefsky4       n=19779    cu=  6.246 Auto=  1.907(hash  ) Ocn=  1.711 opSp=  3.017 HSMU=  2.952 bhSp=  6.605 dense= 1786.47 cublas= 467.357 (33.9s)
+[280/337] rajat16        n=94294    cu=    DNF Auto=       (?     ) Ocn= 47.301 opSp=    DNF HSMU= 60.819 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (186.7s)
+[281/337] rajat17        n=94294    cu=    DNF Auto=       (?     ) Ocn= 47.509 opSp=    DNF HSMU= 59.589 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (186.4s)
+[282/337] rajat18        n=94294    cu=    DNF Auto=       (?     ) Ocn= 42.544 opSp=    DNF HSMU= 55.138 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (187.2s)
+[283/337] rajat20        n=86916    cu=    DNF Auto=       (?     ) Ocn= 36.845 opSp=    DNF HSMU= 56.409 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (199.3s)
+[284/337] rajat25        n=87190    cu=    DNF Auto=       (?     ) Ocn= 37.662 opSp=    DNF HSMU= 56.493 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (196.1s)
+[285/337] rajat28        n=87190    cu=    DNF Auto=       (?     ) Ocn= 37.484 opSp=    DNF HSMU= 55.919 bhSp=    DNF dense=DNF(big) cublas=DNF(big) (193.9s)
+[286/337] rajat31        n=4690002   cu=    DNF Auto= 42.073(hash  ) Ocn=  6.244 opSp=  6.381 HSMU= 32.613 bhSp=144.309 dense=DNF(big) cublas=DNF(big) (120.7s)
+[287/337] ramage02       n=16830    cu=342.411 Auto= 34.933(merge3(回退)) Ocn=  3.899 opSp=  8.352 HSMU=  9.398 bhSp= 18.502 dense= 1095.94 cublas= 282.451 (39.9s)
+[288/337] rgg_n_2_19_s0  n=524288   cu=  6.454 Auto=  7.049(hash  ) Ocn=  2.368 opSp=  4.299 HSMU=  6.619 bhSp= 27.315 dense=DNF(big) cublas=DNF(big) (26.8s)
+[289/337] rgg_n_2_20_s0  n=1048576   cu= 14.198 Auto= 13.839(hash  ) Ocn=  4.623 opSp=  8.213 HSMU= 12.472 bhSp= 53.906 dense=DNF(big) cublas=DNF(big) (39.9s)
+[290/337] rgg_n_2_21_s0  n=2097152   cu=162.629 Auto= 27.767(hash  ) Ocn=  9.675 opSp= 16.226 HSMU= 25.511 bhSp=111.221 dense=DNF(big) cublas=DNF(big) (71.4s)
+[291/337] rgg_n_2_22_s0  n=4194304   cu=518.805 Auto= 55.872(hash  ) Ocn= 20.471 opSp= 31.077 HSMU= 50.362 bhSp=227.063 dense=DNF(big) cublas=DNF(big) (136.7s)
+[292/337] rma10          n=46835    cu=  9.863 Auto=   2.76(hash  ) Ocn=  2.063 opSp=  4.442 HSMU=  4.027 bhSp=  7.747 dense= 23525.9 cublas= 6127.49 (101.9s)
+[293/337] road_central   n=14081816   cu=    DNF Auto=132.607(hash  ) Ocn=  8.895 opSp=  9.227 HSMU=  40.29 bhSp=379.882 dense=DNF(big) cublas=DNF(big) (98.6s)
+[294/337] road_usa       n=23947347   cu=    DNF Auto=       (?     ) Ocn= 11.946 opSp=    DNF HSMU= 65.096 bhSp=609.963 dense=DNF(big) cublas=DNF(big) (148.5s)
+[295/337] s3dkq4m2       n=90449    cu= 16.724 Auto=  4.604(hash  ) Ocn=  2.766 opSp=   4.12 HSMU=  4.923 bhSp=  9.056 dense=DNF(big) cublas=DNF(big) (29.9s)
+[296/337] s3dkt3m2       n=90449    cu= 14.908 Auto=  2.686(hash  ) Ocn=  2.217 opSp=   4.04 HSMU=  3.492 bhSp=  7.507 dense=DNF(big) cublas=DNF(big) (26.2s)
+[297/337] ship_001       n=34920    cu=468.585 Auto=  64.18(merge3(回退)) Ocn=  5.841 opSp= 11.676 HSMU=  12.77 bhSp= 26.257 dense= 9724.56 cublas= 2424.62 (93.1s)
+[298/337] ship_003       n=121728   cu=369.949 Auto=   9.16(hash  ) Ocn=  6.598 opSp= 10.419 HSMU= 11.233 bhSp= 24.525 dense=DNF(big) cublas=DNF(big) (37.4s)
+[299/337] shipsec1       n=140874   cu=122.644 Auto=  6.882(hash  ) Ocn=  5.083 opSp=  8.887 HSMU=  8.707 bhSp=  19.18 dense=DNF(big) cublas=DNF(big) (35.8s)
+[300/337] shipsec5       n=179860   cu=379.906 Auto=  8.861(hash  ) Ocn=  6.495 opSp= 11.997 HSMU= 11.379 bhSp=  22.94 dense=DNF(big) cublas=DNF(big) (41.9s)
+[301/337] shipsec8       n=114919   cu= 24.358 Auto=  6.319(hash  ) Ocn=  4.694 opSp=  7.627 HSMU=   8.29 bhSp=  16.37 dense=DNF(big) cublas=DNF(big) (34.6s)
+[302/337] sinc18         n=16428    cu=  9.975 Auto= 15.917(hash  ) Ocn=  2.004 opSp= 20.349 HSMU= 20.408 bhSp=  29.34 dense= 1023.03 cublas= 260.498 (76.2s)
+[303/337] sme3Da         n=12504    cu=  6.722 Auto=  3.854(hash  ) Ocn=  1.852 opSp=  3.727 HSMU=  3.749 bhSp=   7.29 dense= 449.693 cublas= 113.056 (31.4s)
+[304/337] sme3Db         n=29067    cu= 14.126 Auto=  27.22(merge3(回退)) Ocn=  3.551 opSp=  6.408 HSMU=   6.86 bhSp= 14.905 dense= 5614.95 cublas=  1478.4 (66.5s)
+[305/337] sme3Dc         n=42930    cu=  22.37 Auto= 41.284(merge3(回退)) Ocn=  5.266 opSp=  8.718 HSMU= 10.233 bhSp= 19.239 dense= 18120.3 cublas= 4696.66 (115.1s)
+[306/337] soc-Slashdot0811 n=77360    cu= 17.431 Auto=376.069(merge3(回退)) Ocn=   8.28 opSp= 99.312 HSMU=  24.22 bhSp=180.929 dense=DNF(big) cublas=DNF(big) (27.0s)
+[307/337] soc-Slashdot0902 n=82168    cu= 18.065 Auto=395.258(merge3(回退)) Ocn=  8.597 opSp=107.694 HSMU= 25.803 bhSp=212.336 dense=DNF(big) cublas=DNF(big) (27.2s)
+[308/337] sparsine       n=50000    cu=  7.544 Auto=  7.727(merge3(回退)) Ocn=   2.05 opSp=  3.567 HSMU=  4.498 bhSp= 11.706 dense= 28393.7 cublas= 7215.17 (118.1s)
+[309/337] srb1           n=54924    cu= 11.247 Auto=  2.603(hash  ) Ocn=  2.029 opSp=  3.573 HSMU=  3.675 bhSp=  7.857 dense=DNF(big) cublas=DNF(big) (19.5s)
+[310/337] std1_Jac2      n=21982    cu=   9.43 Auto= 36.641(merge3(回退)) Ocn=  1.871 opSp=  5.907 HSMU=   8.14 bhSp= 26.977 dense= 2436.42 cublas= 630.271 (44.3s)
+[311/337] std1_Jac3      n=21982    cu= 14.015 Auto= 47.234(merge3(回退)) Ocn=  2.306 opSp=   8.39 HSMU=  9.489 bhSp= 31.203 dense= 2438.22 cublas= 626.872 (48.0s)
+[312/337] std1_Jac3_db   n=21982    cu=  4.148 Auto=  2.091(hash  ) Ocn=  0.922 opSp=  2.294 HSMU=  2.872 bhSp=  6.845 dense= 2436.31 cublas= 628.304 (28.6s)
+[313/337] t3dh           n=79171    cu= 17.836 Auto=  6.265(hash  ) Ocn=   4.75 opSp=  6.778 HSMU=  6.961 bhSp= 13.409 dense=DNF(big) cublas=DNF(big) (30.7s)
+[314/337] t3dh_a         n=79171    cu=  18.71 Auto=   6.24(hash  ) Ocn=  4.767 opSp=  6.937 HSMU=  6.706 bhSp= 14.424 dense=DNF(big) cublas=DNF(big) (29.1s)
+[315/337] t3dh_e         n=79171    cu=  18.97 Auto=   6.26(hash  ) Ocn=  4.733 opSp=   6.44 HSMU=  6.812 bhSp= 13.311 dense=DNF(big) cublas=DNF(big) (29.1s)
+[316/337] thermal2       n=1228045   cu=  4.143 Auto= 12.477(hash  ) Ocn=  2.091 opSp=   6.44 HSMU=  5.986 bhSp=  42.14 dense=DNF(big) cublas=DNF(big) (44.1s)
+[317/337] thread         n=29736    cu=481.306 Auto= 55.097(merge3(回退)) Ocn=  6.077 opSp= 12.704 HSMU= 12.677 bhSp= 26.416 dense=  5968.2 cublas= 1497.93 (84.5s)
+[318/337] torso1         n=116158   cu=    DNF Auto=463.542(hash  ) Ocn= 88.411 opSp=236.079 HSMU=433.422 bhSp=298.866 dense=DNF(big) cublas=DNF(big) (66.4s)
+[319/337] torso3         n=259156   cu= 11.029 Auto=  3.765(hash  ) Ocn=  1.955 opSp=  3.477 HSMU=  4.244 bhSp= 16.807 dense=DNF(big) cublas=DNF(big) (38.2s)
+[320/337] trdheim        n=22098    cu=  8.457 Auto=  2.739(hash  ) Ocn=   2.06 opSp=  3.234 HSMU=  3.919 bhSp=  6.533 dense= 2494.42 cublas= 638.313 (32.5s)
+[321/337] troll          n=213453   cu=447.526 Auto= 11.751(hash  ) Ocn=  8.079 opSp= 12.153 HSMU= 13.483 bhSp= 30.783 dense=DNF(big) cublas=DNF(big) (42.3s)
+[322/337] tsyl201        n=20685    cu= 16.529 Auto=  4.477(hash  ) Ocn=  4.193 opSp=  5.488 HSMU=  5.253 bhSp=  8.685 dense=  2047.3 cublas= 530.692 (34.7s)
+[323/337] vanbody        n=47072    cu= 11.091 Auto=   2.85(hash  ) Ocn=  2.097 opSp=  3.229 HSMU=  4.062 bhSp=  7.905 dense= 23638.1 cublas=  5444.8 (93.6s)
+[324/337] vsp_bcsstk30_500sep_10in_1Kout n=58348    cu= 22.092 Auto=  7.959(hash  ) Ocn=   5.16 opSp=  8.671 HSMU=  11.63 bhSp= 16.904 dense=DNF(big) cublas=DNF(big) (22.9s)
+[325/337] vsp_befref_fxm_2_4_air02 n=14109    cu= 11.915 Auto=  9.429(hash  ) Ocn=  2.723 opSp= 55.161 HSMU=  5.598 bhSp= 36.748 dense= 655.165 cublas=  173.91 (56.1s)
+[326/337] vsp_model1_crew1_cr42_south31 n=45101    cu=381.345 Auto=       (?     ) Ocn= 14.858 opSp=1771.202 HSMU=  26.13 bhSp=    DNF dense= 20981.5 cublas= 5467.36 (498.5s)
+[327/337] vsp_msc10848_300sep_100in_1Kout n=21996    cu= 23.518 Auto= 40.571(merge3(回退)) Ocn=  4.432 opSp=  12.91 HSMU= 10.884 bhSp= 22.262 dense=  2442.8 cublas=  612.99 (44.1s)
+[328/337] vsp_south31_slptsk n=39668    cu=359.109 Auto=       (?     ) Ocn= 13.045 opSp=1772.168 HSMU= 25.144 bhSp=    DNF dense= 14303.7 cublas= 3662.43 (469.9s)
+[329/337] water_tank     n=60740    cu=  8.263 Auto=  1.797(hash  ) Ocn=  1.605 opSp=  3.072 HSMU=  2.679 bhSp=  5.846 dense=DNF(big) cublas=DNF(big) (25.3s)
+[330/337] wb-edu         n=9845725   cu=    DNF Auto=       (?     ) Ocn=  1.605 opSp= 92.829 HSMU=224.906 bhSp=2720.04 dense=DNF(big) cublas=DNF(big) (196.2s)
+[331/337] web-BerkStan   n=685230   cu= 23.556 Auto= 21.783(hash  ) Ocn=  6.727 opSp= 10.042 HSMU= 15.708 bhSp= 60.467 dense=DNF(big) cublas=DNF(big) (38.8s)
+[332/337] web-Google     n=916428   cu=  7.766 Auto= 11.857(hash  ) Ocn=  3.103 opSp=  5.014 HSMU=  9.805 bhSp= 46.765 dense=DNF(big) cublas=DNF(big) (33.7s)
+[333/337] web-NotreDame  n=325729   cu=    DNF Auto=489.093(merge3(回退)) Ocn=  4.386 opSp=  28.53 HSMU= 11.829 bhSp= 61.972 dense=DNF(big) cublas=DNF(big) (24.1s)
+[334/337] webbase-1M     n=1000005   cu=   9.72 Auto=409.346(merge3(回退)) Ocn= 16.178 opSp= 14.039 HSMU= 46.571 bhSp= 91.268 dense=DNF(big) cublas=DNF(big) (33.5s)
+[335/337] windscreen     n=22692    cu=  6.847 Auto=  1.776(hash  ) Ocn=  1.539 opSp=  3.061 HSMU=  2.763 bhSp=  4.805 dense=  2676.7 cublas= 684.904 (38.7s)
+[336/337] x104           n=108384   cu=674.838 Auto= 15.987(hash  ) Ocn=  9.285 opSp=  14.68 HSMU= 16.631 bhSp= 35.834 dense=DNF(big) cublas=DNF(big) (48.5s)
+[337/337] xenon2         n=157464   cu= 13.853 Auto=  2.962(hash  ) Ocn=  1.613 opSp=  3.933 HSMU=  3.572 bhSp=  10.65 dense=DNF(big) cublas=DNF(big) (35.3s)
+
+完成 → compare/ocean337/methods_cmp.csv
+
+=== 几何均值(ms) ===
+  cu          31.587
+  Auto        19.894
+  Ocean        6.486
+  opSparse    17.726
+  HSMU        14.630
+  bhSparse    42.202
+  dense     2469.402
+  cublas     622.751
+
+=== Auto 选择(共 292 阵)===  hash 225 / merge3 67
+
+=== Auto vs cuSPARSE:赢 176 / 输 85,几何均值(Auto/cuSPARSE) 0.526× ===
+  name                   n       C_nnz  cuSPARSE      Auto    ratio
+  c-71               76638    52538716    11.059  1239.988  112.12×
+  circuit_4          80209    87091024    14.994   985.700   65.74×
+  c-62               41731    38084477     8.080   522.844   64.71×
+  c-62ghs            41731    38084477     8.421   526.350   62.50×
+  bloweya            30004   100360010    15.811   868.625   54.94×
+  bloweybl           30003   100259987    15.603   842.240   53.98×
+  c-58               37595    40461781     9.942   484.392   48.72×
+  webbase-1M       1000005    51111996     9.720   409.346   42.11×
+  a5esindl           60008   175505062    26.848  1041.697   38.80×
+  c-66               49989    41844075     9.972   293.194   29.40×
+  HTC_336_9129      226340    73626380    37.352  1080.665   28.93×
+  HTC_336_4438      226340    83300312    43.911  1065.954   24.28×
+  soc-Slashdot0902   82168    81362487    18.065   395.258   21.88×
+  soc-Slashdot0811   77360    78851659    17.431   376.069   21.57×
+  a2nnsnsl           80016   158275840    28.201   573.661   20.34×
+  ... 另有 70 个
+
+=== Auto vs Ocean:赢 5 / 输 287,几何均值(Auto/Ocean) 4.040× ===
+  name                   n       C_nnz     Ocean      Auto    ratio
+  bloweybl           30003   100259987     3.638   842.240  231.51×
+  bloweya            30004   100360010     4.525   868.625  191.96×
+  c-71               76638    52538716     8.385  1239.988  147.88×
+  brainpc2           27607   190743619     9.137  1261.005  138.01×
+  web-NotreDame     325729    16801350     4.386   489.093  111.51×
+  circuit_4          80209    87091024     9.604   985.700  102.63×
+  a5esindl           60008   175505062    10.252  1041.697  101.61×
+  c-62ghs            41731    38084477     5.225   526.350  100.74×
+  c-62               41731    38084477     5.199   522.844  100.57×
+  c-58               37595    40461781     5.621   484.392   86.18×
+  HTC_336_9129      226340    73626380    13.275  1080.665   81.41×
+  c-57               37833   177766591    14.882  1207.143   81.11×
+  lowThrust_13       18476    52354998     2.955   227.488   76.98×
+  TSOPF_FS_b39_c7    28216   199299980    20.888  1572.811   75.30×
+  HTC_336_4438      226340    83300312    14.337  1065.954   74.35×
+  ... 另有 272 个
+
+=== Auto vs opSparse:赢 115 / 输 176,几何均值(Auto/opSparse) 1.362× ===
+  name                   n       C_nnz  opSparse      Auto    ratio
+  webbase-1M       1000005    51111996    14.039   409.346   29.16×
+  cnr-2000          325557    34174066     9.918   221.023   22.29×
+  eu-2005           862664   284177131    66.773  1275.631   19.10×
+  web-NotreDame     325729    16801350    28.530   489.093   17.14×
+  germany_osm     11548845    42720261     5.832    99.651   17.09×
+  hugetrace-00010 12057441    74977771     6.869   111.819   16.28×
+  hugetrace-00020 16002413    99652167     9.151   148.933   16.28×
+  hugetric-00020   7122792    44609736     4.530    67.583   14.92×
+  road_central    14081816    69990710     9.227   132.607   14.37×
+  hugetric-00010   6592765    41276239     4.486    62.238   13.87×
+  c-71               76638    52538716   110.390  1239.988   11.23×
+  ohne2             181343    72432047    27.845   309.763   11.12×
+  c-62ghs            41731    38084477    52.676   526.350    9.99×
+  c-62               41731    38084477    52.527   522.844    9.95×
+  circuit_4          80209    87091024   116.879   985.700    8.43×
+  ... 另有 161 个
+
+=== Auto vs HSMU:赢 144 / 输 148,几何均值(Auto/HSMU) 1.796× ===
+  name                   n       C_nnz      HSMU      Auto    ratio
+  bloweybl           30003   100259987     7.245   842.240  116.25×
+  brainpc2           27607   190743619    13.925  1261.005   90.56×
+  bloweya            30004   100360010     9.989   868.625   86.96×
+  c-71               76638    52538716    15.849  1239.988   78.24×
+  a5esindl           60008   175505062    16.928  1041.697   61.54×
+  c-57               37833   177766591    22.157  1207.143   54.48×
+  web-NotreDame     325729    16801350    11.829   489.093   41.35×
+  c-62               41731    38084477    12.810   522.844   40.82×
+  c-62ghs            41731    38084477    13.397   526.350   39.29×
+  lowThrust_8        17702    48095374     5.705   221.370   38.80×
+  TSOPF_FS_b39_c7    28216   199299980    40.895  1572.811   38.46×
+  lowThrust_11       18368    51750248     6.343   241.552   38.08×
+  lowThrust_9        18044    49951688     5.881   220.260   37.45×
+  lowThrust_10       18260    51144876     6.227   219.710   35.28×
+  HTC_336_9129      226340    73626380    31.849  1080.665   33.93×
+  ... 另有 133 个
+
+=== Auto vs bhSparse:赢 228 / 输 63,几何均值(Auto/bhSparse) 0.569× ===
+  name                   n       C_nnz  bhSparse      Auto    ratio
+  web-NotreDame     325729    16801350    61.972   489.093    7.89×
+  c-71               76638    52538716   158.143  1239.988    7.84×
+  circuit_4          80209    87091024   170.038   985.700    5.80×
+  bloweybl           30003   100259987   151.050   842.240    5.58×
+  c-58               37595    40461781    88.644   484.392    5.46×
+  c-62               41731    38084477    96.406   522.844    5.42×
+  c-62ghs            41731    38084477   101.367   526.350    5.19×
+  HTC_336_9129      226340    73626380   211.355  1080.665    5.11×
+  eu-2005           862664   284177131   267.879  1275.631    4.76×
+  webbase-1M       1000005    51111996    91.268   409.346    4.49×
+  HTC_336_4438      226340    83300312   240.517  1065.954    4.43×
+  cnr-2000          325557    34174066    50.401   221.023    4.39×
+  bloweya            30004   100360010   223.141   868.625    3.89×
+  ohne2             181343    72432047    82.546   309.763    3.75×
+  c-64b              51035   155006041   324.039  1120.518    3.46×
+  ... 另有 48 个
+
+=== Auto vs dense:赢 123 / 输 1,几何均值(Auto/dense) 0.006× ===
+  name                   n       C_nnz     dense      Auto    ratio
+  exdata_1            6001    11275501    54.981    76.395    1.39×
+
+=== Auto vs cuBLAS:赢 119 / 输 4,几何均值(Auto/cuBLAS) 0.023× ===
+  name                   n       C_nnz    cuBLAS      Auto    ratio
+  exdata_1            6001    11275501    17.521    76.395    4.36×
+  nd3k                9000    18491738    45.282   116.934    2.58×
+  TSOPF_FS_b39_c7    28216   199299980  1292.830  1572.811    1.22×
+  fp                  7548    12283169    28.231    31.528    1.12×
