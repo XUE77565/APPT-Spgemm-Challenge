@@ -123,6 +123,7 @@ __global__ void mh_merge_kernel(
     int A_rows,
     const unsigned int *b_mh,           // [B_rows * MH_M] uint32 from Phase 1
     const int *row_flop,                // [A_rows] 每行精确乘积数(精确上界,封顶 MinHash 高估)
+    double expand,                      // EST_EXPAND(运行时:小阵 1.4 免重试 / 大阵 1.15 省内存)
     int *est_nnz)                       // [A_rows] output
 {
     int row = blockIdx.x;
@@ -178,7 +179,7 @@ __global__ void mh_merge_kernel(
             // 首版修正漏了因子 m(低 EST 128 倍,exdata_1 est 254k vs C 11.3M)——都已修(2026-08-26)。
             E = (double)MH_M * MH_M * 0x100000000LL / sum_min;
         }
-        int temp = (int)(E * EST_EXPAND);
+        int temp = (int)(E * expand);
         if (temp < 1) temp = 1;
         int est;
         if (temp <= EST_ULTRA_THR) {                                      // ultra:线性 kernel,est 保留紧 temp
@@ -1018,9 +1019,15 @@ static void hash_product(
         });
         int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
         int smem_p2 = MH_M * sizeof(unsigned int);   // [MH_M] uint32(smem_merge)
+        // 自适应 EXPAND(2026-08-26):小计算量矩阵是延迟域 —— retry 的 ~0.7ms 固定延迟占比大,
+        // 保留 1.4 松弛让欠估尾部消失;大矩阵是内存域 —— 1.15 紧 est,retry 摊薄可忽略。
+        // (bcsstk30 教训:1.15 下 143 行欠估 → retry 0.74ms = 总预算 30%,1.76× 落后主因)
+        double est_expand = 1.15;   // EXPAND 扫描裁决(1.15/1.20/1.25/1.30/1.40 → 9.03/9.46/9.50/10.44/9.64ms):紧 est 完胜,retry-vs-compact 零和
+        if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
+        dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
         prof("mh_merge", [&]{
             mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                dA_rp, dA_ci, A_rows, d_mh, d_flop, d_est);
+                dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est);
             CHECK_CUDA(cudaGetLastError());
         });
         dev_free(d_mh);
