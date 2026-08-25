@@ -691,6 +691,14 @@ __global__ void hash_ultra_kernel(
     }
     long long base = row_off[i];
     long long cap = row_off[i + 1] - row_off[i];   // SAFETY:est 槽位守卫(欠估行防越界砸下一行)
+    // 插入排序(u_cnt ≤ CAP=32,单线程 ~512 次比较):输出有序 → compact 走纯 copy,
+    // 免去每行一个 BlockRadixSort CTA(germany_osm 11.5M ultra 行 × csort = 62ms 教训)
+    for (int t = 1; t < u_cnt; t++) {
+        int c = u_col[t]; double v = u_val[t];
+        int s = t - 1;
+        while (s >= 0 && u_col[s] > c) { u_col[s + 1] = u_col[s]; u_val[s + 1] = u_val[s]; s--; }
+        u_col[s + 1] = c; u_val[s + 1] = v;
+    }
     int out = 0;
     for (int t = 0; t < u_cnt; t++) {
         if (out >= cap) {                                    // 欠估 → 记录行交重试
@@ -1565,9 +1573,9 @@ static void hash_product(
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_scr_key, d_scr_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else {
-                // ultra(行≤32,无序):小 config sort
-                launch_csort<64, 1>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
-                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
+                // ultra(行≤32,kernel 内已插入排序):warp copy
+                hash_compact_copy_warp_kernel<<<(n + 7) / 8, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());
             }
         }
         if (d_retry_n > 0) {   // 行级重试的行:从重试区(已分段排序)拷到 CSR
