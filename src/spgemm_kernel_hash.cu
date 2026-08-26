@@ -449,12 +449,136 @@ __global__ void hash_subwarp8_kernel(
     }
 }
 
+
+#define BATCH_HT 128        // per-warp 表槽(est≤64 → 2× 余量)
+#define BATCH_WPB 8         // warp 数/CTA(256 线程)
+// ===================== 方案1: 预排序二分寻址 (HSMU HPCA'25 思路) =====================
+// 两阶段: symbolic 收集列集合并排序 -> numeric 二分定位 + 直接 atomicAdd
+// 零 CAS(位置由二分确定), 零冲突(列集合唯一), 输出天然有序
+
+__global__ void bsearch_symbolic_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
+    const int *bucket_rows, int n_in_bucket,
+    const long long *row_off, const int *est,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag,
+    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+{
+    int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    int lane = threadIdx.x & 31;
+    if (warp >= n_in_bucket) return;
+    int i = bucket_rows[warp];
+
+    __shared__ int bsmem[BATCH_WPB][4 * BATCH_HT];
+    __shared__ int w_cnt[BATCH_WPB];
+    int *t_col = bsmem[warp & (BATCH_WPB - 1)];
+    double *t_val = (double*)(bsmem[warp & (BATCH_WPB - 1)] + BATCH_HT);
+    int *pack_col = bsmem[warp & (BATCH_WPB - 1)] + 2 * BATCH_HT;
+    int *pack_slot = bsmem[warp & (BATCH_WPB - 1)] + 3 * BATCH_HT;
+
+    if (lane == 0) w_cnt[warp & (BATCH_WPB - 1)] = 0;
+    for (int s = lane; s < BATCH_HT; s += 32) { t_col[s] = -1; t_val[s] = 0.0; }
+    __syncwarp();
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    for (int p = rs; p < re; p++) {
+        int k = A_col_idx[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            unsigned slot = ((unsigned)(j * 2654435761u)) & (BATCH_HT - 1);
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&t_col[slot], -1, j);
+                if (old == -1 || old == j) break;
+                slot = (slot + 1) & (BATCH_HT - 1);
+                if (++probes >= BATCH_HT) { atomicExch(overflow_flag, 1); break; }
+            }
+        }
+    }
+    __syncwarp();
+
+    __shared__ int w_cnt2[BATCH_WPB];
+    if (lane == 0) w_cnt2[warp & (BATCH_WPB - 1)] = 0;
+    __syncwarp();
+    long long base = row_off[i];
+    int cap = est[i];
+    for (int s = lane; s < BATCH_HT; s += 32) {
+        int c = t_col[s];
+        if (c >= 0) {
+            int pos = atomicAdd(&w_cnt2[warp & (BATCH_WPB - 1)], 1);
+            if (pos < BATCH_HT) { pack_col[pos] = c; pack_slot[pos] = s; }
+        }
+    }
+    __syncwarp();
+    int n = w_cnt2[warp & (BATCH_WPB - 1)];
+    if (n > BATCH_HT) n = BATCH_HT;
+    for (int idx = lane; idx < n; idx += 32) {
+        int c = pack_col[idx];
+        int rank = 0;
+        for (int m = 0; m < n; m++) if (pack_col[m] < c) rank++;
+        if (rank >= cap) { atomicExch(overflow_flag, 1); continue; }
+        tmp_key[base + rank] = ((unsigned long long)i << 32) | (unsigned int)c;
+        tmp_val[base + rank] = 0.0;
+    }
+    __syncwarp();
+    if (lane == 0) {
+        if (n > cap && !atomicExch(&row_ovf[i], 1)) { int p2 = atomicAdd(ovf_cnt, 1); ovf_rows[p2] = i; }
+        row_nnz[i] = (n <= cap) ? n : cap;
+    }
+}
+
+__global__ void bsearch_numeric_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
+    const int *bucket_rows, int n_in_bucket,
+    const long long *row_off, const int *row_nnz,
+    unsigned long long *tmp_key, double *tmp_val)
+{
+    int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    int lane = threadIdx.x & 31;
+    if (warp >= n_in_bucket) return;
+    int i = bucket_rows[warp];
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    long long base = row_off[i];
+    int nnz = row_nnz[i];
+
+    __shared__ int scol[BATCH_WPB][BATCH_HT];
+    for (int s = lane; s < nnz; s += 32) {
+        scol[warp & (BATCH_WPB - 1)][s] = (int)(tmp_key[base + s] & 0xffffffffu);
+    }
+    __syncwarp();
+    int *cols = scol[warp & (BATCH_WPB - 1)];
+
+    for (int p = rs; p < re; p++) {
+        int k = A_col_idx[p];
+        double a = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            double v = a * B_val[q];
+            int lo = 0, hi = nnz - 1, pos = -1;
+            while (lo <= hi) {
+                int mid = (lo + hi) >> 1;
+                if (cols[mid] == j) { pos = mid; break; }
+                else if (cols[mid] < j) lo = mid + 1;
+                else hi = mid - 1;
+            }
+            if (pos >= 0) atomicAdd(&tmp_val[base + pos], v);
+        }
+    }
+}
+
 // ===================== 小行批量 kernel(2026-08-26,Phase 2 主杠杆) =====================
 // est ≤ 64 的行(bin0-1):warp-per-row + SMEM warp 私有表(128 槽,2× 余量)+ 融合有序 extract。
 // 治"1 CTA/行×256 线程伺候 ~6 个积"的每行固定开销(333SP 型 accumulate 55% 差距源);
 // 有序直写 tmp → compact 阶段走 copy 免排序。设计:`inno/hash_batched_kernel_design.md`。
-#define BATCH_HT 128        // per-warp 表槽(est≤64 → 2× 余量)
-#define BATCH_WPB 8         // warp 数/CTA(256 线程)
 
 __global__ void hash_spa_batched_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
@@ -1428,7 +1552,10 @@ static void hash_product(
         CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
         CHECK_CUDA(cudaMemset(d_ovf_cnt, 0, sizeof(int)));
         CHECK_CUDA(cudaMemset(d_row_ovf, 0, (size_t)A_rows * sizeof(int)));
-        // 多 stream per-bin(HASH_NSTREAMS env 调优,0=单流对照;对标 Ocean 20-stream)
+        static int g_bsearch_s = -1;
+    if (g_bsearch_s < 0) { const char *e = getenv("BSEARCH"); g_bsearch_s = (e && *e && atoi(e) > 0) ? 1 : 0; }
+    const bool g_bsearch = g_bsearch_s;
+    // 多 stream per-bin(HASH_NSTREAMS env 调优,0=单流对照;对标 Ocean 20-stream)
         static int g_nstream = -2;
         if (g_nstream == -2) {
             const char *e = getenv("HASH_NSTREAMS");
@@ -1453,6 +1580,15 @@ static void hash_product(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                     d_ovf_rows, d_ovf_cnt, d_row_ovf);
+            } else if (bi == 0 && g_bsearch) {
+                // 方案1: 预排序二分寻址(HSMU 思路): symbolic 排序列 + numeric 二分定位
+                bsearch_symbolic_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
+                    dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                    rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
+                    d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                bsearch_numeric_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
+                    dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                    rows_ptr, n, d_off, d_row_nnz, d_tmp_key, d_tmp_val);
             } else if (bi == 0) {
                 // 小行批量(est≤64 且行长≤32):warp-per-row + 私有表 + 融合有序 extract(2026-08-26)
                 hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
