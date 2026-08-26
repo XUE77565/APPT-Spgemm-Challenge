@@ -1428,25 +1428,40 @@ static void hash_product(
         CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
         CHECK_CUDA(cudaMemset(d_ovf_cnt, 0, sizeof(int)));
         CHECK_CUDA(cudaMemset(d_row_ovf, 0, (size_t)A_rows * sizeof(int)));
+        // 多 stream per-bin(HASH_NSTREAMS env 调优,0=单流对照;对标 Ocean 20-stream)
+        static int g_nstream = -2;
+        if (g_nstream == -2) {
+            const char *e = getenv("HASH_NSTREAMS");
+            g_nstream = (e && *e) ? atoi(e) : 4;
+            if (g_nstream < 0 || g_nstream > 16) g_nstream = 8;
+        }
+        const bool use_ms = (g_nstream > 0);
+        static cudaStream_t bin_s[16];
+        static bool bin_s_init = false;
+        if (use_ms && !bin_s_init) {
+            for (int i = 0; i < g_nstream; i++) CHECK_CUDA(cudaStreamCreate(&bin_s[i]));
+            bin_s_init = true;
+        }
         for (int bi = 0; bi < N_BINS; bi++) {
+            cudaStream_t cur_s = use_ms ? bin_s[bi % g_nstream] : (cudaStream_t)0;
             int n = h_cnt[bi];
             if (n == 0) continue;
             int *rows_ptr = d_sort + h_off[bi];
             if (bi == N_BINS - 1) {
                 // subwarp8(est≤8):8 线程/行 × 4 行/warp,SMEM 小表 32 slot(方向B 巨型图第二程)
-                hash_subwarp8_kernel<<<(n + 3) / 4, 256>>>(
+                hash_subwarp8_kernel<<<(n + 3) / 4, 256, 0, cur_s>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                     d_ovf_rows, d_ovf_cnt, d_row_ovf);
             } else if (bi == 0) {
                 // 小行批量(est≤64 且行长≤32):warp-per-row + 私有表 + 融合有序 extract(2026-08-26)
-                hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32>>>(
+                hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                     d_ovf_rows, d_ovf_cnt, d_row_ovf);
             } else if (bi == N_BINS - 2) {
                 // ultra(est≤EST_ULTRA_THR):线性,免 hash
-                hash_ultra_kernel<<<(n + 255) / 256, 256>>>(
+                hash_ultra_kernel<<<(n + 255) / 256, 256, 0, cur_s>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                     d_ovf_rows, d_ovf_cnt, d_row_ovf);
@@ -1503,13 +1518,15 @@ static void hash_product(
                         dA_rp, dA_ci, dA_val, rows_ptr, n, ht, PRIV_W, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
                 } else {
-                    hash_spa_kernel<<<n, HASH_BLOCK, smem_flat>>>(
+                    hash_spa_kernel<<<n, HASH_BLOCK, smem_flat, cur_s>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, ht, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf);
                 }
             }
         }
+        if (use_ms)
+            for (int i = 0; i < g_nstream; i++) CHECK_CUDA(cudaStreamSynchronize(bin_s[i]));
         CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));   // D2H 纳入
     });
 
