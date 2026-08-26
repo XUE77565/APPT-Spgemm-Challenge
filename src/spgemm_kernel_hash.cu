@@ -1563,9 +1563,12 @@ static void hash_product(
     if (g_bsearch_s < 0) { const char *e = getenv("BSEARCH"); g_bsearch_s = (e && *e && atoi(e) > 0) ? 1 : 0; }
     const bool g_bsearch = g_bsearch_s;
     // 方案4修正: HYBRID=1 时 value 走全局 L2 原子(学 Ocean HYBRID_HASHMAP)
-    static int g_hybrid_s = -1;
-    if (g_hybrid_s < 0) { const char *e = getenv("HYBRID"); g_hybrid_s = (e && *e && atoi(e) > 0) ? 1 : 0; }
-    const bool g_hybrid = g_hybrid_s;
+    static int g_hybrid_env = -2;
+    if (g_hybrid_env == -2) { const char *e = getenv("HYBRID"); g_hybrid_env = (e && *e) ? atoi(e) : -1; }
+    // 方案4: dup 因子 > 5 时自动开 hybrid(L2 原子吞吐 > SMEM,高 dup 阵受益 5-29%)
+    // 小阵不开(全局池分配 + L2 延退 > 收益);HYBRID=0/1 强制覆盖
+    const bool g_hybrid = (g_hybrid_env >= 0) ? g_hybrid_env
+        : (total_est > 0 && (double)total_flop / total_est > 5.0 && A_rows > 50000);
     // 多 stream per-bin(HASH_NSTREAMS env 调优,0=单流对照;对标 Ocean 20-stream)
         static int g_nstream = -2;
         if (g_nstream == -2) {
