@@ -588,7 +588,8 @@ __global__ void hash_spa_batched_kernel(
     const long long *row_off, const int *est,
     unsigned long long *tmp_key, double *tmp_val,
     int *row_nnz, int *overflow_flag,
-    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+    int *ovf_rows, int *ovf_cnt, int *row_ovf,
+    double *global_val = nullptr)    // HYBRID=1: 全局 value 池(L2 原子,吞吐 > SMEM)
 {
     int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
     int lane = threadIdx.x & 31;
@@ -599,7 +600,13 @@ __global__ void hash_spa_batched_kernel(
     __shared__ int bsmem[BATCH_WPB][4 * BATCH_HT];
     __shared__ int w_cnt[BATCH_WPB];
     int *t_col = bsmem[warp & (BATCH_WPB - 1)];
-    double *t_val = (double*)(bsmem[warp & (BATCH_WPB - 1)] + BATCH_HT);
+    // 方案4修正: HYBRID 模式下 value 在全局(L2 原子吞吐高,CAS 仍在 SMEM)
+    double *t_val;
+    if (global_val) {
+        t_val = global_val + (size_t)(warp) * BATCH_HT;  // 全局池,每 warp 一段
+    } else {
+        t_val = (double*)(bsmem[warp & (BATCH_WPB - 1)] + BATCH_HT);
+    }
     int *pack_col = bsmem[warp & (BATCH_WPB - 1)] + 2 * BATCH_HT;
     int *pack_slot = bsmem[warp & (BATCH_WPB - 1)] + 3 * BATCH_HT;
 
@@ -1555,6 +1562,10 @@ static void hash_product(
         static int g_bsearch_s = -1;
     if (g_bsearch_s < 0) { const char *e = getenv("BSEARCH"); g_bsearch_s = (e && *e && atoi(e) > 0) ? 1 : 0; }
     const bool g_bsearch = g_bsearch_s;
+    // 方案4修正: HYBRID=1 时 value 走全局 L2 原子(学 Ocean HYBRID_HASHMAP)
+    static int g_hybrid_s = -1;
+    if (g_hybrid_s < 0) { const char *e = getenv("HYBRID"); g_hybrid_s = (e && *e && atoi(e) > 0) ? 1 : 0; }
+    const bool g_hybrid = g_hybrid_s;
     // 多 stream per-bin(HASH_NSTREAMS env 调优,0=单流对照;对标 Ocean 20-stream)
         static int g_nstream = -2;
         if (g_nstream == -2) {
@@ -1590,11 +1601,16 @@ static void hash_product(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_row_nnz, d_tmp_key, d_tmp_val);
             } else if (bi == 0) {
-                // 小行批量(est≤64 且行长≤32):warp-per-row + 私有表 + 融合有序 extract(2026-08-26)
+                // 小行批量: HYBRID=1 时 value 走全局 L2(Ocean 杀手锏)
+                double *d_hyb_val = nullptr;
+                if (g_hybrid) {
+                    // 全局 value 池: n 行 × BATCH_HT doubles(每 warp 一段)
+                    d_hyb_val = decltype(d_hyb_val)(dev_alloc((size_t)n * BATCH_HT * sizeof(double)));
+                }
                 hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
-                    d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                    d_ovf_rows, d_ovf_cnt, d_row_ovf, d_hyb_val);
             } else if (bi == N_BINS - 2) {
                 // ultra(est≤EST_ULTRA_THR):线性,免 hash
                 hash_ultra_kernel<<<(n + 255) / 256, 256, 0, cur_s>>>(
