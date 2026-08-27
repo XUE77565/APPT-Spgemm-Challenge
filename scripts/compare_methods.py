@@ -103,10 +103,24 @@ def mtx_header(path):
     dens = (nnz / (n * n) * 100.0) if n > 0 else 0.0
     return n, sym, nnz, dens
 
-def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT):
-    """METHOD=method_key 跑 spgemm_test → (compute_only_ms, wall_ms, cnnz, choice) 或 None。"""
-    env = dict(os.environ, USE_MEMPOOL="1", METHOD=method_key,
-               MP_HOST_MB=os.environ.get("MP_HOST_MB", "8192"))  # ocean337 大输出:3Dspectralwave 195M nnz 需 2.35GB(2048 不够)
+def _parse_num(x):
+    try:
+        v = float(x)
+        return v if v > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT, exp_cnnz=None):
+    """METHOD=method_key 跑 spgemm_test → (compute_only_ms, wall_ms, cnnz, choice) 或 None。
+    exp_cnnz: 已知 C_nnz(来自 CSV 旧列)→ 按需定 host pinned arena(鲸鱼阵 D2H>8GB,普通阵 8GB 省每次 ~10s pin)。"""
+    if "MP_HOST_MB" not in os.environ:
+        need_gb = 8192
+        if exp_cnnz is None or exp_cnnz > 300_000_000:   # 空(鲸鱼阵未出过数)或 >300M nnz → D2H 可能 >8GB
+            need_gb = 32768
+        env_extra = {"MP_HOST_MB": str(need_gb)}
+    else:
+        env_extra = {}
+    env = dict(os.environ, USE_MEMPOOL="1", METHOD=method_key, **env_extra)
     try:
         r = subprocess.run([BIN, mtx], capture_output=True, text=True, env=env, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -297,11 +311,11 @@ def main():
             sys.exit(f"--refresh-col 需要已有 {args.out};先跑一次全量")
         rows = list(csv.DictReader(open(args.out)))
         print(f"Refresh 仅 '{col}' 列 × {len(rows)} 阵(DENSE_TIMEOUT={DENSE_TIMEOUT}s)→ {args.out}\n", flush=True)
-        def run_one(c, p, name):
+        def run_one(c, p, name, old_cnnz=None):
             if c == "cu":
                 r = run_spgemm_method(p, "cu"); return (round(r[0], 3) if r else "DNF", {})
             if c == "Auto":
-                r = run_spgemm_method(p, "adaptive")
+                r = run_spgemm_method(p, "adaptive", exp_cnnz=old_cnnz)
                 ex = {}
                 if r: ex["Auto_choice"] = r[3]; ex["cnnz"] = r[2]
                 return (round(r[0], 3) if r else "", ex)
@@ -322,7 +336,7 @@ def main():
             p = find_mtx(r["matrix"])
             if not p:
                 print(f"[{i+1}/{len(rows)}] {r['matrix']}: 未找到", flush=True); continue
-            t0 = time.time(); val, extra = run_one(col, p, r["matrix"])
+            t0 = time.time(); val, extra = run_one(col, p, r["matrix"], old_cnnz=_parse_num(r.get("cnnz")))
             r[col] = val; r.update(extra)
             print(f"[{i+1}/{len(rows)}] {r['matrix']:14} {col}={val!s:<10} ({time.time()-t0:.1f}s)", flush=True)
             with open(args.out, "w", newline="") as fp:    # 增量回写(断点续刷)

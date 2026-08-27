@@ -296,7 +296,8 @@ __global__ void hash_dense_window_kernel(
     unsigned long long *tmp_key, double *tmp_val,
     int *row_nnz, int *overflow_flag,
     int *ovf_rows, int *ovf_cnt, int *row_ovf,
-    const int *bucket_rows /*nullable:bin 行列表;null=矩阵级模式,blockIdx 即行号*/)
+    const int *bucket_rows /*nullable:bin 行列表;null=矩阵级模式,blockIdx 即行号*/,
+    const int *span_lo /*nullable:每行列跨度起点;null=0(矩阵级模式扫全 [0,n))*/)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
@@ -312,9 +313,14 @@ __global__ void hash_dense_window_kernel(
     int cap = est[i];
     int out = 0;
     bool ovf = false;
-    int nw_win = (n + DENSE_MAX_N - 1) / DENSE_MAX_N;
+    // 跨度窗口 v2(docs/24):窗口对准本行【真实列跨度】[span_lo, n)(由 span_kernel 预计算),
+    // 不再从 0 扫到 n —— F2 类带状 FEM(span~3k vs n=71k)从 5 个全窗(99% 空扫)变 1 个紧窗。
+    // 矩阵级模式(span_lo=null)保持扫全 [0,n)。extract 仍窗口升序 → 全局有序契约不变。
+    int lo0 = span_lo ? span_lo[i] : 0;
+    int nw_win = span_lo ? (n - lo0 + DENSE_MAX_N - 1) / DENSE_MAX_N
+                         : (n + DENSE_MAX_N - 1) / DENSE_MAX_N;
     for (int wi = 0; wi < nw_win; wi++) {
-        int c0 = wi * DENSE_MAX_N, c1 = min(c0 + DENSE_MAX_N, n);
+        int c0 = lo0 + wi * DENSE_MAX_N, c1 = min(c0 + DENSE_MAX_N, n);
         int w = c1 - c0;
         for (int j = tid; j < w; j += blockDim.x) { dval[j] = 0.0; dflag[j] = 0; }
         __syncthreads();
@@ -1134,6 +1140,29 @@ __global__ void heavy_seg_kernel(
 }
 
 // ---- 行级重试 kernels(2026-08-26) ----
+// 每行真实列跨度(docs/24 跨度窗口):B(CSR 有序)每行首/末元素即该行最小/最大列 →
+// 行 i 的乘积列集合 ⊆ [min_k ci[rp[k]], max_k ci[rp[k+1]-1]]。O(nnz_row) 两次寻址,免费。
+__global__ void row_span_kernel(
+    const int *A_row_ptr, const int *A_col_idx, int A_rows,
+    const int *B_row_ptr, const int *B_col_idx,
+    int *span_lo, int *span_len)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= A_rows) return;
+    int lo = INT_MAX, hi = -1;
+    for (int p = A_row_ptr[i]; p < A_row_ptr[i + 1]; p++) {
+        int k = A_col_idx[p];
+        int b0 = B_row_ptr[k], b1 = B_row_ptr[k + 1];
+        if (b0 < b1) {
+            int c0 = B_col_idx[b0], c1 = B_col_idx[b1 - 1];
+            if (c0 < lo) lo = c0;
+            if (c1 > hi) hi = c1;
+        }
+    }
+    span_lo[i]  = (lo == INT_MAX) ? 0 : lo;
+    span_len[i] = (hi < lo) ? 0 : (hi - lo + 1);
+}
+
 struct ToLL {   // thrust scan 输入升 64 位(thrust 按输入 value_type 累加,int 输入 Σ>2^31 回绕)
     __host__ __device__ long long operator()(int x) const { return (long long)x; }
 };
@@ -1232,7 +1261,8 @@ __global__ void hash_compact_sort_kernel(
 // GPU 端分桶(无 host 往返):每行算 bucket_id 并直方图计数(融合省 1 launch)
 __global__ void compute_bucket_kernel(
     const int *est, const int *A_row_ptr, int A_rows, int ultra_thr,
-    const int *flop, int diter_thr, int span_thr,
+    const int *flop, int diter_thr,
+    const int *span_len,   // 每行真实列跨度(docs/24:替代 n 近似)
     int *bucket_id, int *counts)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1240,11 +1270,12 @@ __global__ void compute_bucket_kernel(
     int e = est[i];
     int bid;
     if (e <= ultra_thr) bid = BIN_ULTRA;             // ultra:线性免 hash
-    // dense-iter(docs/22 Phase A):重行(flop≥阈值)且低 dup(<8×,高 dup 留给 hash+Hybrid Value)
-    // → 列窗口直接寻址,免探测免 CAS;c-58 类 19% 行占 89% flop 的结构由此分流。
-    // span 门(Phase A 实测教训):窗口 clear 成本 ∝ n,须 flop ≥ span_thr(默认 n/16)——
-    // pre2(n=659k,44 窗/行,flop/跨度=0.003)与 web-Google 被错误吸入 → +19%/+17% 回归
-    else if (diter_thr > 0 && flop[i] >= diter_thr && flop[i] >= span_thr &&
+    // dense-iter(docs/22 Phase A + 24 裁决):重行 + 低 dup(<8×)+ **est 大(≥2048)**。
+    // v3 门控演进:flop/span 密度作判据被实测否决(输家 pkustk 0.61 vs 赢家 c-58 0.16 完全重叠);
+    // 真判据 = 我方 hash 对该行的速度 ∝ 表大小:F2 的行 est~1-2k → hash 9.7 G/s 本来就快,
+    // 送窗口反而亏;c-58 的重行 est 3-10k → 大表低占用 hash 0.96 G/s,窗口大胜。est≥2048
+    // = "hash 伺候不了的大表行"(docs/24 §门控三版)
+    else if (diter_thr > 0 && flop[i] >= diter_thr && e >= 2048 && 16LL * flop[i] >= (long long)span_len[i] &&
              (long long)flop[i] < 8LL * e) bid = BIN_DITER;
     else if (e > HASH_CAP) bid = BIN_HEAVY;          // heavy:全局表(2026-08-25,不再回退 merge)
     else {
@@ -1417,9 +1448,12 @@ static void hash_product(
     //      Σest 曾爆到 147 亿 = int 溢出 + 74× 过分配;min 不引入新低估:flop ≥ distinct 恒真)
     int *d_est; d_est = decltype(d_est)(dev_alloc(A_rows * sizeof(int)));
     int *d_flop; d_flop = decltype(d_flop)(dev_alloc(A_rows * sizeof(int)));
+    int *d_span_lo; d_span_lo = decltype(d_span_lo)(dev_alloc(A_rows * sizeof(int)));    // docs/24 跨度窗口
+    int *d_span_len; d_span_len = decltype(d_span_len)(dev_alloc(A_rows * sizeof(int)));
     long long total_flop = 0;
     prof("count_flop", [&]{
         count_intermediates_par_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
+        row_span_kernel<<<(A_rows + 255) / 256, 256>>>(dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_span_lo, d_span_len);
         CHECK_CUDA(cudaGetLastError());
         total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
@@ -1524,8 +1558,7 @@ static void hash_product(
         CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));   // 先清零(fused kernel 内 atomicAdd 累加)
         static int g_diter = -1;   // dense-iter 重行阈值(DITER_MIN_FLOP,默认 4096;0=关)
         if (g_diter < 0) { const char *e = getenv("DITER_MIN_FLOP"); g_diter = (e && *e) ? atoi(e) : 4096; }
-        int span_thr = A_cols / 16;   // 跨度门:窗口成本 ∝ n,flop 须 ≥ n/16(pre2/web-Google 教训)
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, span_thr, d_bkid, d_cnt);
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
@@ -1535,6 +1568,7 @@ static void hash_product(
         CHECK_CUDA(cudaMemcpyAsync(h_cnt, d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaMemcpyAsync(h_off, d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaStreamSynchronize(0));
+        dbg("[%s] diter bin=%d 行 / %d\n", tag, h_cnt[BIN_DITER], A_rows);   // TEMP:docs/24 路由观测
     });
 
     // 2b: opt-in max SMEM
@@ -1591,7 +1625,7 @@ static void hash_product(
             hash_dense_window_kernel<<<A_rows, 512, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
-                d_ovf_rows, d_ovf_cnt, d_row_ovf, nullptr);
+                d_ovf_rows, d_ovf_cnt, d_row_ovf, nullptr, nullptr);
             CHECK_CUDA(cudaGetLastError());
         });
     } else
@@ -1666,7 +1700,7 @@ static void hash_product(
                     hash_dense_window_kernel<<<n, 512, wsm, cur_s>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                         d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
-                        d_ovf_rows, d_ovf_cnt, d_row_ovf, rows_ptr);
+                        d_ovf_rows, d_ovf_cnt, d_row_ovf, rows_ptr, d_span_lo);
                 }
             } else if (bi == BIN_HEAVY) {
                 // heavy(est>HASH_CAP):全局内存 hash 表 + cub 分段排序(不回退 merge)
@@ -1806,7 +1840,7 @@ static void hash_product(
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
-        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est);
+        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len);
         dev_free(d_csc_cp); dev_free(d_csc_ri); dev_free(d_csc_val);
         dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
         dev_free(d_seg_beg); dev_free(d_seg_end); dev_free(d_scr_key); dev_free(d_scr_val); dev_free(d_cub_tmp);
@@ -1840,7 +1874,7 @@ static void hash_product(
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
-        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est);
+        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len);
         dev_free(dC_rp);
         dev_free(d_csc_cp); dev_free(d_csc_ri); dev_free(d_csc_val);
         dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
