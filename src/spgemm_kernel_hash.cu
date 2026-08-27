@@ -2212,8 +2212,13 @@ static void hash_product(
                 int *rows_ptr = d_sort + h_off[bi];
                 int ht = 32 << bi;
                 size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
-                if (smem_flat > 48 * 1024)   // 模板实例各自需 opt-in(legacy 只设过 <0>)
-                    CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel<1>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_flat));
+                {   // 一次性无条件 opt-in(49152 恰在 48KB 边界也会失败;legacy 对 <0> 即此做法)
+                    static bool done1 = false;
+                    if (!done1) {
+                        CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel<1>, cudaFuncAttributeMaxDynamicSharedMemorySize, HASH_CAP * (int)(sizeof(int) + sizeof(double))));
+                        done1 = true;
+                    }
+                }
                 hash_spa_kernel<1><<<n, HASH_BLOCK, smem_flat>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, ht, d_off,
@@ -2662,8 +2667,13 @@ static void hash_product(
                 int *rows_ptr = d_sort + h_off[bi];
                 int ht = 32 << bi;
                 size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
-                if (smem_flat > 48 * 1024)
-                    CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel<2>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_flat));
+                {
+                    static bool done2 = false;
+                    if (!done2) {
+                        CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel<2>, cudaFuncAttributeMaxDynamicSharedMemorySize, HASH_CAP * (int)(sizeof(int) + sizeof(double))));
+                        done2 = true;
+                    }
+                }
                 hash_spa_kernel<2><<<n, HASH_BLOCK, smem_flat>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, ht, d_off,
