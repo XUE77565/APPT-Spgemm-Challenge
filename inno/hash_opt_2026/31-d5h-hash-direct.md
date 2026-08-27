@@ -32,7 +32,15 @@ D5H:           MODE=1 count-only(hash 表只插 key,免值加载/免 atomicAdd)
 - 风险:①count pass 对 95k×多 bin 行的固定成本;②MODE=2 大行无序直写的原地排序吞吐;
   ③与 DIRECT5/游标的组合路径(bin 路由不变,正交)。
 
-## 3. A/B 预案(refresh10 后)
+## 3. 调试战报(2026-08-28 晨,未竟,交接)
 
-pre2/web-Google/F2(csort 大户)+ 回归(pwtk/333SP/bcsstk30/Ga3/case39/bloweya)+ c-58;
-`D5H=1` vs 0,3 连测中位数;cnnz 对表 + DBG sorted 校验。全量验证走 refresh11。
+- **已修①**:`invalid argument` @ MODE=1 launch = bin7 的 smem 49152B 恰在 48KB 边界且未 opt-in →
+  改一次性无条件 attr(legacy 同款)。
+- **未解②(偶发)**:`D5H=1` 跑 F2 族,cnnz_scan 的 `thrust::inclusive_scan(device_ptr<int>)` 抛
+  `cudaErrorInvalidDevice: invalid device ordinal`(gdb catch throw 实锤抛点;device sync 全绿、
+  各阶段事件计时正常)。**偶发**(同配置连跑两次全过);逐段二分:MODE=1 kernels 单开 = 通(42ms),
+  zero 段单开曾崩一次后不可复现。怀疑 host 侧 flaky(thrust/cub 惰性初始化 × 某交互),语境烧尽未定位。
+  **下一班**:先连跑 D5H=1 ×10 次统计失败率;cuda-gdb `catch throw` + thrust 线索;或把 cnnz_scan
+  改 cub::DeviceScan 显式 temp(绕 thrust policy)对照。
+- 状态:默认关(二进制 = v11 行为,回归 ±噪声 ✓);kernel/编排/原地 csort/门 全部就位,修好 flaky
+  即可 A/B。
