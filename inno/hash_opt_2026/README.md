@@ -39,7 +39,8 @@
 | [26-timing-audit.md](26-timing-audit.md) | **口径审计**:CSV Ocean 列漏 symbolic(真实 ~2.0×);其余逐项对齐 | `06ddefa` |
 | [27-ocean-dataflow.md](27-ocean-dataflow.md) | **Ocean 端到端数据流解剖**:四工作流判据+数据流、逐相位对照表、可移植机制清单(方案5=抄 type1 直写终态/localLoadBalance/溢出换算法/bin 级 stream) | `914f549` |
 | [28-lit-round3.md](28-lit-round3.md) | **文献第三轮**:8 新机制(MH-SpGEMM bitmap-symbolic+bitonic⭐/Robin Hood/bin 2^k/warp-spec 正负结果)+ 20 条已查无新东西清单 | — |
-| [29-direct5-impl.md](29-direct5-impl.md) | **方案5 实现**(DIRECT5 默认关):count pass+直写终态+tmp 缩容;LLB 按行动态 G;成功路径泄漏修复;A/B 预案 | `3bfed54` |
+| [29-direct5-impl.md](29-direct5-impl.md) | **方案5 实现**(DIRECT5):count pass+直写终态+tmp 缩容;refresh9 全量 1.9722×→默认开+规模门;dup 门两轮证伪;LLB;泄漏修复 | `3bfed54`+ |
+| [30-phaseb-v2-cursor.md](30-phaseb-v2-cursor.md) | **Phase B v2 游标内核**:Ocean iter 三件套(游标/动态组/数据驱动窗)+ avgB 混合路由 + 三连坑调试史;vsp -56%/mult_dcop -48%/bloweya -47% | — |
 
 ## 一页纸:为什么我们曾经慢(差距的完整因果链)
 
