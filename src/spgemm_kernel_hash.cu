@@ -779,6 +779,102 @@ __global__ void hash_spa_kernel(
     }
 }
 
+// hash_spa_hkv_kernel:Hybrid Value 全 bin 版(docs/24 §4.1,治大表行低占用):
+// keys 留 SMEM(4B/槽,occupancy ×3)+ values 走全局 L2 atomicAdd(Ocean HYBRID_HASHMAP 同款)。
+// 仅用于 ht ≥ 4096 的 bin(ht > CSORT_HT 恒真)→ 只保留无序 extract 路径(compact 走 csort)。
+__global__ void hash_spa_hkv_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri,
+    const int *bucket_rows, int n_in_bucket, int ht_size,
+    const long long *row_off,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag,
+    int *ovf_rows, int *ovf_cnt, int *row_ovf,
+    double *gval, const long long *gval_off)
+{
+    int idx = blockIdx.x;
+    if (idx >= n_in_bucket) return;
+    int i = bucket_rows[idx];
+    int tid = threadIdx.x;
+    int mask = ht_size - 1;
+
+    extern __shared__ __align__(8) int smem[];
+    int *sh_col = smem;                        // [ht_size] 仅 keys(12B→4B/槽)
+    for (int s = tid; s < ht_size; s += HASH_BLOCK) sh_col[s] = -1;
+    __syncthreads();
+
+    long long gb = gval_off[i];                // 本行 value 池基址(host 已 memset 0)
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int G = (ht_size <= 64) ? 4 : (ht_size <= 256) ? 8 : (ht_size <= 1024) ? 16 : 32;
+    int num_groups = HASH_BLOCK / G;
+    int my_group = tid / G, my_id = tid % G;
+    for (int p = rs + my_group; p < re; p += num_groups) {
+        int k = A_col_idx[p];
+        double a_ik = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + my_id; q < ke; q += G) {
+            int j = B_col_idx[q];
+            if (upper_tri && j < i) continue;
+            double v = a_ik * B_val[q];
+            unsigned slot = ((unsigned)(j * 2654435761u)) & mask;
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&sh_col[slot], -1, j);
+                if (old == -1 || old == j) { atomicAdd(&gval[gb + slot], v); break; }
+                slot = (slot + 1) & mask;
+                if (++probes >= ht_size) {
+                    atomicExch(overflow_flag, 1);
+                    if (!atomicExch(&row_ovf[i], 1)) { int p = atomicAdd(ovf_cnt, 1); ovf_rows[p] = i; }
+                    break;
+                }
+            }
+        }
+    }
+    __syncthreads();
+
+    // 无序 extract(ht ≥ 4096 > CSORT_HT;compact 侧 csort 排序)
+    __shared__ int cnt;
+    if (tid == 0) cnt = 0;
+    __syncthreads();
+    long long base = row_off[i];
+    long long cap = row_off[i + 1] - row_off[i];
+    for (int s = tid; s < ht_size; s += HASH_BLOCK) {
+        int c = sh_col[s];
+        if (c >= 0) {
+            int pos = atomicAdd(&cnt, 1);
+            if (pos >= cap) { atomicExch(overflow_flag, 1); continue; }
+            tmp_key[base + pos] = ((unsigned long long)i << 32) | (unsigned int)c;
+            tmp_val[base + pos] = gval[gb + s];
+        }
+    }
+    __syncthreads();
+    if (tid == 0) {
+        if (cnt > cap) { if (!atomicExch(&row_ovf[i], 1)) { int p = atomicAdd(ovf_cnt, 1); ovf_rows[p] = i; } }
+        row_nnz[i] = (cnt <= cap) ? cnt : (int)cap;
+    }
+}
+
+// compact 原地化守卫:margin[j] = E_off[j] − C_rp[j](≥0 全体成立 → 前缀紧缩安全,docs/21 Fix2)
+__global__ void margin_kernel(const long long *eoff, const int *crp, int n, long long *marg)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= n) return;
+    marg[j] = eoff[j] - (long long)crp[j];
+}
+
+// 每行 HT 梯表尺寸(与 compute_bucket 同梯;hybrid value 池的 scan 输入)
+__global__ void ladder_ht_kernel(const int *est, int A_rows, int *lht)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= A_rows) return;
+    int e = est[i];
+    int target = (e <= 4096) ? 2 * e : e;
+    int ht = 32;
+    while (ht < target && ht < HASH_CAP) ht <<= 1;
+    lht[i] = ht;
+}
+
 // hash_spa_priv_kernel:warp 私有 SPA(HASH_PRIV 门控):k 按 warp 分区→Phase A 无 atomicAdd 累加,Phase B 跨 warp merge,Phase C extract
 __global__ void hash_spa_priv_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
@@ -1571,6 +1667,37 @@ static void hash_product(
         dbg("[%s] diter bin=%d 行 / %d\n", tag, h_cnt[BIN_DITER], A_rows);   // TEMP:docs/24 路由观测
     });
 
+    // ---- 全 bin Hybrid Value(docs/24 §4.1):ht≥4096 的大表 bin 的 value 池(keys 留 SMEM,occupancy ×3)。
+    //      池 = 每行梯表尺寸 × 8B 的 scan;>8GB(鲸鱼阵)或 HYB_TIER=0 跳过。 ----
+    double *d_gv = nullptr; long long *d_gv_off = nullptr;
+    {
+        static int g_hyb_tier = -1;
+        // 默认 0(2026-08-27 A/B 否决:Ge99 +16%/Ga3As3H12 2.9× 恶化 —— 每乘积一趟全局 L2 原子的
+        // 往返成本 > SMEM 争用成本;与 docs/23 bin0-only 收益微弱一致。保留代码供后续组合实验)
+        if (g_hyb_tier < 0) { const char *e = getenv("HYB_TIER"); g_hyb_tier = (e && *e) ? atoi(e) : 0; }
+        if (g_hyb_tier && !att) {
+            int *d_lht = decltype(d_lht)(dev_alloc(A_rows * sizeof(int)));
+            d_gv_off = decltype(d_gv_off)(dev_alloc((A_rows + 1) * sizeof(long long)));
+            ladder_ht_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, A_rows, d_lht);
+            CHECK_CUDA(cudaMemset(d_gv_off, 0, sizeof(long long)));
+            thrust::inclusive_scan(thrust::make_transform_iterator(thrust::device_ptr<int>(d_lht), ToLL()),
+                                   thrust::make_transform_iterator(thrust::device_ptr<int>(d_lht + A_rows), ToLL()),
+                                   thrust::device_ptr<long long>(d_gv_off + 1));
+            long long gv_slots;
+            CHECK_CUDA(cudaMemcpy(&gv_slots, d_gv_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
+            dev_free(d_lht);
+            long long gv_cap = 8LL << 30;                       // 池上限 8GB(鲸鱼阵 est 巨大,跳过)
+            if (gv_slots > 0 && gv_slots * (long long)sizeof(double) <= gv_cap) {
+                d_gv = decltype(d_gv)(dev_alloc((size_t)gv_slots * sizeof(double)));
+                CHECK_CUDA(cudaMemset(d_gv, 0, (size_t)gv_slots * sizeof(double)));
+                dbg("[%s] hybrid value pool: %.2f GB\n", tag, gv_slots * 8.0 / (1 << 30));
+            } else {
+                dev_free(d_gv_off); d_gv_off = nullptr;
+                dbg("[%s] hybrid value pool 跳过(%.2f GB 超 cap)\n", tag, gv_slots * 8.0 / (1 << 30));
+            }
+        }
+    }
+
     // 2b: opt-in max SMEM
     {
         size_t maxsm = (size_t)HASH_CAP * (sizeof(int) + sizeof(double));   // sh_col[int]+sh_val[double]
@@ -1750,7 +1877,14 @@ static void hash_product(
                 int ht = 32 << bi;
                 size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
                 size_t smem_priv = (size_t)PRIV_W * ht * (sizeof(int) + sizeof(double));
-                if (!att && g_priv && smem_priv <= 196 * 1024) {
+                if (d_gv && ht >= 4096) {
+                    // Hybrid Value 大表 bin:keys SMEM(4B/槽)+ values 全局 L2 原子(docs/24)
+                    hash_spa_hkv_kernel<<<n, HASH_BLOCK, (size_t)ht * sizeof(int), cur_s>>>(
+                        dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                        rows_ptr, n, ht, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf,
+                        d_gv, d_gv_off);
+                } else if (!att && g_priv && smem_priv <= 196 * 1024) {
                     hash_spa_priv_kernel<<<n, PRIV_W * 32, smem_priv>>>(
                         dA_rp, dA_ci, dA_val, rows_ptr, n, ht, PRIV_W, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
@@ -1840,7 +1974,7 @@ static void hash_product(
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
-        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len);
+        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_gv); dev_free(d_gv_off);
         dev_free(d_csc_cp); dev_free(d_csc_ri); dev_free(d_csc_val);
         dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
         dev_free(d_seg_beg); dev_free(d_seg_end); dev_free(d_scr_key); dev_free(d_scr_val); dev_free(d_cub_tmp);
@@ -1874,7 +2008,7 @@ static void hash_product(
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
-        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len);
+        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_gv); dev_free(d_gv_off);
         dev_free(dC_rp);
         dev_free(d_csc_cp); dev_free(d_csc_ri); dev_free(d_csc_val);
         dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
@@ -1890,12 +2024,46 @@ static void hash_product(
     size_t C_rp_al  = ALIGN8(C_rp_sz);
     size_t C_ci_al  = ALIGN8(C_ci_sz);
     size_t C_total  = C_rp_al + C_ci_al + C_v_sz;
-    void *dC; dC = decltype(dC)(dev_alloc(C_total));
-    char *cb = (char*)dC;
-    int   *dC_ci = (int*)(cb + C_rp_al);
-    d_val        = (double*)(cb + C_rp_al + C_ci_al);
+    // ---- compact 原地化(docs/21 Fix2):dC(12B×C)不再新分配,col/val 直接前缀紧缩进 tmp 自己。
+    //      安全条件 = ∀j: 前缀 A(j)=Σactual ≤ E(j)=Σest(d_est 原始值,retry 行的欠估已计入)——
+    //      此时行 i 的写区间 [4A(i), 4A(i+1)) 恒低于任何 j>i 行的读区间 [8E(j),…) ✓(含 retry 行
+    //      从 rk2 的写)。违例(retry 欠估累计 > 正常行富余)→ 回退旧路径。whale 阵省 C×12GB 级峰值。
+    bool in_place = false;
+    {
+        long long *d_eoff = decltype(d_eoff)(dev_alloc((A_rows + 1) * sizeof(long long)));
+        CHECK_CUDA(cudaMemset(d_eoff, 0, sizeof(long long)));
+        thrust::inclusive_scan(thrust::make_transform_iterator(thrust::device_ptr<int>(d_est), ToLL()),
+                               thrust::make_transform_iterator(thrust::device_ptr<int>(d_est + A_rows), ToLL()),
+                               thrust::device_ptr<long long>(d_eoff + 1));
+        // margin = min_j (E(j) − C_rp[j]);dC_rp 是 int(实际行和 ≤ 2^31 保证:C_nnz 是 int)
+        long long *d_marg = decltype(d_marg)(dev_alloc((A_rows + 1) * sizeof(long long)));
+        margin_kernel<<<(A_rows + 255) / 256, 256>>>(d_eoff, dC_rp, A_rows + 1, d_marg);
+        long long min_marg;
+        thrust::device_ptr<long long> mmin = thrust::min_element(thrust::device_ptr<long long>(d_marg), thrust::device_ptr<long long>(d_marg) + A_rows + 1);
+        CHECK_CUDA(cudaMemcpy(&min_marg, mmin.get(), sizeof(long long), cudaMemcpyDeviceToHost));
+        // ⚠ 2026-08-27 rajat16 实测 294411 行内乱序(原 0)= 某紧凑路径交叉写读(疑 csort 多趟/
+        //   gapped 区间重读)。默认关闭,守卫+代码保留,FIX2=1 可开(普通阵 margin 普遍 ≥0)
+        static int g_fix2 = -1;
+        if (g_fix2 < 0) { const char *e = getenv("FIX2"); g_fix2 = (e && *e) ? atoi(e) : 0; }
+        in_place = (min_marg >= 0) && g_fix2 && ((long long)C_nnz_result > 50LL * 1000 * 1000);
+        dev_free(d_eoff); dev_free(d_marg);
+        dbg("[%s] compact in_place=%d (min_margin=%lld)\n", tag, (int)in_place, min_marg);
+    }
+    void *dC = nullptr;
+    int   *dC_ci; double *d_val_ip;
+    if (in_place) {
+        dC_ci = (int*)d_tmp_key;          // col 前缀紧缩进 key 区(4B 写 ≤ 8B 源,同一守卫)
+        d_val_ip = d_tmp_val;             // val 原地(等宽,守卫直接适用)
+    } else {
+        dC = decltype(dC)(dev_alloc(C_total));
+        char *cb = (char*)dC;
+        dC_ci = (int*)(cb + C_rp_al);
+        d_val_ip = (double*)(cb + C_rp_al + C_ci_al);
+    }
+    d_val = d_val_ip;
     prof("compact+sort", [&]{
-        CHECK_CUDA(cudaMemcpy(cb, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));   // row_ptr 落位(~A_rows ints,微秒级,纳入计时)
+        if (!in_place)
+            CHECK_CUDA(cudaMemcpy(dC, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));   // row_ptr 落位(~A_rows ints,微秒级,纳入计时)
         for (int bi = 0; bi < ((dense_mode || dense_win_mode) ? 1 : N_BINS); bi++) {
             int n = (dense_mode || dense_win_mode) ? A_rows : h_cnt[bi];
             int *rows_ptr = (dense_mode || dense_win_mode) ? nullptr : (d_sort + h_off[bi]);
@@ -1960,11 +2128,20 @@ static void hash_product(
 #endif
 
     // Stage 7: 连续 dC 已就位(compact+sort 直写 col/val + row_ptr 已落位)→ 直接 D2H 前 C_total 字节 = packed [rp|ci|val]。免 pack。
+    //          in_place 模式:col/val 在 tmp 里 → 3 段拷进同一 pinned 布局(rq: rp 段从 dC_rp)。
 
     void *C_buffer = nullptr;
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total));
     prof("d2h", [&]{
-        CHECK_CUDA(cudaMemcpy(C_buffer, dC, C_total, cudaMemcpyDeviceToHost));
+        if (in_place) {
+            char *hb = (char*)C_buffer;
+            CHECK_CUDA(cudaMemcpyAsync(hb, dC_rp, C_rp_sz, cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpyAsync(hb + C_rp_al, d_tmp_key, C_ci_sz, cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpyAsync(hb + C_rp_al + C_ci_al, d_tmp_val, C_v_sz, cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaStreamSynchronize(0));
+        } else {
+            CHECK_CUDA(cudaMemcpy(C_buffer, dC, C_total, cudaMemcpyDeviceToHost));
+        }
     });
 
     *C_buffer_out = C_buffer;
