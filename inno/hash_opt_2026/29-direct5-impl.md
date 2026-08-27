@@ -76,7 +76,33 @@ warmup+bench 多轮累加 —— 鲸鱼阵(c-73 峰值 ~62GB、rajat 类 OOM 史
 已补尾部释放(d2h 后区域,与既有 12 buffer 尾释放同址,不进 hash-prof 相位;早退路径补
 d_flop)。docs/21 Fix0 修了 retry 缓冲,这批是当年漏网的另一半。
 
-## 6. 实现状态
+## 6. A/B 结果(2026-08-27 夜,compute-only 同 CSV 口径,`compare/ocean337/ab_direct5_llb.log`)
+
+| 阵 | base | D5 | LLB | 判 |
+|---|---|---|---|---|
+| mult_dcop_03 | 113.40 | **77.76(-31%)** | 113.40 | D5 大胜(top1 loser 7.9×→~5.4×)|
+| c-58 | 12.89 | **11.64(-10%)** | 12.09(-6%) | 双赢 |
+| bloweya | 19.61 | **18.26(-7%)** | **18.20(-7%)** | 双赢 |
+| email-Enron | 8.66 | 8.32(-4%) | **8.07(-7%)** | 双赢 |
+| pre2 | 81.70 | 81.00(-1%) | 79.47(-3%) | **D5 无感 = 其行未过 v4 门(span),瓶颈是路由非 compact** |
+| soc | 24.32 | 24.11 | 23.89 | 微 |
+| exdata_1 | 14.82 | ~~38.30(+159%)~~ → 修复后 21.2≈base | 14.80 | **回归已修**(见下)|
+| Ge99H100 | 74.34 | 75.12 | 74.10 | **LLB 无感:Ge99 重行疑走 heavy(hash_global)路径,LLB 只补了 hash_spa** |
+| pwtk | 8.73 | 8.74 | 8.93(+2%) | LLB 微回归 |
+| 333SP/bcsstk30/Ga3 | ±0.1-1% | 同 | 同 | 回归干净 |
+
+**exdata_1 回归根因**:dense_mode 的 legacy 内核按 **n 尺寸**配 SMEM(exdata n=6001→78KB→2CTA/SM),
+direct 内核是固定 DENSE_MAX_N 窗口(195KB→1CTA/SM)—— occupancy 减半(相位实证:direct 33.4ms
+vs legacy accumulate 13.5ms)。**修复 = dense_mode 排除出 DIRECT5**(其 compact 仅 1.4% 无税可省);
+保留 dense_win_mode + BIN_DITER(两路同为固定窗口,D5 严格减活)。修复后 exdata_1 D5 = 21.2 ≈ base ✓。
+cnnz 14/14 阵全部与 CSV 精确一致 ✓。
+
+**默认策略**:DIRECT5/LLB 仍默认关;**refresh9(DIRECT5=1,Auto 列,tmux)全量验证 geomean 后再定**。
+LLB 净效应温和(-7%~+2%),且 Ge99(原 4.4× 主诉求)无感 —— 待查 heavy 路径(下一步:hash_global_kernel
+同款 LLB)。TSOPF_RS_b2383 非矩阵级 dense_win(D5 -0.8% 噪声),矩阵级 dense_win 的直接案例本轮未逮到
+(结构上两路同固定窗口,D5 仍应纯赢)。
+
+## 7. 实现状态
 
 - 代码:`src/spgemm_kernel_hash.cu`(hash_dense_count_kernel / hash_dense_direct_kernel /
   dense_sum_kernel[unsigned ll 原子 —— sm_90 无 signed ll atomicAdd 重载]/ zero_est_kernel

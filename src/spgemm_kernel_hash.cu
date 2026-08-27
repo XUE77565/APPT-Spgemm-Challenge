@@ -1927,8 +1927,11 @@ static void hash_product(
     int dense_nr = 0; const int *dense_rows = nullptr;   // dense 行集合(null = 全体行)
     long long dense_est_sum = 0, dense_nnz_sum = 0, tmp_slots_dev = 0;
     if (g_direct5) {
-        if (dense_mode || dense_win_mode) dense_nr = A_rows;            // 矩阵级:全体行
-        else if (h_cnt[BIN_DITER] > 0) { dense_nr = h_cnt[BIN_DITER]; dense_rows = d_sort + h_off[BIN_DITER]; }
+        // 矩阵级只取 dense_win:n≤DENSE_MAX_N 的 dense_mode 用按 n 尺寸的 v1 内核(occupancy 高),
+        // direct 是固定 14980 窗口(195KB,1CTA/SM)——exdata_1 实测 13.5→33.4ms 占用减半;且
+        // dense_mode 的 compact 仅 ~1.4% 无税可省。dense_win 两路同为固定窗口 → 纯赢(A/B 实证)。
+        if (dense_win_mode) dense_nr = A_rows;
+        else if (!dense_mode && h_cnt[BIN_DITER] > 0) { dense_nr = h_cnt[BIN_DITER]; dense_rows = d_sort + h_off[BIN_DITER]; }
         if (dense_nr > 0) {
             // 矩阵级路径不再走下方 accumulate 分支(那三处 memset 挪到这里,计时内);mixed 路径 per-bin 头会再清,无害
             prof("dense_count", [&]{
