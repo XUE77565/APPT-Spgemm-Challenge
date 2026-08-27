@@ -2212,6 +2212,8 @@ static void hash_product(
                 int *rows_ptr = d_sort + h_off[bi];
                 int ht = 32 << bi;
                 size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
+                if (smem_flat > 48 * 1024)   // 模板实例各自需 opt-in(legacy 只设过 <0>)
+                    CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel<1>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_flat));
                 hash_spa_kernel<1><<<n, HASH_BLOCK, smem_flat>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, ht, d_off,
@@ -2660,6 +2662,8 @@ static void hash_product(
                 int *rows_ptr = d_sort + h_off[bi];
                 int ht = 32 << bi;
                 size_t smem_flat = (size_t)ht * (sizeof(int) + sizeof(double));
+                if (smem_flat > 48 * 1024)
+                    CHECK_CUDA(cudaFuncSetAttribute(hash_spa_kernel<2>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_flat));
                 hash_spa_kernel<2><<<n, HASH_BLOCK, smem_flat>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, ht, d_off,
