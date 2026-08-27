@@ -13,7 +13,7 @@ Auto = src 里的 spgemm_self_product_adaptive(flop>thr→hash 否则 merge3)。
 import os, sys, re, csv, json, subprocess, argparse, time, math
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.path.join(REPO, "spgemm_test")
+BIN = os.environ.get("SPGEMM_BIN") or os.path.join(REPO, "spgemm_test")
 DENSE_BIN = os.path.join(REPO, "spgemm_dense")
 CUBLAS_BIN = os.path.join(REPO, "spgemm_dense_cublas")   # cuBLAS FP64 dgemm(PEDANTIC,无 TC)
 HSMU_BIN = os.path.join(REPO, "external_sota/HSMU-SpGEMM/evaluation/script/test")

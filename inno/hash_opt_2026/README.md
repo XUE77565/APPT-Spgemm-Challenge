@@ -30,6 +30,9 @@
 | [04-row-retry.md](04-row-retry.md) | 行级重试:欠估行 flop 定表重跑(Ocean out_overflow_row_ids 同款,含去重门陷阱) | `de4abe7` |
 | [05-batched-family.md](05-batched-family.md) | 批量 kernel 族:warp-per-row 累加 + 融合 extract + 批量 copy + 聚合原子 | `a72f51a`→`96e633e` |
 | [06-roadmap.md](06-roadmap.md) | 剩余差距归因 + 超越 Ocean 的新优化方向 | — |
+| [20-bottleneck-analysis.md](20-bottleneck-analysis.md) | **全量瓶颈分析(337 阵)**:差距双层结构 + Ocean 解剖 → 四条战线(dense 家族扩建/直接写终态/hash 结构差/DNF) | — |
+| [21-dnf-root-cause-and-fixes.md](21-dnf-root-cause-and-fixes.md) | **16 阵 DNF 根因**:subwarp8 遮蔽 heavy bug + retry 泄漏 + flop 无 n 封顶;Fix0-4 设计 | 待提交 |
+| [22-dense-iter-port-design.md](22-dense-iter-port-design.md) | **Ocean 机制移植设计**:按行 dense-iter 分流(重行占 89-100% flop 实测)+ 内核升级 B1-B5 | 待提交 |
 
 ## 一页纸:为什么我们曾经慢(差距的完整因果链)
 
