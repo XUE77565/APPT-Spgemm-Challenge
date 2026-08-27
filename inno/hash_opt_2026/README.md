@@ -33,6 +33,11 @@
 | [20-bottleneck-analysis.md](20-bottleneck-analysis.md) | **全量瓶颈分析(337 阵)**:差距双层结构 + Ocean 解剖 → 四条战线(dense 家族扩建/直接写终态/hash 结构差/DNF) | — |
 | [21-dnf-root-cause-and-fixes.md](21-dnf-root-cause-and-fixes.md) | **16 阵 DNF 根因**:subwarp8 遮蔽 heavy bug + retry 泄漏 + flop 无 n 封顶;Fix0-4 设计 | 待提交 |
 | [22-dense-iter-port-design.md](22-dense-iter-port-design.md) | **Ocean 机制移植设计**:按行 dense-iter 分流(重行占 89-100% flop 实测)+ 内核升级 B1-B5 | 待提交 |
+| [23-hybrid-ablation.md](23-hybrid-ablation.md) | Hybrid 消融 | — |
+| [24-phaseA-gate-evolution.md](24-phaseA-gate-evolution.md) | **Phase A 门控 v1→v4**:判别特征=hash 侧速度∝表大小(非密度);v4 门定型 | `ffc6e16` |
+| [25-hyb-tier-merge3-fix2.md](25-hyb-tier-merge3-fix2.md) | **三项裁决**:全 bin Hybrid 否决 / Fix2 默认关 / merge3 无生态位;refresh8 2.195× 定型;剩余差距结构 | `c0ef2b0` |
+| [26-timing-audit.md](26-timing-audit.md) | **口径审计**:CSV Ocean 列漏 symbolic(真实 ~2.0×);其余逐项对齐 | `06ddefa` |
+| [27-ocean-dataflow.md](27-ocean-dataflow.md) | **Ocean 端到端数据流解剖**:四工作流判据+数据流、逐相位对照表、可移植机制清单(方案5=抄 type1 直写终态/localLoadBalance/溢出换算法/bin 级 stream) | 本文 |
 
 ## 一页纸:为什么我们曾经慢(差距的完整因果链)
 
