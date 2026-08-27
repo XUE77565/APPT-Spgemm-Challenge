@@ -372,6 +372,146 @@ __global__ void hash_dense_window_kernel(
     if (tid == 0) row_nnz[i] = (out <= cap) ? out : cap;
 }
 
+// ===================== 方案5:dense 行精确计数 + 直写终态(docs/27 §4.1,2026-08-27)=====================
+// Ocean type1 工作流的核心经济性:两遍直写 vs 单遍 gapped 的交通量临界 = dup≈6~8(v4 门 dup<8 对齐)。
+//   count pass:只标记 flag(1B/列,免 dval 8B+atomicAdd)→ row_nnz = 精确 distinct(无 cap,永不 ovf);
+//   numeric pass:窗口升序直写 dC 精确偏移 —— dense 行的 gapped 写 + compact copy 整体消失。
+// hash 行不动(结构已同 Ocean type2 est 工作流)。DIRECT5=1 开启,默认关。
+#define DENSE_CNT_W 65536   // 计数窗口(SMEM 1B/列;数值 pass 窗口 DENSE_MAX_N 不同不影响总数)
+
+// count pass:窗口扫描标 flag + 块归约;窗口划分与数值 pass 不同也无妨( disjoint cover 计数同)。
+__global__ void hash_dense_count_kernel(
+    const int *A_row_ptr, const int *A_col_idx,
+    const int *B_row_ptr, const int *B_col_idx,
+    int upper_tri, int A_rows, int n,
+    int *row_nnz,
+    const int *bucket_rows /*nullable,同 window kernel*/,
+    const int *span_lo /*nullable*/)
+{
+    int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
+    if (i >= A_rows) return;
+    int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
+    extern __shared__ __align__(8) unsigned char csmem[];   // [DENSE_CNT_W] flags
+    __shared__ int wcnt[16];                                 // blockDim 512 = 16 warp
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int total = 0;
+    int lo0 = span_lo ? span_lo[i] : 0;
+    int nw_win = (n - lo0 + DENSE_CNT_W - 1) / DENSE_CNT_W;
+    for (int wi = 0; wi < nw_win; wi++) {
+        int c0 = lo0 + wi * DENSE_CNT_W, c1 = min(c0 + DENSE_CNT_W, n);
+        int w = c1 - c0;
+        for (int j = tid; j < w; j += blockDim.x) csmem[j] = 0;
+        __syncthreads();
+        for (int p = rs + warp; p < re; p += nw) {
+            int k = A_col_idx[p];
+            int ks = dev_lower_bound(B_col_idx, B_row_ptr[k], B_row_ptr[k + 1], c0);
+            int ke = dev_lower_bound(B_col_idx, ks, B_row_ptr[k + 1], c1);
+            for (int q = ks + lane; q < ke; q += 32) {
+                int j = B_col_idx[q] - c0;
+                int col = c0 + j;
+                if (upper_tri && col < i) continue;   // 与数值 pass 同过滤位置(标记前)
+                csmem[j] = 1;
+            }
+        }
+        __syncthreads();
+        int cnt = 0;
+        for (int j = tid; j < w; j += blockDim.x) cnt += csmem[j];
+        for (int off = 16; off; off >>= 1) cnt += __shfl_down_sync(0xffffffff, cnt, off);
+        if (lane == 0) wcnt[warp] = cnt;
+        __syncthreads();
+        if (tid == 0) { int s = 0; for (int x = 0; x < nw; x++) s += wcnt[x]; total += s; }
+        __syncthreads();   // 读完 wcnt 才可进入下一窗口清 flags
+    }
+    if (tid == 0) row_nnz[i] = total;
+}
+
+// numeric pass:直写终态(与 hash_dense_window_kernel 同构,输出改 dC 精确偏移;无 ovf/重试路径)。
+__global__ void hash_dense_direct_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri, int A_rows, int n,
+    const int *exact_rp, int *dC_ci, double *dC_val,
+    int *row_nnz,
+    const int *bucket_rows /*nullable*/,
+    const int *span_lo /*nullable*/)
+{
+    int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
+    if (i >= A_rows) return;
+    int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
+    extern __shared__ __align__(8) unsigned char wsmem[];
+    double *dval = (double*)wsmem;
+    unsigned char *dflag = wsmem + (size_t)DENSE_MAX_N * sizeof(double);
+    int *dpref = (int*)(wsmem + (((size_t)DENSE_MAX_N * 9) + 3) / 4 * 4);
+
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int base = exact_rp[i];     // 精确偏移(int;C_nnz ≤ 2^31)
+    int cap = row_nnz[i];       // count pass 的精确值(无 ovf)
+    int out = 0;
+    int lo0 = span_lo ? span_lo[i] : 0;
+    int nw_win = span_lo ? (n - lo0 + DENSE_MAX_N - 1) / DENSE_MAX_N
+                         : (n + DENSE_MAX_N - 1) / DENSE_MAX_N;
+    for (int wi = 0; wi < nw_win; wi++) {
+        int c0 = lo0 + wi * DENSE_MAX_N, c1 = min(c0 + DENSE_MAX_N, n);
+        int w = c1 - c0;
+        for (int j = tid; j < w; j += blockDim.x) { dval[j] = 0.0; dflag[j] = 0; }
+        __syncthreads();
+        for (int p = rs + warp; p < re; p += nw) {
+            int k = A_col_idx[p];
+            double a = A_val[p];
+            int ks = dev_lower_bound(B_col_idx, B_row_ptr[k], B_row_ptr[k + 1], c0);
+            int ke = dev_lower_bound(B_col_idx, ks, B_row_ptr[k + 1], c1);
+            for (int q = ks + lane; q < ke; q += 32) {
+                int j = B_col_idx[q] - c0;
+                if (upper_tri && (c0 + j) < i) continue;
+                atomicAdd(&dval[j], a * B_val[q]);
+                dflag[j] = 1;
+            }
+        }
+        __syncthreads();
+        if (warp == 0) {
+            int seglen = (w + 31) / 32;
+            int lo = lane * seglen, hi = min(lo + seglen, w);
+            int run = 0;
+            for (int j = lo; j < hi; j++) { dpref[j] = run; run += dflag[j]; }
+            int excl = run;
+            for (int off = 1; off < 32; off <<= 1) {
+                int v = __shfl_up_sync(0xffffffff, excl, off);
+                if (lane >= off) excl += v;
+            }
+            for (int j = lo; j < hi; j++) dpref[j] += excl - run;
+        }
+        __syncthreads();
+        for (int j = tid; j < w; j += blockDim.x) {
+            if (dflag[j]) {
+                int rank = out + dpref[j];
+                if (rank >= cap) continue;   // SAFETY:count/direct 同构恒不触发;防御性守卫
+                dC_ci[base + rank] = c0 + j;
+                dC_val[base + rank] = dval[j];
+            }
+        }
+        out += dpref[w - 1] + dflag[w - 1];
+        __syncthreads();
+    }
+    if (tid == 0 && out != cap)
+        row_nnz[i] = out;   // SAFETY:理论上不达;不一致时以数值侧为准(下游仅读 dC_rp,不再用 row_nnz)
+}
+
+// dense 行集合的 Σest / Σrow_nnz(方案5:tmp 缩容 + est 下溢检查改 hash 侧口径)
+// sum 用 unsigned ll 原子(sm_90 无 signed ll atomicAdd 重载;值为非负,位型等同)
+__global__ void dense_sum_kernel(const int *rows, int nr, const int *est, const int *row_nnz,
+                                 unsigned long long *sum_est, unsigned long long *sum_nnz) {
+    int r = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r >= nr) return;
+    if (est) atomicAdd(sum_est, (unsigned long long)est[rows ? rows[r] : r]);
+    if (row_nnz) atomicAdd(sum_nnz, (unsigned long long)row_nnz[rows ? rows[r] : r]);
+}
+
+// dense 行 est 置 0(方案5:d_off 重扫前坍缩 gapped 空间;binning 已完成,est 无后续消费者)
+__global__ void zero_est_kernel(int *est, const int *rows, int nr) {
+    int r = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < nr) est[rows[r]] = 0;
+}
+
 // ===================== sub-warp 批量 kernel(2026-08-26 方向B,巨型图第二程) =====================
 // est ≤ 8 的极稀疏行(germany_osm/road 类 avg_product≈5):每行只派 8 线程(4 行/warp),
 // 去重累加在**寄存器**里(≤8 个 col/val 对,零 SMEM 零原子),warp shfl 去重+求和。
@@ -1631,8 +1771,7 @@ static void hash_product(
     double *rv = nullptr, *rv2 = nullptr;
     void *rct = nullptr;
     unsigned long long *d_tmp_key; double *d_tmp_val;
-    d_tmp_key = decltype(d_tmp_key)(dev_alloc((size_t)total_est * sizeof(unsigned long long)));
-    d_tmp_val = decltype(d_tmp_val)(dev_alloc((size_t)total_est * sizeof(double)));
+    // (tmp 分配挪到 binning/方案5 之后:dense 行直写不占 gapped 槽 → 缩容 Σest_dense,见 tmp_slots)
     // d_val(C_val)现 alias 进连续 dC(compact+sort 直写,见 cnnz_scan 后),不再单独分配/释放。
     double *d_val = nullptr;
 
@@ -1724,6 +1863,68 @@ static void hash_product(
         ((double)total_est / ((double)A_rows * A_cols) >= DENSE_MIN_FRAC);
     const bool dense_win_mode = !dense_mode && (A_cols <= DENSE_WIN_MAX_N) && A_rows > 0 &&
         ((double)total_est / ((double)A_rows * A_cols) >= DENSE_MIN_FRAC);
+    // ---- 方案5(docs/27 §4.1):dense 行精确计数 + 直写终态。DIRECT5=1 开,默认关。----
+    // dense 行集合 = 矩阵级 dense/dense_win(全体行)或 Phase A bin(v4 门含 dup<8 = 两遍直写
+    // 交通量赢面);hash 行不动(结构同 Ocean type2 est 工作流)。count pass 在 accumulate 前
+    // 出精确 row_nnz → cnnz_scan 后数值 pass 直写 dC;dense 行不再占 gapped tmp 槽(缩容 Σest_dense)
+    // 且永不 ovf(计数精确,免 retry)。
+    static int g_direct5 = -1;
+    if (g_direct5 < 0) { const char *e = getenv("DIRECT5"); g_direct5 = (e && *e && atoi(e) > 0) ? 1 : 0; }
+    int dense_nr = 0; const int *dense_rows = nullptr;   // dense 行集合(null = 全体行)
+    long long dense_est_sum = 0, dense_nnz_sum = 0, tmp_slots_dev = 0;
+    if (g_direct5) {
+        if (dense_mode || dense_win_mode) dense_nr = A_rows;            // 矩阵级:全体行
+        else if (h_cnt[BIN_DITER] > 0) { dense_nr = h_cnt[BIN_DITER]; dense_rows = d_sort + h_off[BIN_DITER]; }
+        if (dense_nr > 0) {
+            // 矩阵级路径不再走下方 accumulate 分支(那三处 memset 挪到这里,计时内);mixed 路径 per-bin 头会再清,无害
+            prof("dense_count", [&]{
+                CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
+                CHECK_CUDA(cudaMemset(d_ovf_cnt, 0, sizeof(int)));
+                CHECK_CUDA(cudaMemset(d_row_ovf, 0, (size_t)A_rows * sizeof(int)));
+                size_t csm = (size_t)DENSE_CNT_W;
+                if (csm > 48 * 1024)
+                    CHECK_CUDA(cudaFuncSetAttribute(hash_dense_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)csm));
+                hash_dense_count_kernel<<<dense_nr, 512, csm>>>(
+                    dA_rp, dA_ci, dB_rp, dB_ci, upper_tri, A_rows, A_cols,
+                    d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr);
+                CHECK_CUDA(cudaGetLastError());
+                unsigned long long *d_sums = decltype(d_sums)(dev_alloc(2 * sizeof(long long)));
+                CHECK_CUDA(cudaMemset(d_sums, 0, 2 * sizeof(long long)));
+                dense_sum_kernel<<<(dense_nr + 255) / 256, 256>>>(
+                    dense_rows, dense_nr, d_est, d_row_nnz, d_sums, d_sums + 1);
+                CHECK_CUDA(cudaMemcpy(&dense_est_sum, d_sums, sizeof(long long), cudaMemcpyDeviceToHost));
+                CHECK_CUDA(cudaMemcpy(&dense_nnz_sum, d_sums + 1, sizeof(long long), cudaMemcpyDeviceToHost));
+                dev_free(d_sums);
+                // dense 行 est 置 0 → d_off 重扫:gapped 偏移坍缩进 hash 侧空间(tmp 才能按缩容量分配;
+                // d_off 是全行 est 前缀,不重扫则 heavy/hash 行偏移仍指旧空间 → 越界)。
+                // 置零安全:binning 已完成,后续无消费者按 dense 行的 est 寻址(它们不走 hash/compact)。
+                if (dense_rows)
+                    zero_est_kernel<<<(dense_nr + 255) / 256, 256>>>(d_est, dense_rows, dense_nr);
+                else
+                    CHECK_CUDA(cudaMemset(d_est, 0, (size_t)A_rows * sizeof(int)));
+                CHECK_CUDA(cudaMemset(d_off, 0, sizeof(long long)));
+                if (A_rows <= 1024) {
+                    int b = 1; while (b < A_rows) b <<= 1;
+                    scan_inclusive_kernel<long long><<<1, b, b * sizeof(long long)>>>(d_est, d_off + 1, A_rows);
+                } else {
+                    thrust::inclusive_scan(
+                        thrust::make_transform_iterator(thrust::device_ptr<int>(d_est), ToLL()),
+                        thrust::make_transform_iterator(thrust::device_ptr<int>(d_est + A_rows), ToLL()),
+                        thrust::device_ptr<long long>(d_off + 1));
+                }
+                CHECK_CUDA(cudaMemcpy(&tmp_slots_dev, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
+            });
+            dbg("[%s] 方案5:count pass %d dense 行(Σest=%lld Σnnz=%lld)→ cnnz_scan 后直写终态\n",
+                tag, dense_nr, dense_est_sum, dense_nnz_sum);
+        }
+    }
+    // tmp 缩容:dense 行直写不占 gapped 槽(heavy scratch 同口径;鲸鱼阵 Phase A 行恰是 est 大头)
+    const long long tmp_slots = (dense_nr > 0) ? tmp_slots_dev : total_est;
+    d_tmp_key = decltype(d_tmp_key)(dev_alloc((size_t)tmp_slots * sizeof(unsigned long long)));
+    d_tmp_val = decltype(d_tmp_val)(dev_alloc((size_t)tmp_slots * sizeof(double)));
+    if (dense_nr > 0 && (dense_mode || dense_win_mode)) {
+        // 方案5 矩阵级:count 已出精确 row_nnz,数值 pass 在 cnnz_scan 后直写(此分支无 accumulate)
+    } else
     if (dense_mode) {
         dbg("[%s] dense 累积器路径(n=%d, est 占比 %.1f%%)\n", tag, A_cols,
             100.0 * total_est / ((double)A_rows * A_cols));
@@ -1821,7 +2022,8 @@ static void hash_product(
             } else if (bi == BIN_DITER) {
                 // dense-iter(docs/22 Phase A):重行列窗口累积,直接寻址免探测;
                 // 窗口升序 → 行内天然有序 → compact 走 copy。输出仍写 tmp(est-gapped)+ ovf 行照旧 retry。
-                {
+                // 方案5(DIRECT5):count pass 已出精确 row_nnz,数值 pass 在 cnnz_scan 后直写 → 此 bin 跳过
+                if (dense_nr == 0) {
                     size_t wsm = ((size_t)DENSE_MAX_N * 9 + 3) / 4 * 4 + (size_t)DENSE_MAX_N * sizeof(int);
                     CHECK_CUDA(cudaFuncSetAttribute(hash_dense_window_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
                     hash_dense_window_kernel<<<n, 512, wsm, cur_s>>>(
@@ -1855,8 +2057,8 @@ static void hash_product(
                     d_tab_val = decltype(d_tab_val)(dev_alloc((size_t)total_slots * sizeof(double)));
                     d_seg_beg = decltype(d_seg_beg)(dev_alloc(n * sizeof(int)));
                     d_seg_end = decltype(d_seg_end)(dev_alloc(n * sizeof(int)));
-                    d_scr_key = decltype(d_scr_key)(dev_alloc((size_t)total_est * sizeof(unsigned long long)));
-                    d_scr_val = decltype(d_scr_val)(dev_alloc((size_t)total_est * sizeof(double)));
+                    d_scr_key = decltype(d_scr_key)(dev_alloc((size_t)tmp_slots * sizeof(unsigned long long)));
+                    d_scr_val = decltype(d_scr_val)(dev_alloc((size_t)tmp_slots * sizeof(double)));
                     hash_global_kernel<<<n, HASH_BLOCK>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, d_heavy_ht, d_heavy_tab_off, d_tab_col, d_tab_val,
@@ -2001,7 +2203,10 @@ static void hash_product(
         total_est > 0 ? (double)total_est / C_nnz_result : 0.0);
 
     // est underflow check: actual C_nnz > estimated total → 回退 merge3
-    if (C_nnz_result > total_est) {
+    // 方案5:dense 行计数精确(可 > 其 est,合法),检查改 hash 侧 = C_nnz − Σnnz_dense ≤ tmp_slots
+    if (dense_nr > 0
+            ? ((long long)C_nnz_result - dense_nnz_sum > tmp_slots)
+            : ((long long)C_nnz_result > total_est)) {
         fprintf(stderr, "[hash] est underflow: C_nnz=%d > total_est=%d → 回退 merge\n", C_nnz_result, total_est);
         *C_buffer_out = nullptr; *C_rows = A_rows; *C_cols = A_cols; *C_nnz = -1;
         dev_free(rtc); dev_free(rtv); dev_free(rk); dev_free(rv); dev_free(rk2); dev_free(rv2); dev_free(rct);   // docs/21 Fix0
@@ -2045,7 +2250,8 @@ static void hash_product(
         //   gapped 区间重读)。默认关闭,守卫+代码保留,FIX2=1 可开(普通阵 margin 普遍 ≥0)
         static int g_fix2 = -1;
         if (g_fix2 < 0) { const char *e = getenv("FIX2"); g_fix2 = (e && *e) ? atoi(e) : 0; }
-        in_place = (min_marg >= 0) && g_fix2 && ((long long)C_nnz_result > 50LL * 1000 * 1000);
+        in_place = (min_marg >= 0) && g_fix2 && ((long long)C_nnz_result > 50LL * 1000 * 1000)
+                   && (dense_nr == 0);   // 方案5 互斥:direct 写终态与 tmp 前缀紧缩重叠,且 est 已置 0 致 margin 失义
         dev_free(d_eoff); dev_free(d_marg);
         dbg("[%s] compact in_place=%d (min_margin=%lld)\n", tag, (int)in_place, min_marg);
     }
@@ -2061,6 +2267,17 @@ static void hash_product(
         d_val_ip = (double*)(cb + C_rp_al + C_ci_al);
     }
     d_val = d_val_ip;
+    // 方案5 数值 pass:dense 行窗口升序直写终态(精确偏移;compact 阶段这些行整体跳过)
+    if (dense_nr > 0) {
+        prof("dense_direct", [&]{
+            size_t wsm = ((size_t)DENSE_MAX_N * 9 + 3) / 4 * 4 + (size_t)DENSE_MAX_N * sizeof(int);
+            CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
+            hash_dense_direct_kernel<<<dense_nr, 512, wsm>>>(
+                dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
+                dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr);
+            CHECK_CUDA(cudaGetLastError());
+        });
+    }
     prof("compact+sort", [&]{
         if (!in_place)
             CHECK_CUDA(cudaMemcpy(dC, dC_rp, C_rp_sz, cudaMemcpyDeviceToDevice));   // row_ptr 落位(~A_rows ints,微秒级,纳入计时)
@@ -2068,6 +2285,8 @@ static void hash_product(
             int n = (dense_mode || dense_win_mode) ? A_rows : h_cnt[bi];
             int *rows_ptr = (dense_mode || dense_win_mode) ? nullptr : (d_sort + h_off[bi]);
             if (dense_mode || dense_win_mode) {
+                // 方案5:矩阵级 dense 行已在 dense_direct 直写终态 → copy 整段跳过
+                if (dense_nr > 0) break;
                 // dense 输出全局有序:identity 行表 + 一趟 warp-batched copy
                 int *d_all = decltype(d_all)(dev_alloc((size_t)A_rows * sizeof(int)));
                 thrust::sequence(thrust::device_ptr<int>(d_all), thrust::device_ptr<int>(d_all + A_rows));
@@ -2094,8 +2313,9 @@ static void hash_product(
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_scr_key, d_scr_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());   // TEMP:定位
             } else if (bi == BIN_DITER) {
-                // dense-iter:窗口升序 = 行内天然有序,只 copy
-                hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                // dense-iter:窗口升序 = 行内天然有序,只 copy。方案5:direct 已直写 → 跳过
+                if (dense_nr == 0)
+                    hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());
             } else {
                 // ultra(行≤32)和 subwarp8(bin12):kernel 内已插入排序 → warp copy
