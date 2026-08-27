@@ -178,9 +178,18 @@ def run_ocean(mtx, timeout=CALL_TIMEOUT):
       + numeric 全部 + epilogue 3 子项 + prologue。h2d/d2h 不在 timing 里(Ocean 另算)。"""
     csr = "/tmp/cmp_ocean.csr"
     try:
-        subprocess.run([OCEAN_CONV, mtx, csr], capture_output=True, timeout=CALL_TIMEOUT)
-        subprocess.run([OCEAN_RUN, csr, OCEAN_CFG], cwd=os.path.join(REPO, "ocean"),
-                       capture_output=True, timeout=timeout)
+        # 2026-08-27 夜事故修复:spgemm 静默崩溃(convert/spgemm rc 被吞)时 stats.json 残留【上一阵】
+        # 的数据 —— refresh_ocean_sym 批首 43 阵被冻结值 4.027 污染(333SP 真值 6.16/Ga3 真值 37.05)。
+        # 修复:跑前删 stats.json + 检查 rc;失败 = DNF(None),绝不解析陈旧文件。
+        if os.path.exists(OCEAN_STATS):
+            os.remove(OCEAN_STATS)
+        r1 = subprocess.run([OCEAN_CONV, mtx, csr], capture_output=True, timeout=CALL_TIMEOUT)
+        if r1.returncode != 0:
+            return None
+        r2 = subprocess.run([OCEAN_RUN, csr, OCEAN_CFG], cwd=os.path.join(REPO, "ocean"),
+                            capture_output=True, timeout=timeout)
+        if r2.returncode != 0 or not os.path.exists(OCEAN_STATS):
+            return None
         t = json.load(open(OCEAN_STATS))["timing"]
         an  = t["analysis"]["product_calc"] + t["analysis"]["reduce"] + t["analysis"]["mem_cpy"]
         est = (t["estimation"]["hll_construct"] + t["estimation"]["hll_merge"]
