@@ -1,5 +1,34 @@
 # 26 · 计时口径全面审计(2026-08-27 夜,用户质询触发)
 
+> ## ⚠ 补遗(2026-08-27 夜二班,全量刷新完成后)——本表数字以此为准
+>
+> **终版:geomean Auto/Ocean = 1.9919×(含 symbolic 权威口径,336 阵;wb-edu 剔除,见下)。
+> 不含 symbolic 口径 = 2.1585×。审计预测 "~2.0×" 命中。** 基线 `compare/ocean337/methods_cmp_v9_oceansym.csv`
+> (run_ocean 已含 rc 守卫)。本文档其余部分为审计过程记录。
+>
+> **刷新过程揭出 stale-stats 污染事故**(修正了历次数字的三重来源):
+> 1. **批首 43 阵冻结值 4.027**:20:40-20:47 窗口 spgemm 静默崩(根因未定,疑似外部 GPU 占用),
+>    旧 run_ocean 吞 rc → 解析上一阵残留 stats.json。333SP 真值 6.15/Ga3 37.05/Cube_Coup 87.8 实锤。
+>    另 af_3_k101/atmosmodj/conf5_4-8x8-15 同病(与前阵完全同值签名扫出)。
+> 2. **wb-edu "1.47ms/~1000×" 是假的**:Ocean 的 spgemm 在 wb-edu 上**跨批确定性崩溃**
+>    (`CUDA kernel error in Wrappers.cuh:902 illegal memory access` = 其 epilogue 排序内核越界),
+>    所有历史 CSV 的 wb-edu 值都是 echo 前序 water_tank(1.469)。真值 = **DNF**;我方 910ms 正常
+>    完成且正确。历史 geomean 被 wb-edu 一项虚罚 ~2%(1000×^(1/337))。**任务④关闭:异常不存在,
+>    是 Ocean 的健壮性缺陷。**
+> 3. **修复**:run_ocean 跑前删 stats.json + 查 convert/spgemm rc + 缺文件 → DNF;
+>    rerun_ocean_bogus.py(43)+ rerun_ocean_extra4.py(4)定向重跑。今后该类失败显示 DNF 而非假数据。
+>
+> **新口径结构变化(vs docs/20 时代 2.279×)**:
+> - **≥5× 只剩 5 阵**(mult_dcop×3 7.7-7.9× / vsp_south31_slptsk 5.6× / pre2 5.3×)—— top losers
+>   大换血(Ge99 4.4× 已跌出 top20),头部空间仅 1.019×。**前 24 阵头部战线基本打赢,进入中段**。
+> - 2-5× = 145 阵(大头),<2× = 186 阵;全 1× 的 geomean = 1.956×。
+> - 按 n:最差 = 10k-200k(2.12×)中尺寸;按 C 行长:2k+(2.6-3.1×)重行最差(docs/24
+>   "hash 速度∝表大小"结论在新口径下不变)→ LLB/DIRECT5/PhaseB v2 正对此。
+> - symbolic 效应:226 阵变慢(中位 +14%),小阵主导(FEM_3D_thermal2 +195%)。
+>
+> docs 20/23/24/25 的 vs Ocean 数字均为不含 symbolic 的历史口径(其结论的结构性判断不受影响,
+> 涉及 Ocean 绝对值的对比按本补遗 1.99×/2.16× 换算)。
+
 ## 结论先行
 
 **口径形态对齐,但 Ocean 列漏计 symbolic —— 当前 CSV 对我们不利(保守)5-20%/阵。**
