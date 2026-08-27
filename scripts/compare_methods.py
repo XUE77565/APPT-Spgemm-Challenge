@@ -185,9 +185,10 @@ def run_ocean(mtx, timeout=CALL_TIMEOUT):
         an  = t["analysis"]["product_calc"] + t["analysis"]["reduce"] + t["analysis"]["mem_cpy"]
         est = (t["estimation"]["hll_construct"] + t["estimation"]["hll_merge"]
                + t["estimation"]["malloc"] + t["estimation"]["sampling"])
-        num = sum(t["numeric"].values())
-        epi = t["epilogue"]["sort"] + t["epilogue"]["copy"] + t["epilogue"]["scan"]
-        return an + est + num + epi + t.get("prologue", 0)
+        sym = sum(t.get("symbolic", {}).values())   # 2026-08-27 口径修正:type-0 阵真实发生
+        num = sum(t["numeric"].values())            # 的 symbolic pass 必须计入(Ocean 论文的
+        epi = t["epilogue"]["sort"] + t["epilogue"]["copy"] + t["epilogue"]["scan"]  # iteration 时间含它)
+        return an + est + sym + num + epi + t.get("prologue", 0)
     except Exception:
         return None
 
