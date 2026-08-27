@@ -55,7 +55,28 @@ DIRECT5:        count pass(只标记 flag,1B/列)→ 精确 row_nnz
 A/B:`DIRECT5=1` vs 默认,profile_top_losers.py(三坑:MP_HOST_MB≥8192 / 取末轮 / 排除
 h2d-d2h-TOTAL);C_nnz 与乱序校验(DBG 的 hash_check_sorted + 与 CSV cnnz 对表)。
 
-## 4. 实现状态
+## 4. 同场实现:localLoadBalance 移植(LLB=1,默认关)
+
+- `row_span_kernel` 顺产 `max_b_len`(它已在扫 B 行,零额外成本);`local_load_balance()`
+  device 函数 = Ocean `AccumulatorCommon.cuh:67` 同款语义:起步均值**排除最长 B 行**
+  (`(flop−maxb)/(a_len−1)`,straggler 由夹逼吸收)→ 取最近 2^k → 按 max_sub_iter vs
+  num_iters 的 2× 失衡双向调 → clamp。
+- `hash_spa_kernel` 的 G 选择替换:静态梯(ht_size→G∈{4..32})→ 按行动态 log2(G)∈[2,8]
+  (**上限 HASH_BLOCK=256:整 block 伺候一个 k**,我们的内层无 warp 内在,合法)。
+  治 Ge99 类 4.4×(重行 B 长方差大,统一 G 必然失衡)。
+- 移植修正:原版在 avg_ops>2^ubound 时 `1<<(ubound−log_nthr)` 负移位 UB(其 bin 行长
+  有界故未触发),我们加了预钳位。
+- A/B:`LLB=1` vs 0,阵 = Ge99H100 / c-58 / bloweya / soc / Enron + 回归 pwtk/333SP/bcsstk30。
+
+## 5. 同场修复:成功路径逐行数组泄漏
+
+审计发现:d_bkid/d_sort/d_est/**d_flop**/d_span_lo/d_span_len(/d_maxbl)此前**只在早退
+路径释放,成功路径全漏**(USE_DEV_POOL 默认关 = cudaMalloc 模式)≈ 28B×A_rows/调用,
+warmup+bench 多轮累加 —— 鲸鱼阵(c-73 峰值 ~62GB、rajat 类 OOM 史)的隐性推手。
+已补尾部释放(d2h 后区域,与既有 12 buffer 尾释放同址,不进 hash-prof 相位;早退路径补
+d_flop)。docs/21 Fix0 修了 retry 缓冲,这批是当年漏网的另一半。
+
+## 6. 实现状态
 
 - 代码:`src/spgemm_kernel_hash.cu`(hash_dense_count_kernel / hash_dense_direct_kernel /
   dense_sum_kernel[unsigned ll 原子 —— sm_90 无 signed ll atomicAdd 重载]/ zero_est_kernel

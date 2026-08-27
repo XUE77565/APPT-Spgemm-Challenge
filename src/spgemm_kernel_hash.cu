@@ -817,6 +817,46 @@ __global__ void hash_spa_batched_kernel(
     }
 }
 
+// localLoadBalance 移植(docs/27 §4.2,Ocean AccumulatorCommon.cuh:67 同款语义):
+// 按行 (a_len, flop, max_b_len) 动态选 2^log_nthr 线程/k —— 起步均值【排除最长 B 行】(它是
+// straggler,由后续双向夹逼吸收),再按 max_sub_iter vs num_iters 的 2× 失衡双向调 G。
+// 我们无 warp 内在依赖,G 上限 = HASH_BLOCK(整 block 伺候一个 k)。返回 log2(G)。
+__device__ __forceinline__ int local_load_balance(int n_element_a, int num_products, int max_elements_b,
+                                                  int lbound, int ubound)
+{
+    if (num_products <= 0) return lbound;
+    int avg_ops = (num_products - max_elements_b) / (n_element_a > 1 ? n_element_a - 1 : 1);
+    if (avg_ops < 1) avg_ops = 1;
+    int log_nthr = 31 - __clz((unsigned)avg_ops);
+    if (log_nthr < 1) log_nthr = 1;
+    if ((1 << log_nthr) * 3 < avg_ops * 2) log_nthr += 1;   // 取最近 2^k(非线性截断)
+    if (log_nthr > ubound) log_nthr = ubound;               // 预钳位:防 1<<(ubound-log_nthr) 负移位 UB(Ocean 原版隐患)
+    int a_elem_per_iter = 1 << (ubound - log_nthr);
+    int num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
+    int max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
+    while (max_sub_iter > num_iters * 2) {
+        if (log_nthr >= ubound) break;
+        log_nthr++;
+        max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
+        a_elem_per_iter = 1 << (ubound - log_nthr);
+        num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
+    }
+    while (num_iters > max_sub_iter * 2) {
+        if (log_nthr <= lbound) break;
+        log_nthr--;
+        max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
+        a_elem_per_iter = 1 << (ubound - log_nthr);
+        num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
+    }
+    while (a_elem_per_iter > n_element_a && (1 << log_nthr) < max_elements_b) {
+        log_nthr++;
+        a_elem_per_iter = 1 << (ubound - log_nthr);
+    }
+    if (log_nthr < lbound) log_nthr = lbound;
+    if (log_nthr > ubound) log_nthr = ubound;
+    return log_nthr;
+}
+
 // 按桶跑:ht_size = 该桶 hash 表大小;轻行小表、重行大表,distinct>ht_size → overflow_flag
 __global__ void hash_spa_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
@@ -826,7 +866,10 @@ __global__ void hash_spa_kernel(
     const long long *row_off,
     unsigned long long *tmp_key, double *tmp_val,
     int *row_nnz, int *overflow_flag,
-    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+    int *ovf_rows, int *ovf_cnt, int *row_ovf,
+    const int *row_flop = nullptr,      // localLoadBalance 输入(行 flop);null=旧静态 G
+    const int *row_maxbl = nullptr,     // 行 k 集内 B 行最大长;null=旧静态 G
+    int llb = 0)                        // LLB=1:按行动态 G(docs/27 §4.2)
 {
     int idx = blockIdx.x;
     if (idx >= n_in_bucket) return;
@@ -841,8 +884,14 @@ __global__ void hash_spa_kernel(
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    // G 从 ht_size 推:重行→G 大,轻行→G 小(更多 k 并行);G ∈ {4,8,16,32}
-    int G = (ht_size <= 64) ? 4 : (ht_size <= 256) ? 8 : (ht_size <= 1024) ? 16 : 32;
+    // G 选择:默认按 ht_size 静态梯(重行→G 大);LLB=1 改按行 (a_len, flop, max_b_len) 动态 2^k
+    // (Ocean localLoadBalance 同款语义,治 Ge99 类 4.4× 的负载不均;G 可到 HASH_BLOCK=整 block/k)
+    int logG;
+    if (llb && row_flop && row_maxbl)
+        logG = local_load_balance(re - rs, row_flop[i], row_maxbl[i], 2, 31 - __clz((unsigned)HASH_BLOCK));
+    else
+        logG = (ht_size <= 64) ? 2 : (ht_size <= 256) ? 3 : (ht_size <= 1024) ? 4 : 5;
+    int G = 1 << logG;
     int num_groups = HASH_BLOCK / G;
     int my_group = tid / G, my_id = tid % G;
     for (int p = rs + my_group; p < re; p += num_groups) {   // 并行 k(stride num_groups)
@@ -1381,11 +1430,12 @@ __global__ void heavy_seg_kernel(
 __global__ void row_span_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows,
     const int *B_row_ptr, const int *B_col_idx,
-    int *span_lo, int *span_len)
+    int *span_lo, int *span_len,
+    int *max_b_len /*nullable:本行 k 集内 B 行最大长(localLoadBalance 输入)*/)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
-    int lo = INT_MAX, hi = -1;
+    int lo = INT_MAX, hi = -1, mb = 0;
     for (int p = A_row_ptr[i]; p < A_row_ptr[i + 1]; p++) {
         int k = A_col_idx[p];
         int b0 = B_row_ptr[k], b1 = B_row_ptr[k + 1];
@@ -1393,11 +1443,14 @@ __global__ void row_span_kernel(
             int c0 = B_col_idx[b0], c1 = B_col_idx[b1 - 1];
             if (c0 < lo) lo = c0;
             if (c1 > hi) hi = c1;
+            if (b1 - b0 > mb) mb = b1 - b0;
         }
     }
     span_lo[i]  = (lo == INT_MAX) ? 0 : lo;
     span_len[i] = (hi < lo) ? 0 : (hi - lo + 1);
+    if (max_b_len) max_b_len[i] = mb;
 }
+
 
 struct ToLL {   // thrust scan 输入升 64 位(thrust 按输入 value_type 累加,int 输入 Σ>2^31 回绕)
     __host__ __device__ long long operator()(int x) const { return (long long)x; }
@@ -1686,10 +1739,11 @@ static void hash_product(
     int *d_flop; d_flop = decltype(d_flop)(dev_alloc(A_rows * sizeof(int)));
     int *d_span_lo; d_span_lo = decltype(d_span_lo)(dev_alloc(A_rows * sizeof(int)));    // docs/24 跨度窗口
     int *d_span_len; d_span_len = decltype(d_span_len)(dev_alloc(A_rows * sizeof(int)));
+    int *d_maxbl;   d_maxbl   = decltype(d_maxbl)(dev_alloc(A_rows * sizeof(int)));   // 行 k 集内 B 行最大长(LLB 输入)
     long long total_flop = 0;
     prof("count_flop", [&]{
         count_intermediates_par_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
-        row_span_kernel<<<(A_rows + 255) / 256, 256>>>(dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_span_lo, d_span_len);
+        row_span_kernel<<<(A_rows + 255) / 256, 256>>>(dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_span_lo, d_span_len, d_maxbl);
         CHECK_CUDA(cudaGetLastError());
         total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
@@ -1963,6 +2017,9 @@ static void hash_product(
         CHECK_CUDA(cudaMemset(d_row_ovf, 0, (size_t)A_rows * sizeof(int)));
         static int g_bsearch_s = -1;
     if (g_bsearch_s < 0) { const char *e = getenv("BSEARCH"); g_bsearch_s = (e && *e && atoi(e) > 0) ? 1 : 0; }
+    // LLB=1:hash_spa_kernel 按行动态 G(localLoadBalance 移植,docs/27 §4.2;默认关待 A/B)
+    static int g_llb = -1;
+    if (g_llb < 0) { const char *e = getenv("LLB"); g_llb = (e && *e && atoi(e) > 0) ? 1 : 0; }
     const bool g_bsearch = g_bsearch_s;
     // 方案4修正: HYBRID=1 时 value 走全局 L2 原子(学 Ocean HYBRID_HASHMAP)
     static int g_hybrid_env = -2;
@@ -2094,7 +2151,8 @@ static void hash_product(
                     hash_spa_kernel<<<n, HASH_BLOCK, smem_flat, cur_s>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, ht, d_off,
-                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf,
+                        d_flop, d_maxbl, g_llb);
                 }
             }
         }
@@ -2176,11 +2234,12 @@ static void hash_product(
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
-        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_gv); dev_free(d_gv_off);
+        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_maxbl); dev_free(d_gv); dev_free(d_gv_off);
         dev_free(d_csc_cp); dev_free(d_csc_ri); dev_free(d_csc_val);
         dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
         dev_free(d_seg_beg); dev_free(d_seg_end); dev_free(d_scr_key); dev_free(d_scr_val); dev_free(d_cub_tmp);
         dev_free(d_ovf_rows); dev_free(d_ovf_cnt); dev_free(d_row_ovf);
+        dev_free(d_flop);
         return;
     }
 
@@ -2213,12 +2272,13 @@ static void hash_product(
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
         dev_free(dA); dev_free(d_off); dev_free(d_row_nnz);
         dev_free(d_overflow); dev_free(d_tmp_key); dev_free(d_tmp_val);
-        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_gv); dev_free(d_gv_off);
+        dev_free(d_bkid); dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos); dev_free(d_sort); dev_free(d_est); dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_maxbl); dev_free(d_gv); dev_free(d_gv_off);
         dev_free(dC_rp);
         dev_free(d_csc_cp); dev_free(d_csc_ri); dev_free(d_csc_val);
         dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
         dev_free(d_seg_beg); dev_free(d_seg_end); dev_free(d_scr_key); dev_free(d_scr_val); dev_free(d_cub_tmp);
         dev_free(d_ovf_rows); dev_free(d_ovf_cnt); dev_free(d_row_ovf);
+        dev_free(d_flop);
         return;
     }
 
@@ -2374,6 +2434,13 @@ static void hash_product(
     dev_free(d_heavy_ht); dev_free(d_heavy_tab_off); dev_free(d_tab_col); dev_free(d_tab_val);
     dev_free(d_seg_beg); dev_free(d_seg_end); dev_free(d_scr_key); dev_free(d_scr_val); dev_free(d_cub_tmp);
     dev_free(d_ovf_rows); dev_free(d_ovf_cnt); dev_free(d_row_ovf);
+    // 成功路径逐行数组泄漏修复(2026-08-27):d_bkid/d_sort/d_est/d_flop/d_span_*/d_maxbl 此前只在
+    // 早退路径释放,成功路径漏 ~28B×A_rows/调用(USE_DEV_POOL 默认关 = cudaMalloc 模式;whale 阵
+    // warmup+bench 多轮累加 GB 级 —— c-73 峰值 ~62GB 的隐性推手之一)。尾部释放与 d2h 后既有
+    // 12 buffer 同区域,不进 hash-prof 计时相位。
+    dev_free(d_bkid); dev_free(d_sort); dev_free(d_est); dev_free(d_flop);
+    dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_maxbl); dev_free(d_gv); dev_free(d_gv_off);
+    dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos);
 }
 
 void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
