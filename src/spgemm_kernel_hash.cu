@@ -206,6 +206,46 @@ __global__ void mh_merge_kernel(
     }
 }
 
+// localLoadBalance 移植(docs/27 §4.2,Ocean AccumulatorCommon.cuh:67 同款语义):
+// 按行 (a_len, flop, max_b_len) 动态选 2^log_nthr 线程/k —— 起步均值【排除最长 B 行】(它是
+// straggler,由后续双向夹逼吸收),再按 max_sub_iter vs num_iters 的 2× 失衡双向调 G。
+// 我们无 warp 内在依赖,G 上限 = HASH_BLOCK(整 block 伺候一个 k)。返回 log2(G)。
+__device__ __forceinline__ int local_load_balance(int n_element_a, int num_products, int max_elements_b,
+                                                  int lbound, int ubound)
+{
+    if (num_products <= 0) return lbound;
+    int avg_ops = (num_products - max_elements_b) / (n_element_a > 1 ? n_element_a - 1 : 1);
+    if (avg_ops < 1) avg_ops = 1;
+    int log_nthr = 31 - __clz((unsigned)avg_ops);
+    if (log_nthr < 1) log_nthr = 1;
+    if ((1 << log_nthr) * 3 < avg_ops * 2) log_nthr += 1;   // 取最近 2^k(非线性截断)
+    if (log_nthr > ubound) log_nthr = ubound;               // 预钳位:防 1<<(ubound-log_nthr) 负移位 UB(Ocean 原版隐患)
+    int a_elem_per_iter = 1 << (ubound - log_nthr);
+    int num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
+    int max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
+    while (max_sub_iter > num_iters * 2) {
+        if (log_nthr >= ubound) break;
+        log_nthr++;
+        max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
+        a_elem_per_iter = 1 << (ubound - log_nthr);
+        num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
+    }
+    while (num_iters > max_sub_iter * 2) {
+        if (log_nthr <= lbound) break;
+        log_nthr--;
+        max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
+        a_elem_per_iter = 1 << (ubound - log_nthr);
+        num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
+    }
+    while (a_elem_per_iter > n_element_a && (1 << log_nthr) < max_elements_b) {
+        log_nthr++;
+        a_elem_per_iter = 1 << (ubound - log_nthr);
+    }
+    if (log_nthr < lbound) log_nthr = lbound;
+    if (log_nthr > ubound) log_nthr = ubound;
+    return log_nthr;
+}
+
 // ===================== dense 累积器路径(2026-08-26,超越点) =====================
 // 触发:n ≤ DENSE_MAX_N 且 输出足够稠密(avg_est/n ≥ DENSE_MIN_FRAC)—— exdata_1 类
 // (6001²,est 1878/行 = 31% 稠密,76× dup)。SMEM 直接寻址表 vals[n]+flags[n]:
@@ -297,7 +337,8 @@ __global__ void hash_dense_window_kernel(
     int *row_nnz, int *overflow_flag,
     int *ovf_rows, int *ovf_cnt, int *row_ovf,
     const int *bucket_rows /*nullable:bin 行列表;null=矩阵级模式,blockIdx 即行号*/,
-    const int *span_lo /*nullable:每行列跨度起点;null=0(矩阵级模式扫全 [0,n))*/)
+    const int *span_lo /*nullable:每行列跨度起点;null=0(矩阵级模式扫全 [0,n))*/,
+    const int *row_flop = nullptr, const int *row_maxbl = nullptr /*Phase B v2-lite 动态组*/)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
@@ -386,7 +427,8 @@ __global__ void hash_dense_count_kernel(
     int upper_tri, int A_rows, int n,
     int *row_nnz,
     const int *bucket_rows /*nullable,同 window kernel*/,
-    const int *span_lo /*nullable*/)
+    const int *span_lo /*nullable*/,
+    const int *row_flop = nullptr, const int *row_maxbl = nullptr /*Phase B v2-lite*/)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
@@ -425,7 +467,27 @@ __global__ void hash_dense_count_kernel(
     if (tid == 0) row_nnz[i] = total;
 }
 
-// numeric pass:直写终态(与 hash_dense_window_kernel 同构,输出改 dC 精确偏移;无 ovf/重试路径)。
+#ifndef PB2_STAGE
+#define PB2_STAGE 4
+#endif
+// dense 行 a_len 采集/散射(全局 cursor 区偏移构造)
+__global__ void alen_gather_kernel(const int *rows, int nr, const int *A_rp, int *alen) {
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j < nr) { int r = rows ? rows[j] : j; alen[j] = A_rp[r + 1] - A_rp[r]; }
+}
+__global__ void scatter_alen_kernel(const int *rows, int nr, const int *alen, int *off_by_row /*[A_rows],已清零*/) {
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j < nr) off_by_row[rows ? rows[j] : j] = alen[j];
+}
+
+// numeric pass:直写终态 + Ocean iter 内核机制(docs/30 Phase B v2):start_map 游标 + 动态组
+// + 数据驱动窗口。三件套消除旧窗口内核的两个结构税:①每窗每 k 的 lower_bound 重复搜索
+// (G>32 时冗余 = G×2log(avgB),c-58/case39/gupta1/TSOPF 回归主因);②固定 warp-per-k 的
+// 线程利用率 32×a_len/512(mult_dcop 31% 占用 = 6.9× 差距主因)。游标:每 k 一个 SMEM 槽,
+// 首窗一次 lower_bound 定位到 span_lo,越窗列回写 atomicMin(= O(1) 推进,免重复二分);
+// 下一窗起点 = 全体越窗列的最小列(数据驱动,跳空窗)。窗口宽 PB2_W(SMEM 17B/列:
+// val8+flag1+pref4+cursor4 → 12900 列 ≈ 219KB)。
+#define PB2_W 12900   // 游标版窗口宽(SMEM 预算 17B×W ≤ ~220KB)
 __global__ void hash_dense_direct_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
@@ -433,67 +495,166 @@ __global__ void hash_dense_direct_kernel(
     const int *exact_rp, int *dC_ci, double *dC_val,
     int *row_nnz,
     const int *bucket_rows /*nullable*/,
-    const int *span_lo /*nullable*/)
+    const int *span_lo /*nullable*/,
+    const int *row_flop = nullptr, const int *row_maxbl = nullptr,
+    int *smap_base = nullptr, const int *smap_off = nullptr, int smir_bias = 0,
+    int use_cursor = 1)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
     int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
     extern __shared__ __align__(8) unsigned char wsmem[];
     double *dval = (double*)wsmem;
-    unsigned char *dflag = wsmem + (size_t)DENSE_MAX_N * sizeof(double);
-    int *dpref = (int*)(wsmem + (((size_t)DENSE_MAX_N * 9) + 3) / 4 * 4);
+    unsigned char *dflag = wsmem + (size_t)PB2_W * sizeof(double);
+    int *dpref = (int*)(wsmem + (((size_t)PB2_W * 9) + 3) / 4 * 4);
+    int *smap = smap_base + smap_off[i];                    // 活动游标(本窗 atomicMin 目标)
+    int *smir = smap_base + smir_bias + smap_off[i];        // 本窗起点镜像(读旧值;原槽复位 INT_MAX)
+    __shared__ int s_next_lo;
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
-    int base = exact_rp[i];     // 精确偏移(int;C_nnz ≤ 2^31)
-    int cap = row_nnz[i];       // count pass 的精确值(无 ovf)
+    int a_len = re - rs;
+    int base = exact_rp[i];
+    int cap = row_nnz[i];
     int out = 0;
     int lo0 = span_lo ? span_lo[i] : 0;
-    int nw_win = span_lo ? (n - lo0 + DENSE_MAX_N - 1) / DENSE_MAX_N
-                         : (n + DENSE_MAX_N - 1) / DENSE_MAX_N;
-    for (int wi = 0; wi < nw_win; wi++) {
-        int c0 = lo0 + wi * DENSE_MAX_N, c1 = min(c0 + DENSE_MAX_N, n);
-        int w = c1 - c0;
+
+    int logG = (row_flop && row_maxbl) ? local_load_balance(a_len, row_flop[i], row_maxbl[i], 5, 9)
+                                       : 5;
+    int G = 1 << logG, num_groups = blockDim.x >> logG;
+    int my_group = tid >> logG, my_id = tid & (G - 1);
+
+    for (int p = rs + tid; p < re; p += blockDim.x) {
+        int k = A_col_idx[p];
+        smap[p - rs] = dev_lower_bound(B_col_idx, B_row_ptr[k], B_row_ptr[k + 1], lo0);
+    }
+    if (tid == 0) s_next_lo = n;
+    __syncthreads();
+    if (PB2_STAGE < 1) return;
+
+    int avgB = (row_flop && a_len > 0) ? row_flop[i] / a_len : 0;
+    if (avgB < 64 || !use_cursor) {   // PB2_CURSOR=0(host env)→ 全行走搜索路径(=52b89da 对照)
+        // 混合路由(docs/30):avgB(=flop/a_len,平均 B 行长)< 64 的行走旧固定窗搜索路径 ——
+        // 游标镜像/复位是每窗 O(a_len) 全局往返,开销/工作量 ∝ a_len×窗数/flop = 1/avgB;
+        // TSOPF(avgB≈16)游标版 +22% 实锤,mult_dcop(avgB≈4000)游标 -42%。旧路径 = 52b89da 行为。
+        int nw_win = span_lo ? (n - lo0 + PB2_W - 1) / PB2_W
+                             : (n + PB2_W - 1) / PB2_W;
+        for (int wi = 0; wi < nw_win; wi++) {
+            int c0 = lo0 + wi * PB2_W, c1 = min(c0 + PB2_W, n);
+            int w = min(PB2_W, n - c0);
+            for (int j = tid; j < w; j += blockDim.x) { dval[j] = 0.0; dflag[j] = 0; }
+            __syncthreads();
+            for (int p = rs + warp; p < re; p += nw) {
+                int k = A_col_idx[p];
+                double a = A_val[p];
+                int ks = dev_lower_bound(B_col_idx, B_row_ptr[k], B_row_ptr[k + 1], c0);
+                int ke = dev_lower_bound(B_col_idx, ks, B_row_ptr[k + 1], c1);
+                for (int q = ks + lane; q < ke; q += 32) {
+                    int j = B_col_idx[q] - c0;
+                    if (upper_tri && (c0 + j) < i) continue;
+                    atomicAdd(&dval[j], a * B_val[q]);
+                    dflag[j] = 1;
+                }
+            }
+            __syncthreads();
+            if (warp == 0) {
+                int seglen = (w + 31) / 32;
+                int lo = lane * seglen, hi = min(lo + seglen, w);
+                int run = 0;
+                for (int j = lo; j < hi; j++) { dpref[j] = run; run += dflag[j]; }
+                int excl = run;
+                for (int off = 1; off < 32; off <<= 1) {
+                    int v = __shfl_up_sync(0xffffffff, excl, off);
+                    if (lane >= off) excl += v;
+                }
+                for (int j = lo; j < hi; j++) dpref[j] += excl - run;
+            }
+            __syncthreads();
+            for (int j = tid; j < w; j += blockDim.x) {
+                if (dflag[j]) {
+                    int rank = out + dpref[j];
+                    if (rank >= cap) continue;
+                    dC_ci[base + rank] = c0 + j;
+                    dC_val[base + rank] = dval[j];
+                }
+            }
+            out += dpref[w - 1] + dflag[w - 1];
+            __syncthreads();
+        }
+        if (tid == 0 && out != cap) row_nnz[i] = out;
+        return;
+    }
+    int win_lo = lo0;
+    while (win_lo < n) {
+        int w = min(PB2_W, n - win_lo);
         for (int j = tid; j < w; j += blockDim.x) { dval[j] = 0.0; dflag[j] = 0; }
         __syncthreads();
-        for (int p = rs + warp; p < re; p += nw) {
-            int k = A_col_idx[p];
-            double a = A_val[p];
-            int ks = dev_lower_bound(B_col_idx, B_row_ptr[k], B_row_ptr[k + 1], c0);
-            int ke = dev_lower_bound(B_col_idx, ks, B_row_ptr[k + 1], c1);
-            for (int q = ks + lane; q < ke; q += 32) {
-                int j = B_col_idx[q] - c0;
-                if (upper_tri && (c0 + j) < i) continue;
-                atomicAdd(&dval[j], a * B_val[q]);
-                dflag[j] = 1;
+        if (tid == 0) s_next_lo = n;
+        __syncthreads();
+        // 每窗读游标进镜像 + 原槽复位 INT_MAX(Ocean 原版 reset-to-∞ 语义):否则旧游标恒小于
+        // 新 break 值 → atomicMin 永不更新 → 游标不前进 → 下窗重读旧位置 → col<win_lo → j<0
+        // → SMEM 下越界 → illegal instruction(今晚实锤的坑,docs/30)
+        for (int p = rs + tid; p < re; p += blockDim.x) {
+            int v = smap[p - rs];
+            smir[p - rs] = v;
+            smap[p - rs] = 0x7fffffff;
+        }
+        __syncthreads();
+        int my_next = n;
+        if (PB2_STAGE >= 2) {
+            for (int p = rs + my_group; p < re; p += num_groups) {
+                int st = smir[p - rs];
+                if (st == 0x7fffffff) continue;   // 哨兵:该 k 已耗尽(INT_MAX+my_id 会溢出为负 → 全局越界)
+                int k = A_col_idx[p];
+                double a = A_val[p];
+                int b_end = B_row_ptr[k + 1];
+                for (int q = st + my_id; q < b_end; q += G) {
+                    int j = B_col_idx[q] - win_lo;
+                    if (j >= w) {
+                        atomicMin(&smap[p - rs], q);
+                        if (B_col_idx[q] < my_next) my_next = B_col_idx[q];
+                        break;
+                    }
+                    int col = win_lo + j;
+                    if (upper_tri && col < i) continue;
+                    atomicAdd(&dval[j], a * B_val[q]);
+                    dflag[j] = 1;
+                }
+            }
+            if (my_next < n) atomicMin(&s_next_lo, my_next);
+        }
+        __syncthreads();
+        if (PB2_STAGE >= 3) {
+            if (warp == 0) {
+                int seglen = (w + 31) / 32;
+                int lo = lane * seglen, hi = min(lo + seglen, w);
+                int run = 0;
+                for (int j = lo; j < hi; j++) { dpref[j] = run; run += dflag[j]; }
+                int excl = run;
+                for (int off = 1; off < 32; off <<= 1) {
+                    int v = __shfl_up_sync(0xffffffff, excl, off);
+                    if (lane >= off) excl += v;
+                }
+                for (int j = lo; j < hi; j++) dpref[j] += excl - run;
             }
         }
         __syncthreads();
-        if (warp == 0) {
-            int seglen = (w + 31) / 32;
-            int lo = lane * seglen, hi = min(lo + seglen, w);
-            int run = 0;
-            for (int j = lo; j < hi; j++) { dpref[j] = run; run += dflag[j]; }
-            int excl = run;
-            for (int off = 1; off < 32; off <<= 1) {
-                int v = __shfl_up_sync(0xffffffff, excl, off);
-                if (lane >= off) excl += v;
+        if (PB2_STAGE >= 4) {
+            for (int j = tid; j < w; j += blockDim.x) {
+                if (dflag[j]) {
+                    int rank = out + dpref[j];
+                    if (rank >= cap) continue;
+                    dC_ci[base + rank] = win_lo + j;
+                    dC_val[base + rank] = dval[j];
+                }
             }
-            for (int j = lo; j < hi; j++) dpref[j] += excl - run;
+            out += dpref[w - 1] + dflag[w - 1];
         }
+        int next = s_next_lo;
         __syncthreads();
-        for (int j = tid; j < w; j += blockDim.x) {
-            if (dflag[j]) {
-                int rank = out + dpref[j];
-                if (rank >= cap) continue;   // SAFETY:count/direct 同构恒不触发;防御性守卫
-                dC_ci[base + rank] = c0 + j;
-                dC_val[base + rank] = dval[j];
-            }
-        }
-        out += dpref[w - 1] + dflag[w - 1];
-        __syncthreads();
+        win_lo = next;
     }
     if (tid == 0 && out != cap)
-        row_nnz[i] = out;   // SAFETY:理论上不达;不一致时以数值侧为准(下游仅读 dC_rp,不再用 row_nnz)
+        row_nnz[i] = out;
 }
 
 // dense 行集合的 Σest / Σrow_nnz / Σflop(方案5:tmp 缩容 + est 下溢检查改 hash 侧口径 + dup 门)
@@ -819,45 +980,6 @@ __global__ void hash_spa_batched_kernel(
     }
 }
 
-// localLoadBalance 移植(docs/27 §4.2,Ocean AccumulatorCommon.cuh:67 同款语义):
-// 按行 (a_len, flop, max_b_len) 动态选 2^log_nthr 线程/k —— 起步均值【排除最长 B 行】(它是
-// straggler,由后续双向夹逼吸收),再按 max_sub_iter vs num_iters 的 2× 失衡双向调 G。
-// 我们无 warp 内在依赖,G 上限 = HASH_BLOCK(整 block 伺候一个 k)。返回 log2(G)。
-__device__ __forceinline__ int local_load_balance(int n_element_a, int num_products, int max_elements_b,
-                                                  int lbound, int ubound)
-{
-    if (num_products <= 0) return lbound;
-    int avg_ops = (num_products - max_elements_b) / (n_element_a > 1 ? n_element_a - 1 : 1);
-    if (avg_ops < 1) avg_ops = 1;
-    int log_nthr = 31 - __clz((unsigned)avg_ops);
-    if (log_nthr < 1) log_nthr = 1;
-    if ((1 << log_nthr) * 3 < avg_ops * 2) log_nthr += 1;   // 取最近 2^k(非线性截断)
-    if (log_nthr > ubound) log_nthr = ubound;               // 预钳位:防 1<<(ubound-log_nthr) 负移位 UB(Ocean 原版隐患)
-    int a_elem_per_iter = 1 << (ubound - log_nthr);
-    int num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
-    int max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
-    while (max_sub_iter > num_iters * 2) {
-        if (log_nthr >= ubound) break;
-        log_nthr++;
-        max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
-        a_elem_per_iter = 1 << (ubound - log_nthr);
-        num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
-    }
-    while (num_iters > max_sub_iter * 2) {
-        if (log_nthr <= lbound) break;
-        log_nthr--;
-        max_sub_iter = (max_elements_b + (1 << log_nthr) - 1) >> log_nthr;
-        a_elem_per_iter = 1 << (ubound - log_nthr);
-        num_iters = (n_element_a + a_elem_per_iter - 1) / a_elem_per_iter;
-    }
-    while (a_elem_per_iter > n_element_a && (1 << log_nthr) < max_elements_b) {
-        log_nthr++;
-        a_elem_per_iter = 1 << (ubound - log_nthr);
-    }
-    if (log_nthr < lbound) log_nthr = lbound;
-    if (log_nthr > ubound) log_nthr = ubound;
-    return log_nthr;
-}
 
 // 按桶跑:ht_size = 该桶 hash 表大小;轻行小表、重行大表,distinct>ht_size → overflow_flag
 __global__ void hash_spa_kernel(
@@ -1965,7 +2087,7 @@ static void hash_product(
                     CHECK_CUDA(cudaFuncSetAttribute(hash_dense_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)csm));
                 hash_dense_count_kernel<<<dense_nr, 512, csm>>>(
                     dA_rp, dA_ci, dB_rp, dB_ci, upper_tri, A_rows, A_cols,
-                    d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr);
+                    d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr, d_flop, d_maxbl);
                 CHECK_CUDA(cudaGetLastError());
                 unsigned long long *d_sums = decltype(d_sums)(dev_alloc(2 * sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_sums, 0, 2 * sizeof(long long)));
@@ -2032,7 +2154,7 @@ static void hash_product(
             hash_dense_window_kernel<<<A_rows, 512, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
-                d_ovf_rows, d_ovf_cnt, d_row_ovf, nullptr, nullptr);
+                d_ovf_rows, d_ovf_cnt, d_row_ovf, nullptr, nullptr, d_flop, d_maxbl);
             CHECK_CUDA(cudaGetLastError());
         });
     } else
@@ -2111,7 +2233,7 @@ static void hash_product(
                     hash_dense_window_kernel<<<n, 512, wsm, cur_s>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                         d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
-                        d_ovf_rows, d_ovf_cnt, d_row_ovf, rows_ptr, d_span_lo);
+                        d_ovf_rows, d_ovf_cnt, d_row_ovf, rows_ptr, d_span_lo, d_flop, d_maxbl);
                 }
             } else if (bi == BIN_HEAVY) {
                 // heavy(est>HASH_CAP):全局内存 hash 表 + cub 分段排序(不回退 merge)
@@ -2352,14 +2474,45 @@ static void hash_product(
         d_val_ip = (double*)(cb + C_rp_al + C_ci_al);
     }
     d_val = d_val_ip;
-    // 方案5 数值 pass:dense 行窗口升序直写终态(精确偏移;compact 阶段这些行整体跳过)
+    // 方案5 数值 pass(Phase B v2 游标版):dense 行数据驱动窗口直写终态
+    int *d_smap = nullptr, *d_smap_off = nullptr;
     if (dense_nr > 0) {
         prof("dense_direct", [&]{
-            size_t wsm = ((size_t)DENSE_MAX_N * 9 + 3) / 4 * 4 + (size_t)DENSE_MAX_N * sizeof(int);
+            // 全局 cursor 区:每 dense 行 a_len 个 int,偏移 = alen 按行散射后的 inclusive scan(Σ ≤ nnz)
+            int *d_alen = decltype(d_alen)(dev_alloc((size_t)dense_nr * sizeof(int)));
+            d_smap_off = decltype(d_smap_off)(dev_alloc((A_rows + 1) * sizeof(int)));
+            alen_gather_kernel<<<(dense_nr + 255) / 256, 256>>>(dense_rows, dense_nr, dA_rp, d_alen);
+            CHECK_CUDA(cudaMemset(d_smap_off, 0, (size_t)(A_rows + 1) * sizeof(int)));
+            scatter_alen_kernel<<<(dense_nr + 255) / 256, 256>>>(dense_rows, dense_nr, d_alen, d_smap_off);
+            // ⚠ exclusive(偏移语义)+ 无槽位移位:off[i] = Σ_{r<i} alen[r];off[A_rows] = 总量。
+            //   (首版 inclusive+1 槽双错:行 chunk 右移互相覆盖 → 游标读到别行 B 位置 → j<0 →
+            //    SMEM 下越界 → "illegal instruction";docs/21 同款陷阱再现)
+            thrust::exclusive_scan(thrust::device_ptr<int>(d_smap_off),
+                                   thrust::device_ptr<int>(d_smap_off + A_rows + 1),
+                                   thrust::device_ptr<int>(d_smap_off));
+            int sm_tot;
+            CHECK_CUDA(cudaMemcpy(&sm_tot, d_smap_off + A_rows, sizeof(int), cudaMemcpyDeviceToHost));
+#ifdef DBG
+            {   // TEMP:offset 验证(首 dense 行 off 应=0;Σ 应=sm_tot)
+                int h0 = -1, h1 = -1, h2 = -1, r0 = -1, r1 = -1;
+                CHECK_CUDA(cudaMemcpy(&h0, d_smap_off, sizeof(int), cudaMemcpyDeviceToHost));
+                if (dense_rows) { CHECK_CUDA(cudaMemcpy(&r0, dense_rows, sizeof(int), cudaMemcpyDeviceToHost));
+                                 CHECK_CUDA(cudaMemcpy(&h1, d_smap_off + r0, sizeof(int), cudaMemcpyDeviceToHost)); }
+                CHECK_CUDA(cudaMemcpy(&h2, d_smap_off + 1, sizeof(int), cudaMemcpyDeviceToHost));
+                fprintf(stderr, "[pb2dbg] sm_tot=%d off[0]=%d first_dense_row=%d off[row0]=%d off[1]=%d\n",
+                        sm_tot, h0, r0, h1, h2);
+            }
+#endif
+            d_smap = decltype(d_smap)(dev_alloc((size_t)(sm_tot > 0 ? 2 * sm_tot : 1) * sizeof(int)));   // 2×:活动游标 + 本窗镜像
+            dev_free(d_alen);
+            size_t wsm = ((size_t)PB2_W * 9 + 3) / 4 * 4 + (size_t)PB2_W * sizeof(int);
             CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
+            static int g_pb2cur = -1;
+            if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e && atoi(e) == 0) ? 0 : 1; }
             hash_dense_direct_kernel<<<dense_nr, 512, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
-                dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr);
+                dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr,
+                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, g_pb2cur);
             CHECK_CUDA(cudaGetLastError());
         });
     }
@@ -2466,6 +2619,7 @@ static void hash_product(
     dev_free(d_bkid); dev_free(d_sort); dev_free(d_est); dev_free(d_flop);
     dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_maxbl); dev_free(d_gv); dev_free(d_gv_off);
     dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos);
+    dev_free(d_smap); dev_free(d_smap_off);   // Phase B v2 全局 cursor 区
 }
 
 void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
