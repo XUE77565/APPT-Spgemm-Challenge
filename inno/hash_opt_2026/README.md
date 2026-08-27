@@ -37,7 +37,9 @@
 | [24-phaseA-gate-evolution.md](24-phaseA-gate-evolution.md) | **Phase A 门控 v1→v4**:判别特征=hash 侧速度∝表大小(非密度);v4 门定型 | `ffc6e16` |
 | [25-hyb-tier-merge3-fix2.md](25-hyb-tier-merge3-fix2.md) | **三项裁决**:全 bin Hybrid 否决 / Fix2 默认关 / merge3 无生态位;refresh8 2.195× 定型;剩余差距结构 | `c0ef2b0` |
 | [26-timing-audit.md](26-timing-audit.md) | **口径审计**:CSV Ocean 列漏 symbolic(真实 ~2.0×);其余逐项对齐 | `06ddefa` |
-| [27-ocean-dataflow.md](27-ocean-dataflow.md) | **Ocean 端到端数据流解剖**:四工作流判据+数据流、逐相位对照表、可移植机制清单(方案5=抄 type1 直写终态/localLoadBalance/溢出换算法/bin 级 stream) | 本文 |
+| [27-ocean-dataflow.md](27-ocean-dataflow.md) | **Ocean 端到端数据流解剖**:四工作流判据+数据流、逐相位对照表、可移植机制清单(方案5=抄 type1 直写终态/localLoadBalance/溢出换算法/bin 级 stream) | `914f549` |
+| [28-lit-round3.md](28-lit-round3.md) | **文献第三轮**:8 新机制(MH-SpGEMM bitmap-symbolic+bitonic⭐/Robin Hood/bin 2^k/warp-spec 正负结果)+ 20 条已查无新东西清单 | — |
+| [29-direct5-impl.md](29-direct5-impl.md) | **方案5 实现**(DIRECT5 默认关):count pass+直写终态+tmp 缩容;LLB 按行动态 G;成功路径泄漏修复;A/B 预案 | `3bfed54` |
 
 ## 一页纸:为什么我们曾经慢(差距的完整因果链)
 
