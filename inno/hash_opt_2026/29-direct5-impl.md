@@ -102,7 +102,29 @@ LLB 净效应温和(-7%~+2%),且 Ge99(原 4.4× 主诉求)无感 —— 待查 h
 同款 LLB)。TSOPF_RS_b2383 非矩阵级 dense_win(D5 -0.8% 噪声),矩阵级 dense_win 的直接案例本轮未逮到
 (结构上两路同固定窗口,D5 仍应纯赢)。
 
-## 7. 实现状态
+## 8. refresh9 全量裁决 + 定型(2026-08-28 凌晨)
+
+**refresh9(DIRECT5=1,无门)全量 337 阵:geomean 1.9722×(vs v9 1.9919×,净 -0.99%)**;
+好 22 阵(-10~-31%:mult_dcop/TSOPF_FS_b39_c7/brainpc2/case39/hangGlider×2/gupta1/c-57/c-58/
+bloweya/lowThrust/Zd_Jac2_db…)vs 差 8 阵(+8.5~22%)。v10 基线 = `methods_cmp_v10_direct5.csv`
+(refresh9 Auto + v9 修复 Ocean)。
+
+**门的两轮证伪与最终形态**:
+- dup 门(flop_dense/est_dense ≤ 1.5)**被实测推翻**:赢家 dup = 1.54(c-58)/2.11(brainpc2)/
+  6.14(case39),输家 = <1.5(c-62!)/1.74(S_B)/4.64(c-43)/42(nd6k)—— 完全重叠,无阈值可分。
+  (c-62 相位深挖:direct 数值遍 8.66ms ≡ legacy 中 dense 行份额 8.65ms【等本】,亏损=count 0.96 >
+  compact 节省 0.55 —— 但该机理无法解释 case39 dup 6.14 为何大胜,**开放问题**。)
+- 机械可解释的门只剩微型 dense 集:cnr-2000(73 行/0.3% est)/ohne2(69 行/0.13%)纯固定开销亏损
+  → **规模门 = dense_nr ≥ 1000 ∧ Σest_dense ≥ 5% total_est**(门掉即整体回 legacy)。
+- **定型:DIRECT5 默认开**(refresh9 全量验证 + 门只增不减)+ 规模门默认生效;DIRECT5=0 可关。
+  门后验证:cnr-2000 11.71≈base 11.66 / ohne2 23.76≈23.27 / mult_dcop_03 默认开 69.4ms
+  (vs v9 113 = **-39%**)。预期 geomean ≈ 1.965-1.97×(refresh10 复核)。
+
+**遗留**:①c-43/c-62/c-62ghs/S_B/nd6k/bcsstk36(后者未触发 D5 亦 +22%,疑纯噪声)6 阵的判别
+变量未明 —— c-58(赢)vs c-62(输)同量级同 dup 是天然对照实验,下一步逐相位差分;②矩阵级
+dense_win 直接案例仍未逮到;③Ge99/LLB heavy 路径(hash_global)未补。
+
+## 9. 实现状态
 
 - 代码:`src/spgemm_kernel_hash.cu`(hash_dense_count_kernel / hash_dense_direct_kernel /
   dense_sum_kernel[unsigned ll 原子 —— sm_90 无 signed ll atomicAdd 重载]/ zero_est_kernel

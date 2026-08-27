@@ -496,14 +496,16 @@ __global__ void hash_dense_direct_kernel(
         row_nnz[i] = out;   // SAFETY:理论上不达;不一致时以数值侧为准(下游仅读 dC_rp,不再用 row_nnz)
 }
 
-// dense 行集合的 Σest / Σrow_nnz(方案5:tmp 缩容 + est 下溢检查改 hash 侧口径)
+// dense 行集合的 Σest / Σrow_nnz / Σflop(方案5:tmp 缩容 + est 下溢检查改 hash 侧口径 + dup 门)
 // sum 用 unsigned ll 原子(sm_90 无 signed ll atomicAdd 重载;值为非负,位型等同)
 __global__ void dense_sum_kernel(const int *rows, int nr, const int *est, const int *row_nnz,
+                                 const int *flop /*nullable:方案5 dup 门 pre-pass*/,
                                  unsigned long long *sum_est, unsigned long long *sum_nnz) {
     int r = blockIdx.x * blockDim.x + threadIdx.x;
     if (r >= nr) return;
     if (est) atomicAdd(sum_est, (unsigned long long)est[rows ? rows[r] : r]);
     if (row_nnz) atomicAdd(sum_nnz, (unsigned long long)row_nnz[rows ? rows[r] : r]);
+    if (flop) atomicAdd(sum_nnz, (unsigned long long)flop[rows ? rows[r] : r]);   // 门 pre-pass 复用 sum_nnz 槽
 }
 
 // dense 行 est 置 0(方案5:d_off 重扫前坍缩 gapped 空间;binning 已完成,est 无后续消费者)
@@ -1923,7 +1925,7 @@ static void hash_product(
     // 出精确 row_nnz → cnnz_scan 后数值 pass 直写 dC;dense 行不再占 gapped tmp 槽(缩容 Σest_dense)
     // 且永不 ovf(计数精确,免 retry)。
     static int g_direct5 = -1;
-    if (g_direct5 < 0) { const char *e = getenv("DIRECT5"); g_direct5 = (e && *e && atoi(e) > 0) ? 1 : 0; }
+    if (g_direct5 < 0) { const char *e = getenv("DIRECT5"); g_direct5 = (e && *e) ? atoi(e) : 1; }   // refresh9 全量验证 -0.99% → 默认开;DIRECT5=0 关
     int dense_nr = 0; const int *dense_rows = nullptr;   // dense 行集合(null = 全体行)
     long long dense_est_sum = 0, dense_nnz_sum = 0, tmp_slots_dev = 0;
     if (g_direct5) {
@@ -1938,6 +1940,26 @@ static void hash_product(
                 CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
                 CHECK_CUDA(cudaMemset(d_ovf_cnt, 0, sizeof(int)));
                 CHECK_CUDA(cudaMemset(d_row_ovf, 0, (size_t)A_rows * sizeof(int)));
+                // 规模门 pre-pass(refresh9 实证:dup 门不成立 —— 赢家 dup 1.54/2.11/6.14 与输家
+                // <1.5/1.74/4.64 完全重叠,docs/29 §8 开放问题;机械可解释的只有微型 dense 集:
+                // cnr-2000(73 行/0.3% est)/ohne2(69 行/0.13%)纯固定开销亏损)。
+                // 门 = dense 行数 ≥ 1000 且 Σest_dense ≥ 5% total_est,否则方案5 整体跳过回 legacy。
+                {
+                    unsigned long long *d_s2 = decltype(d_s2)(dev_alloc(2 * sizeof(long long)));
+                    CHECK_CUDA(cudaMemset(d_s2, 0, 2 * sizeof(long long)));
+                    dense_sum_kernel<<<(dense_nr + 255) / 256, 256>>>(
+                        dense_rows, dense_nr, d_est, nullptr, d_flop, d_s2, d_s2 + 1);
+                    unsigned long long h2[2];
+                    CHECK_CUDA(cudaMemcpy(h2, d_s2, 2 * sizeof(long long), cudaMemcpyDeviceToHost));
+                    dev_free(d_s2);
+                    long long est_d = (long long)h2[0], flop_d = (long long)h2[1];
+                    if (dense_nr < 1000 || est_d * 20 < total_est) {
+                        dbg("[%s] 方案5 规模门:跳过(dense_nr=%d Σest=%lld/%lld, flop=%lld)\n",
+                            tag, dense_nr, est_d, total_est, flop_d);
+                        dense_nr = 0;
+                        return;
+                    }
+                }
                 size_t csm = (size_t)DENSE_CNT_W;
                 if (csm > 48 * 1024)
                     CHECK_CUDA(cudaFuncSetAttribute(hash_dense_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)csm));
@@ -1948,7 +1970,7 @@ static void hash_product(
                 unsigned long long *d_sums = decltype(d_sums)(dev_alloc(2 * sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_sums, 0, 2 * sizeof(long long)));
                 dense_sum_kernel<<<(dense_nr + 255) / 256, 256>>>(
-                    dense_rows, dense_nr, d_est, d_row_nnz, d_sums, d_sums + 1);
+                    dense_rows, dense_nr, d_est, d_row_nnz, nullptr, d_sums, d_sums + 1);
                 CHECK_CUDA(cudaMemcpy(&dense_est_sum, d_sums, sizeof(long long), cudaMemcpyDeviceToHost));
                 CHECK_CUDA(cudaMemcpy(&dense_nnz_sum, d_sums + 1, sizeof(long long), cudaMemcpyDeviceToHost));
                 dev_free(d_sums);
