@@ -523,7 +523,8 @@ __global__ void scatter_alen_kernel(const int *rows, int nr, const int *alen, in
 // 首窗一次 lower_bound 定位到 span_lo,越窗列回写 atomicMin(= O(1) 推进,免重复二分);
 // 下一窗起点 = 全体越窗列的最小列(数据驱动,跳空窗)。窗口宽 PB2_W(SMEM 17B/列:
 // val8+flag1+pref4+cursor4 → 12900 列 ≈ 219KB)。
-#define PB2_W 12900   // 游标版窗口宽(SMEM 预算 17B×W ≤ ~220KB)
+#define PB2_W 12900   // 游标版窗口宽(SMEM 预算 13B×W + 双游标区 ≤ ~227KB)
+#define SMAP_SMEM_MAX 7300   // a_len ≤ 此值的行游标进 SMEM(docs/35 §3:TSOPF 修法;预算 2×4B×7300)
 __global__ void hash_dense_direct_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
@@ -543,12 +544,16 @@ __global__ void hash_dense_direct_kernel(
     double *dval = (double*)wsmem;
     unsigned char *dflag = wsmem + (size_t)PB2_W * sizeof(double);
     int *dpref = (int*)(wsmem + (((size_t)PB2_W * 9) + 3) / 4 * 4);
-    int *smap = smap_base + smap_off[i];                    // 活动游标(本窗 atomicMin 目标)
-    int *smir = smap_base + smir_bias + smap_off[i];        // 本窗起点镜像(读旧值;原槽复位 INT_MAX)
+    int *smap_g = smap_base + smap_off[i];                  // 全局游标(大 a_len 回退)
+    int *smir_g = smap_base + smir_bias + smap_off[i];
+    int *smap_s = dpref + PB2_W;                            // SMEM 游标区(与 dpref 分立)
+    int *smir_s = smap_s + SMAP_SMEM_MAX;
     __shared__ int s_next_lo;
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int a_len = re - rs;
+    int *smap = (a_len <= SMAP_SMEM_MAX) ? smap_s : smap_g; // docs/35 §3:SMEM 消每窗 O(a_len) 全局往返
+    int *smir = (smap == smap_s) ? smir_s : smir_g;
     int base = exact_rp[i];
     int cap = row_nnz[i];
     int out = 0;
@@ -2682,7 +2687,8 @@ static void hash_product(
 #endif
             d_smap = decltype(d_smap)(dev_alloc((size_t)(sm_tot > 0 ? 2 * sm_tot : 1) * sizeof(int)));   // 2×:活动游标 + 本窗镜像
             dev_free(d_alen);
-            size_t wsm = ((size_t)PB2_W * 9 + 3) / 4 * 4 + (size_t)PB2_W * sizeof(int);
+            size_t wsm = ((size_t)PB2_W * 9 + 3) / 4 * 4 + (size_t)PB2_W * sizeof(int)
+                       + 2 * (size_t)SMAP_SMEM_MAX * sizeof(int);
             CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
             static int g_pb2cur = -1;
             if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e && atoi(e) == 0) ? 0 : 1; }
