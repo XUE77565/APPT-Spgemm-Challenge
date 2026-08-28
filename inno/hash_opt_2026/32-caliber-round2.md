@@ -28,6 +28,14 @@
 - 我方墙−相位和明细含:pinned_d2h_alloc、~15 次 cudaMalloc/Free、host 编排;其中传输相关
   (pin/arena)约占一半,纯 alloc+间隙 ~4-6ms 级(中尺寸阵)。
 
+## 2.5 修法1实测(MALLOC_ASYNC,2026-08-28)
+
+env 门控实现(`MALLOC_ASYNC=1` → cudaMallocAsync + releaseThreshold=MAX,默认关)。A/B(墙/compute):
+F2 -7.6%/-1.5%、pwtk -12.4%/+2.3%、bcsstk30 -13.9%/+17.5%、mult_dcop -2.1%/+2.1%,**但 c-58 +9.7%/+10.8%、
+brainpc2 +15.0%/+3.5% 回归** —— legacy stream 上 cudaMallocAsync/FreeAsync 的隐式同步串行化反噬,
+池纪律在我们管线非免费。**默认关,留 env**;论文级口径对齐改走修法 2(alloc 包 prof 计入)或
+每 bin 专用 stream + async 的组合(下一班)。
+
 ## 3. 学 Ocean 的下一步(与本口径结论绑定)
 
 1. **cudaMallocAsync 池纪律**(§4.7,上表修法 1)—— 下一个实施项,兼修口径与延迟。

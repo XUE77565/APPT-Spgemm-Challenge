@@ -1,6 +1,7 @@
 #include "mempool.h"
 
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 
 // 运行时开关,默认 false(原路径)。main 启动时按 USE_MEMPOOL 覆盖。
@@ -93,9 +94,31 @@ void dev_pool_reset() {
     if (g_use_dev_pool) g_dev_off = 0;
 }
 
+static bool g_malloc_async = false;
+static bool g_ma_init = false;
+static void ma_init_once() {   // docs/32 修法1:Ocean 池纪律 —— releaseThreshold=MAX = 迭代间同尺寸零 driver 往返
+    if (g_ma_init) return;
+    g_ma_init = true;
+    const char *e = std::getenv("MALLOC_ASYNC");
+    g_malloc_async = (e && *e && std::atoi(e) > 0);
+    if (g_malloc_async) {
+        cudaMemPool_t pool;
+        if (cudaDeviceGetDefaultMemPool(&pool, 0) == cudaSuccess) {
+            uint64_t threshold = UINT64_MAX;
+            cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &threshold);
+        }
+        fprintf(stderr, "[mempool] MALLOC_ASYNC=ON(cudaMallocAsync + releaseThreshold=MAX)\n");
+    }
+}
 void* dev_alloc(size_t bytes) {
     if (bytes == 0) bytes = 1;
     if (!g_use_dev_pool) {                  // legacy:原路径 cudaMalloc(A/B 同二进制)
+        ma_init_once();
+        if (g_malloc_async) {
+            void *ap = nullptr;
+            if (cudaMallocAsync(&ap, bytes, (cudaStream_t)0) == cudaSuccess && ap) return ap;
+            // 罕见失败 → 落回同步路径
+        }
         void* p = nullptr;
         cudaError_t err = cudaMalloc(&p, bytes);
         if (err != cudaSuccess) {
@@ -117,7 +140,10 @@ void* dev_alloc(size_t bytes) {
 }
 
 void dev_free(void* p) {
-    if (!g_use_dev_pool) cudaFree(p);       // 池模式:no-op,arena 由 dev_pool_reset 回收
+    if (!g_use_dev_pool) {
+        if (g_malloc_async) cudaFreeAsync(p, (cudaStream_t)0);
+        else cudaFree(p);                   // 池模式:no-op,arena 由 dev_pool_reset 回收
+    }
 }
 
 size_t dev_pool_used() { return g_dev_off; }
