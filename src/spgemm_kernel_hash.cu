@@ -2049,11 +2049,14 @@ static void launch_csort_fused(int n, const int *rows_ptr, const long long *d_of
     using BRS = cub::BlockRadixSort<unsigned, TPB, IPT>;
     constexpr int CAP = TPB * IPT;
     size_t smem = std::max(sizeof(typename BRS::TempStorage), (size_t)CAP * sizeof(double));
-    if (smem > 48 * 1024)
-        CHECK_CUDA(cudaFuncSetAttribute((const void*)csort_fused_kernel<TPB, IPT>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem));
+    if (smem > 48 * 1024) {
+        cudaError_t ae = cudaFuncSetAttribute((const void*)csort_fused_kernel<TPB, IPT>,
+                                              cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
+        if (ae != cudaSuccess) fprintf(stderr, "[csf] attr %zu B 失败: %s\n", smem, cudaGetErrorString(ae));
+    }
     csort_fused_kernel<TPB, IPT><<<n, TPB, smem>>>(rows_ptr, d_off, d_row_nnz, dC_rp, k, v, dC_ci, d_val, valid_bits);
-    CHECK_CUDA(cudaGetLastError());
+    cudaError_t le = cudaGetLastError();
+    if (le != cudaSuccess) fprintf(stderr, "[csf] launch n=%d TPB=%d smem=%zu vb=%d: %s\n", n, TPB, smem, valid_bits, cudaGetErrorString(le));
 }
 
 // launch helper:按 config 查 BlockRadixSort TempStorage 大小,>48KB 自动 opt-in 动态 shared(H100 可 ~228KB)。
@@ -2214,6 +2217,7 @@ static void hash_product(
     // (tmp 分配挪到 binning/方案5 之后:dense 行直写不占 gapped 槽 → 缩容 Σest_dense,见 tmp_slots)
     // d_val(C_val)现 alias 进连续 dC(compact+sort 直写,见 cnnz_scan 后),不再单独分配/释放。
     double *d_val = nullptr;
+    double *d_hybrid_val = nullptr;   // Fix#6(审查):bin0 hybrid 池句柄(尾部释放)
 
     // 2a: GPU 端分桶(MinHash est → bucket):bucket_id → count → exclusive scan → scatter(全 device)
     int *d_bkid; d_bkid = decltype(d_bkid)(dev_alloc(A_rows * sizeof(int)));
@@ -2421,9 +2425,12 @@ static void hash_product(
                 // Σnnz(count 后)供下溢检查改口径
                 unsigned long long *d_s3 = decltype(d_s3)(dev_alloc(sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_s3, 0, sizeof(long long)));
-                for (int bi = 1; bi <= 10; bi++)
-                    if (!getenv("D5H_NODSUM")) dense_sum_kernel<<<(h_cnt[bi] + 255) / 256, 256>>>(
+                for (int bi = 1; bi <= 10; bi++) {
+                    if (h_cnt[bi] == 0) continue;   // Fix#8(审查):空 bin 的 <<<0,256>>> = invalid-config
+                                                      // = docs/31/35 "invalid argument" 之谜根因(grid=0)
+                    dense_sum_kernel<<<(h_cnt[bi] + 255) / 256, 256>>>(
                         d_sort + h_off[bi], h_cnt[bi], nullptr, d_row_nnz, nullptr, nullptr, d_s3);
+                }
                 CHECK_CUDA(cudaGetLastError());
                 CHECK_CUDA(cudaMemcpy(&d5h_nnz_sum, d_s3, sizeof(long long), cudaMemcpyDeviceToHost));
                 dev_free(d_s3);
@@ -2538,16 +2545,13 @@ static void hash_product(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_row_nnz, d_tmp_key, d_tmp_val);
             } else if (bi == 0) {
-                // 小行批量: HYBRID=1 时 value 走全局 L2(Ocean 杀手锏)
-                double *d_hyb_val = nullptr;
-                if (g_hybrid) {
-                    // 全局 value 池: n 行 × BATCH_HT doubles(每 warp 一段)
-                    d_hyb_val = decltype(d_hyb_val)(dev_alloc((size_t)n * BATCH_HT * sizeof(double)));
-                }
+                // 小行批量: HYBRID=1 时 value 走全局 L2(Ocean 杀手锏;池句柄 d_hybrid_val 尾部统一释放,Fix#6)
+                if (g_hybrid && !d_hybrid_val)
+                    d_hybrid_val = decltype(d_hybrid_val)(dev_alloc((size_t)n * BATCH_HT * sizeof(double)));
                 hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
-                    d_ovf_rows, d_ovf_cnt, d_row_ovf, d_hyb_val);
+                    d_ovf_rows, d_ovf_cnt, d_row_ovf, d_hybrid_val);
             } else if (bi == BIN_ULTRA) {
                 // ultra(est≤EST_ULTRA_THR):线性,免 hash
                 hash_ultra_kernel<<<(n + 255) / 256, 256, 0, cur_s>>>(
@@ -2689,9 +2693,9 @@ static void hash_product(
                 retry_slot_kernel<<<(h_ovf + 255) / 256, 256>>>(d_ovf_rows, h_ovf, d_flop, d_rslot, A_cols);
                 d_roff = decltype(d_roff)(dev_alloc((A_rows + 1) * sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_roff, 0, sizeof(long long)));
-                thrust::inclusive_scan(thrust::device_ptr<int>(d_rslot),
-                                       thrust::device_ptr<int>(d_rslot + A_rows),
-                                       thrust::device_ptr<long long>(d_roff + 1));
+                thrust::inclusive_scan(thrust::make_transform_iterator(thrust::device_ptr<int>(d_rslot), ToLL()),
+                                       thrust::make_transform_iterator(thrust::device_ptr<int>(d_rslot + A_rows), ToLL()),
+                                       thrust::device_ptr<long long>(d_roff + 1));   // Fix#3(审查):int 累加 2^31 回绕,同 est_scan 坑
                 long long r_slots;
                 CHECK_CUDA(cudaMemcpy(&r_slots, d_roff + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
                 if (r_slots > 0) {
@@ -2947,13 +2951,13 @@ static void hash_product(
                 // 小行(ht≤CSORT_HT):accumulate 已 count-sort,这里只 compact_copy(tmp→CSR)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
             } else if (bi <= 7) {
-                if (A_cols < (1 << 20))   // 融合键:pos 12 位(512×8=4096)→ n<2^20(docs/38)
+                if (A_cols < (1 << 20) && getenv("CSF"))   // 融合键:pos 12 位(512×8=4096)→ n<2^20(docs/38)
                     launch_csort_fused<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, 31 - __builtin_clz(A_cols) + 1);
                 else
                     launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());
             } else if (bi <= 9) {
-                if (A_cols < (1 << 18))   // pos 14 位(256×64=16384)→ n<2^18
+                if (A_cols < (1 << 18) && getenv("CSF"))   // pos 14 位(256×64=16384)→ n<2^18
                     launch_csort_fused<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, 31 - __builtin_clz(A_cols) + 1);
                 else
                     launch_csort<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
@@ -3031,10 +3035,12 @@ static void hash_product(
     // 早退路径释放,成功路径漏 ~28B×A_rows/调用(USE_DEV_POOL 默认关 = cudaMalloc 模式;whale 阵
     // warmup+bench 多轮累加 GB 级 —— c-73 峰值 ~62GB 的隐性推手之一)。尾部释放与 d2h 后既有
     // 12 buffer 同区域,不进 hash-prof 计时相位。
+    dev_free(d_hybrid_val);   // Fix#6(审查):bin0 hybrid 值池从不释放(n×1KB/调用)
     dev_free(d_bkid); dev_free(d_sort); dev_free(d_est); dev_free(d_flop);
     dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_maxbl); dev_free(d_gv); dev_free(d_gv_off);
     dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos);
     dev_free(d_smap); dev_free(d_smap_off);   // Phase B v2 全局 cursor 区
+    dev_free(d_hybrid_val);                    // Fix#6(审查)
 }
 
 void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
