@@ -1977,7 +1977,7 @@ static void hash_product(
         });
         dev_free(d_mh);
     }
-    long long total_est;
+    long long total_est = 0;
     prof("est_scan", [&]{
         CHECK_CUDA(cudaMemset(d_off, 0, sizeof(long long)));
         if (A_rows <= 1024) {
@@ -1991,17 +1991,9 @@ static void hash_product(
                 thrust::make_transform_iterator(thrust::device_ptr<int>(d_est + A_rows), ToLL()),
                 thrust::device_ptr<long long>(d_off + 1));
         }
-        CHECK_CUDA(cudaMemcpy(&total_est, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));   // D2H 纳入计时
+        // total_est 的 D2H 延后并入 binning 的 sync(小阵省一次同步往返,docs/34)
     });
-    dbg("[hash] total_est=%lld\n", total_est);
-    if (total_est <= 0) {   // TEMP 诊断(docs/21 C 类):d_est 极值定位负值来源
-        thrust::pair<thrust::device_ptr<int>, thrust::device_ptr<int>> mm =
-            thrust::minmax_element(thrust::device_ptr<int>(d_est), thrust::device_ptr<int>(d_est + A_rows));
-        int hmin = 0, hmax = 0;
-        CHECK_CUDA(cudaMemcpy(&hmin, mm.first.get(), sizeof(int), cudaMemcpyDeviceToHost));
-        CHECK_CUDA(cudaMemcpy(&hmax, mm.second.get(), sizeof(int), cudaMemcpyDeviceToHost));
-        fprintf(stderr, "[hash][diag] d_est min=%d max=%d (A_rows=%d)\n", hmin, hmax, A_rows);
-    }
+    // (TEMP est 诊断块已删:total_est D2H 延后到 binning sync,此处未读)
 
     // Stage 2: GPU 端分桶(全 device,无 host 往返)+ 预分配大 buffer(零 per-bucket malloc/free)
     int *d_row_nnz; d_row_nnz = decltype(d_row_nnz)(dev_alloc(A_rows * sizeof(int)));
@@ -2050,9 +2042,10 @@ static void hash_product(
                                thrust::device_ptr<int>(d_offb));
         CHECK_CUDA(cudaMemset(d_pos, 0, N_BINS * sizeof(int)));   // scatter 计数器从 0 起(非 offsets)
         scatter_rows_kernel<<<(A_rows + 255) / 256, 256>>>(d_bkid, A_rows, d_offb, d_pos, d_sort);
-        // 2 个 D2H 合并:async + 单 sync(省 1 同步点;小阵 launch 开销友好)
+        // 3 个 D2H 合并:async + 单 sync(省 2 同步点;total_est 从 est_scan 延后到此)
         CHECK_CUDA(cudaMemcpyAsync(h_cnt, d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaMemcpyAsync(h_off, d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpyAsync(&total_est, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaStreamSynchronize(0));
         dbg("[%s] diter bin=%d 行 / %d\n", tag, h_cnt[BIN_DITER], A_rows);   // TEMP:docs/24 路由观测
     });
