@@ -1990,6 +1990,72 @@ static void launch_csort_ip(int n, const int *rows_ptr, const int *d_rp, int *d_
     CHECK_CUDA(cudaGetLastError());
 }
 
+// 融合键排序(docs/38,Ocean sortOutputFused):键 = (src_pos << valid_bits) | col,radix 只扫
+// col 位;值不进排序流 —— 先灌 SMEM,排序后按键内 src_pos gather。省一半排序交通。
+// 约束:n < 2^valid_bits 且 CAP=TPB×IPT ≤ 2^(32−valid_bits)(大 n 回退旧双数组内核)。
+template<int TPB, int IPT>
+__global__ void csort_fused_kernel(
+    const int *rows, const long long *d_off, const int *d_row_nnz, const int *dC_rp,
+    const unsigned long long *tmp_key, const double *tmp_val,
+    int *dC_ci, double *dC_val, int valid_bits)
+{
+    constexpr int CAP = TPB * IPT;
+    int r = rows[blockIdx.x];
+    long long s = d_off[r];
+    int n_el = d_row_nnz[r];
+    int out = dC_rp[r];
+    if (n_el == 0) return;
+    using BRS = cub::BlockRadixSort<unsigned, TPB, IPT>;
+    extern __shared__ __align__(16) char cfs[];
+    union CFU { typename BRS::TempStorage sort; double vals[CAP]; };
+    CFU &u = reinterpret_cast<CFU&>(*cfs);
+    unsigned k[IPT];
+    #pragma unroll
+    for (int i = 0; i < IPT; i++) {
+        int idx = threadIdx.x * IPT + i;
+        if (idx < n_el) {
+            unsigned col = (unsigned)(tmp_key[s + idx] & 0xffffffffu);
+            k[i] = ((unsigned)idx << valid_bits) | col;  // src_pos 高位免费搭车
+        } else {
+            k[i] = 0xffffffffu;
+        }
+    }
+    __syncthreads();
+    BRS(u.sort).Sort(k, /*begin_bit=*/0, /*end_bit=*/valid_bits);   // 只扫 col 位
+    __syncthreads();
+    // 值在排序【后】装 SMEM(union 区排序时被 TempStorage 占用,Ocean 同款时序)
+    #pragma unroll
+    for (int i = 0; i < IPT; i++) {
+        int idx = threadIdx.x * IPT + i;
+        if (idx < n_el) u.vals[idx] = tmp_val[s + idx];
+    }
+    __syncthreads();
+    #pragma unroll
+    for (int i = 0; i < IPT; i++) {
+        int idx = threadIdx.x * IPT + i;
+        if (idx < n_el) {
+            unsigned key = k[i];
+            unsigned col = key & ((1u << valid_bits) - 1u);
+            int src = (int)(key >> valid_bits);
+            dC_ci[out + idx] = (int)col;
+            dC_val[out + idx] = u.vals[src];           // 值按源位 gather
+        }
+    }
+}
+template<int TPB, int IPT>
+static void launch_csort_fused(int n, const int *rows_ptr, const long long *d_off, const int *d_row_nnz,
+                               const int *dC_rp, const unsigned long long *k, const double *v,
+                               int *dC_ci, double *d_val, int valid_bits) {
+    using BRS = cub::BlockRadixSort<unsigned, TPB, IPT>;
+    constexpr int CAP = TPB * IPT;
+    size_t smem = std::max(sizeof(typename BRS::TempStorage), (size_t)CAP * sizeof(double));
+    if (smem > 48 * 1024)
+        CHECK_CUDA(cudaFuncSetAttribute((const void*)csort_fused_kernel<TPB, IPT>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem));
+    csort_fused_kernel<TPB, IPT><<<n, TPB, smem>>>(rows_ptr, d_off, d_row_nnz, dC_rp, k, v, dC_ci, d_val, valid_bits);
+    CHECK_CUDA(cudaGetLastError());
+}
+
 // launch helper:按 config 查 BlockRadixSort TempStorage 大小,>48KB 自动 opt-in 动态 shared(H100 可 ~228KB)。
 template<int TPB, int IPT>
 static void launch_csort(int n, const int *rows_ptr, const long long *d_off, const int *d_row_nnz,
@@ -2881,11 +2947,17 @@ static void hash_product(
                 // 小行(ht≤CSORT_HT):accumulate 已 count-sort,这里只 compact_copy(tmp→CSR)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
             } else if (bi <= 7) {
-                launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
-                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
+                if (A_cols < (1 << 20))   // 融合键:pos 12 位(512×8=4096)→ n<2^20(docs/38)
+                    launch_csort_fused<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, 31 - __builtin_clz(A_cols) + 1);
+                else
+                    launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());
             } else if (bi <= 9) {
-                launch_csort<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
-                CHECK_CUDA(cudaGetLastError());   // TEMP:定位
+                if (A_cols < (1 << 18))   // pos 14 位(256×64=16384)→ n<2^18
+                    launch_csort_fused<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, 31 - __builtin_clz(A_cols) + 1);
+                else
+                    launch_csort<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());
             } else if (bi == BIN_HEAVY) {
                 // heavy:accumulate 内已分段排序(compact 读 scratch)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_scr_key, d_scr_val, dC_ci, d_val, d_row_ovf);
