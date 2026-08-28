@@ -648,7 +648,7 @@ __global__ void hash_dense_direct_kernel(
     if (PB2_STAGE < 1) return;
 
     int avgB = (row_flop && a_len > 0) ? row_flop[i] / a_len : 0;
-    if (avgB < 64 || !use_cursor) {   // PB2_CURSOR=0(host env)→ 全行走搜索路径(=52b89da 对照)
+    if (avgB < 64 || use_cursor != 1) {   // docs/39 路由 v3 判据收回 avgB(host 级 dup 门见下)
         // 混合路由(docs/30):avgB(=flop/a_len,平均 B 行长)< 64 的行走旧固定窗搜索路径 ——
         // 游标镜像/复位是每窗 O(a_len) 全局往返,开销/工作量 ∝ a_len×窗数/flop = 1/avgB;
         // TSOPF(avgB≈16)游标版 +22% 实锤,mult_dcop(avgB≈4000)游标 -42%。旧路径 = 52b89da 行为。
@@ -2870,10 +2870,15 @@ static void hash_product(
             CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
             static int g_pb2cur = -1;
             if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e && atoi(e) == 0) ? 0 : 1; }
+            // docs/39 路由 v3:矩阵级 dense_win ∧ 高 dup(≥4)→ search(TSOPF_FS 族实测 -26/-13%;
+            // 低 dup 的 bloweya/mult_dcop/vsp/brainpc2 游标大胜,勿动);bin 行恒 cursor。
+            int uc = g_pb2cur;
+            if (uc == 1 && !dense_rows && total_est > 0 && (double)total_flop / (double)total_est >= 4.0)
+                uc = 0;
             hash_dense_direct_kernel<<<dense_nr, 512, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr,
-                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, g_pb2cur);
+                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, uc);
             CHECK_CUDA(cudaGetLastError());
         });
     }
