@@ -2049,14 +2049,11 @@ static void launch_csort_fused(int n, const int *rows_ptr, const long long *d_of
     using BRS = cub::BlockRadixSort<unsigned, TPB, IPT>;
     constexpr int CAP = TPB * IPT;
     size_t smem = std::max(sizeof(typename BRS::TempStorage), (size_t)CAP * sizeof(double));
-    if (smem > 48 * 1024) {
-        cudaError_t ae = cudaFuncSetAttribute((const void*)csort_fused_kernel<TPB, IPT>,
-                                              cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
-        if (ae != cudaSuccess) fprintf(stderr, "[csf] attr %zu B 失败: %s\n", smem, cudaGetErrorString(ae));
-    }
+    if (smem > 48 * 1024)
+        CHECK_CUDA(cudaFuncSetAttribute((const void*)csort_fused_kernel<TPB, IPT>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem));
     csort_fused_kernel<TPB, IPT><<<n, TPB, smem>>>(rows_ptr, d_off, d_row_nnz, dC_rp, k, v, dC_ci, d_val, valid_bits);
-    cudaError_t le = cudaGetLastError();
-    if (le != cudaSuccess) fprintf(stderr, "[csf] launch n=%d TPB=%d smem=%zu vb=%d: %s\n", n, TPB, smem, valid_bits, cudaGetErrorString(le));
+    CHECK_CUDA(cudaGetLastError());
 }
 
 // launch helper:按 config 查 BlockRadixSort TempStorage 大小,>48KB 自动 opt-in 动态 shared(H100 可 ~228KB)。
@@ -2951,13 +2948,13 @@ static void hash_product(
                 // 小行(ht≤CSORT_HT):accumulate 已 count-sort,这里只 compact_copy(tmp→CSR)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
             } else if (bi <= 7) {
-                if (A_cols < (1 << 20) && getenv("CSF"))   // 融合键:pos 12 位(512×8=4096)→ n<2^20(docs/38)
+                if (A_cols < (1 << 20) && !getenv("NOCSF"))   // 融合键:pos 12 位(512×8=4096)→ n<2^20(docs/38)
                     launch_csort_fused<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, 31 - __builtin_clz(A_cols) + 1);
                 else
                     launch_csort<512, 8>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());
             } else if (bi <= 9) {
-                if (A_cols < (1 << 18) && getenv("CSF"))   // pos 14 位(256×64=16384)→ n<2^18
+                if (A_cols < (1 << 18) && !getenv("NOCSF"))   // pos 14 位(256×64=16384)→ n<2^18
                     launch_csort_fused<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, 31 - __builtin_clz(A_cols) + 1);
                 else
                     launch_csort<256, 64>(n, rows_ptr, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
@@ -3040,7 +3037,8 @@ static void hash_product(
     dev_free(d_span_lo); dev_free(d_span_len); dev_free(d_maxbl); dev_free(d_gv); dev_free(d_gv_off);
     dev_free(d_cnt); dev_free(d_offb); dev_free(d_pos);
     dev_free(d_smap); dev_free(d_smap_off);   // Phase B v2 全局 cursor 区
-    dev_free(d_hybrid_val);                    // Fix#6(审查)
+    dev_free(d_hybrid_val);
+    { cudaError_t pe = cudaGetLastError(); if (pe != cudaSuccess) fprintf(stderr, "[probe] frees 后: %s\n", cudaGetErrorString(pe)); }                    // Fix#6(审查)
 }
 
 void spgemm_self_product_hash(void *A_buffer, int A_rows, int A_cols, int A_nnz,
