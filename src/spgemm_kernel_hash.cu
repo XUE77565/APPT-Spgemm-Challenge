@@ -87,7 +87,8 @@ __global__ void count_flop_span_kernel(
 #define HASH_CAP 16384         // 重行桶 hash 表最大槽位(→ col+val = 128KB/块)
 #endif
 #define HASH_BLOCK 256
-#define N_BINS 14    // 0..10:batched(0)+hash ht 梯(1..10,ht=32<<i) + ultra(11) + heavy(12,est>HASH_CAP 全局表) + dense-iter(13,重行窗口累积 docs/22)
+#define N_BINS 18    // 0..10:hash 梯 + ultra(11) + heavy(12) + dense-iter(13) + 小跨度 dense 4 子桶(14-17,docs/37)
+#define BIN_SSPAN0 14   // span≤256(64线程/3.3KB,32+行/SM —— Ocean dense bin0 同位)
 #define BIN_ULTRA 11
 #define BIN_HEAVY 12
 #define BIN_DITER 13
@@ -358,6 +359,80 @@ __global__ void hash_dense_kernel(
         }
     }
     if (tid == 0) row_nnz[i] = (total_nz <= cap) ? total_nz : cap;
+}
+
+// ===================== 小跨度 dense 4 子桶(docs/37 = 35 §3 设计 + 36 号 spECK/nsparse 弹药)=====================
+// span∈{256,512,1024,2048} × 块{64,128,256,256}:1 行/块但小块+小 SMEM → 8-32 行/SM(Ocean dense 梯同位);
+// 直接寻址免 CAS 免探测;warp0 前缀有序 extract → compact 走 copy。est≥span/2 由路由门保证利用率。
+template<int SPAN, int TPB>
+__global__ void hash_sspan2_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const double *A_val,
+    const int *B_row_ptr, const int *B_col_idx, const double *B_val,
+    int upper_tri, int A_rows,
+    const int *bucket_rows,
+    const int *span_lo, const int *span_len,
+    const long long *row_off,
+    unsigned long long *tmp_key, double *tmp_val,
+    int *row_nnz, int *overflow_flag,
+    int *ovf_rows, int *ovf_cnt, int *row_ovf)
+{
+    int i = bucket_rows[blockIdx.x];
+    if (i >= A_rows) return;
+    int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = TPB >> 5;
+    extern __shared__ __align__(8) unsigned char ssm2[];
+    double *dval = (double*)ssm2;                                    // [SPAN]
+    unsigned char *dflag = ssm2 + (size_t)SPAN * sizeof(double);     // [SPAN]
+    int *dpref = (int*)(ssm2 + (((size_t)SPAN * 9) + 3) / 4 * 4);    // [SPAN]
+    int lo = span_lo[i];
+    int w_ = span_len[i];
+    if (w_ <= 0) w_ = 1;
+    if (w_ > SPAN) w_ = SPAN;   // SAFETY:路由门已限
+    for (int j = tid; j < w_; j += TPB) { dval[j] = 0.0; dflag[j] = 0; }
+    __syncthreads();
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    for (int p = rs + warp; p < re; p += nw) {
+        int k = A_col_idx[p];
+        double a = A_val[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {
+            int j = B_col_idx[q] - lo;
+            if (j < 0 || j >= w_) continue;
+            int col = lo + j;
+            if (upper_tri && col < i) continue;
+            atomicAdd(&dval[j], a * B_val[q]);
+            dflag[j] = 1;
+        }
+    }
+    __syncthreads();
+    if (warp == 0) {
+        int seglen = (w_ + 31) / 32;
+        int slo = lane * seglen, shi = min(slo + seglen, w_);
+        int run = 0;
+        for (int j = slo; j < shi; j++) { dpref[j] = run; run += dflag[j]; }
+        int excl = run;
+        for (int off = 1; off < 32; off <<= 1) {
+            int v = __shfl_up_sync(0xffffffff, excl, off);
+            if (lane >= off) excl += v;
+        }
+        for (int j = slo; j < shi; j++) dpref[j] += excl - run;
+    }
+    __syncthreads();
+    long long base = row_off[i];
+    long long cap = row_off[i + 1] - row_off[i];
+    int count = dpref[w_ - 1] + dflag[w_ - 1];
+    for (int j = tid; j < w_; j += TPB) {
+        if (dflag[j]) {
+            int rank = dpref[j];
+            if (rank >= cap) {
+                atomicExch(overflow_flag, 1);
+                if (!atomicExch(&row_ovf[i], 1)) { int q2 = atomicAdd(ovf_cnt, 1); ovf_rows[q2] = i; }
+                break;
+            }
+            tmp_key[base + rank] = ((unsigned long long)i << 32) | (unsigned int)(lo + j);
+            tmp_val[base + rank] = dval[j];
+        }
+    }
+    if (tid == 0) row_nnz[i] = (count <= cap) ? count : (int)cap;
 }
 
 // ===================== dense 窗口版(2026-08-26 Step3,治 TSOPF 类) =====================
@@ -1760,7 +1835,17 @@ __global__ void compute_bucket_kernel(
     if (i >= A_rows) return;
     int e = est[i];
     int bid;
-    if (e <= ultra_thr) bid = BIN_ULTRA;             // ultra:线性免 hash
+    int sl0 = span_len[i];
+    // 门 v2(333SP +160%/F2 +13% 教训:窄跨度但 est 小的行在 batched/hash 本来就快,勿偷):
+    // 极窄 span≤512:数组比任何 hash 表都小,只要 e>64 就值得;中段 512<span≤2048:须 est≥2048
+    // (= v4 门的"hash 伺候不了的大表行")。两档都要求 est≥span/2(数组利用率)。
+    if (e > 64 && sl0 > 0 && sl0 <= 256 && 2LL * e >= (long long)sl0) {
+        // 小跨度 dense(docs/37;门 v3=收缩到 Ocean dense0 精确槽位:span≤256):pwtk +145%/F2 +14%
+        // 教训 = 高 dup 行 dense 付逐乘积原子、hash 只付逐 distinct,中窄跨度(257-2048)反复被偷;
+        // 256 内数组比一切 hash 表小且密集,是唯一稳定赢的槽位(nemeth18 全族实证)。
+        bid = 14;
+    }
+    else if (e <= ultra_thr) bid = BIN_ULTRA;             // ultra:线性免 hash
     // dense-iter(docs/22 Phase A + 24 裁决):重行 + 低 dup(<8×)+ **est 大(≥2048)**。
     // v3 门控演进:flop/span 密度作判据被实测否决(输家 pkustk 0.61 vs 赢家 c-58 0.16 完全重叠);
     // 真判据 = 我方 hash 对该行的速度 ∝ 表大小:F2 的行 est~1-2k → hash 9.7 G/s 本来就快,
@@ -2415,7 +2500,33 @@ static void hash_product(
                         d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                         d_ovf_rows, d_ovf_cnt, d_row_ovf, rows_ptr, d_span_lo, d_flop, d_maxbl);
                 }
-            } else if (bi == BIN_HEAVY) {
+            }
+            else if (bi >= BIN_SSPAN0 && bi <= BIN_SSPAN0 + 3) {
+                // 小跨度 dense 4 子桶(docs/37):span 定 SMEM/块型,小块高行密度
+                int sb = bi - BIN_SSPAN0;
+                if (sb == 0)
+                    hash_sspan2_kernel<256, 64><<<n, 64, (((size_t)256 * 9) + 3) / 4 * 4 + (size_t)256 * sizeof(int), cur_s>>>(
+                        dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows,
+                        rows_ptr, d_span_lo, d_span_len, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                else if (sb == 1)
+                    hash_sspan2_kernel<512, 128><<<n, 128, (((size_t)512 * 9) + 3) / 4 * 4 + (size_t)512 * sizeof(int), cur_s>>>(
+                        dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows,
+                        rows_ptr, d_span_lo, d_span_len, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                else if (sb == 2)
+                    hash_sspan2_kernel<1024, 256><<<n, 256, (((size_t)1024 * 9) + 3) / 4 * 4 + (size_t)1024 * sizeof(int), cur_s>>>(
+                        dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows,
+                        rows_ptr, d_span_lo, d_span_len, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                else
+                    hash_sspan2_kernel<2048, 256><<<n, 256, (((size_t)2048 * 9) + 3) / 4 * 4 + (size_t)2048 * sizeof(int), cur_s>>>(
+                        dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows,
+                        rows_ptr, d_span_lo, d_span_len, d_off,
+                        d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());   // 即时检查(invalid-argument 之谜防复发,docs/35 §4)
+            }
+            else if (bi == BIN_HEAVY) {
                 // heavy(est>HASH_CAP):全局内存 hash 表 + cub 分段排序(不回退 merge)
                 d_heavy_ht     = decltype(d_heavy_ht)(dev_alloc(n * sizeof(long long)));   // ll:scan 同型(混型 scan 产出坏偏移的坑)
                 d_heavy_tab_off= decltype(d_heavy_tab_off)(dev_alloc((n + 1) * sizeof(long long)));
@@ -2779,6 +2890,9 @@ static void hash_product(
                 // heavy:accumulate 内已分段排序(compact 读 scratch)
                 hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_scr_key, d_scr_val, dC_ci, d_val, d_row_ovf);
                 CHECK_CUDA(cudaGetLastError());   // TEMP:定位
+            } else if (bi >= BIN_SSPAN0 && bi <= BIN_SSPAN0 + 3) {
+                hash_compact_copy_kernel<<<n, 256>>>(rows_ptr, n, d_off, d_row_nnz, dC_rp, d_tmp_key, d_tmp_val, dC_ci, d_val, d_row_ovf);
+                CHECK_CUDA(cudaGetLastError());
             } else if (bi == BIN_DITER) {
                 // dense-iter:窗口升序 = 行内天然有序,只 copy。方案5:direct 已直写 → 跳过
                 if (dense_nr == 0)
