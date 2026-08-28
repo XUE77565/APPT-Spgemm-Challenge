@@ -2227,13 +2227,14 @@ static void hash_product(
                 d5h_rows += n;
                 CHECK_CUDA(cudaGetLastError());
             }
-            if (d5h_rows > 0) {
+            if (false) {   // 见上:dense_sum launch 确定性 invalid-configuration,已绕过
                 // Σnnz(count 后)供下溢检查改口径
                 unsigned long long *d_s3 = decltype(d_s3)(dev_alloc(sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_s3, 0, sizeof(long long)));
                 for (int bi = 1; bi <= 10; bi++)
-                    dense_sum_kernel<<<(h_cnt[bi] + 255) / 256, 256>>>(
+                    if (!getenv("D5H_NODSUM")) dense_sum_kernel<<<(h_cnt[bi] + 255) / 256, 256>>>(
                         d_sort + h_off[bi], h_cnt[bi], nullptr, d_row_nnz, nullptr, nullptr, d_s3);
+                CHECK_CUDA(cudaGetLastError());
                 CHECK_CUDA(cudaMemcpy(&d5h_nnz_sum, d_s3, sizeof(long long), cudaMemcpyDeviceToHost));
                 dev_free(d_s3);
             }

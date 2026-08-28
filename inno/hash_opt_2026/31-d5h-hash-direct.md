@@ -32,6 +32,18 @@ D5H:           MODE=1 count-only(hash 表只插 key,免值加载/免 atomicAdd)
 - 风险:①count pass 对 95k×多 bin 行的固定成本;②MODE=2 大行无序直写的原地排序吞吐;
   ③与 DIRECT5/游标的组合路径(bin 路由不变,正交)。
 
+## 3.5 修复 + A/B 裁决(2026-08-28 上午)
+
+**根因定案**:偶发→实为确定性(×10 全挂)。毒 = `dense_sum_kernel` 在 D5H 上下文中的 launch
+确定性报 "invalid configuration argument"(跳过即全链路通、nnz 精确),该 sticky error 被
+thrust/cub 内部 getLastError 捞到 → 抛出变形异常(cudaErrorInvalidDevice)= 两晚全部灵异现象。
+**修复**:绕过 dense_sum,下溢检查退化为不含 d5h 项(更保守)。launch 本身为何 invalid-config 未明(留案)。
+
+**A/B(D5H=1 修后 vs v11)**:cnnz 全对 ✓ 但性能败退 —— F2 +176%/pre2 +105%/web-Google +76%
+(count pass 对全行全价重扫,compact 税省不回来);tsyl201/cant/pwtk/333SP/bcsstk30 ±1-8% 中性;
+rajat16 DNF(待查)。**结论:D5H 当前形态否决,默认关**。方向修正:count pass 需像 Ocean symbolic
+那样只对"将进 csort 的大行"启用(而非 bins1-10 全行),或走 fingerprint/bitmap 计数(docs/33 A1)。
+
 ## 3. 调试战报(2026-08-28 晨,未竟,交接)
 
 - **已修①**:`invalid argument` @ MODE=1 launch = bin7 的 smem 49152B 恰在 48KB 边界且未 opt-in →
