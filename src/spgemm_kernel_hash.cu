@@ -2870,10 +2870,10 @@ static void hash_product(
             CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
             static int g_pb2cur = -1;
             if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e && atoi(e) == 0) ? 0 : 1; }
-            // docs/39 路由 v3:矩阵级 dense_win ∧ 高 dup(≥4)→ search(TSOPF_FS 族实测 -26/-13%;
-            // 低 dup 的 bloweya/mult_dcop/vsp/brainpc2 游标大胜,勿动);bin 行恒 cursor。
+            // docs/39 路由 v4:dup≥4 → search(全局,含 bin 行)。Cube_Coup dup=7.24/TSOPF_FS dup≥4;
+            // 全部 cursor 赢家 dup≤2.1(rajat 1.00/c-73 1.48/vsp 1.12/mult_dcop 1.0/brainpc2 2.1)。
             int uc = g_pb2cur;
-            if (uc == 1 && !dense_rows && total_est > 0 && (double)total_flop / (double)total_est >= 4.0)
+            if (uc == 1 && total_est > 0 && (double)total_flop / (double)total_est >= 4.0)
                 uc = 0;
             hash_dense_direct_kernel<<<dense_nr, 512, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
