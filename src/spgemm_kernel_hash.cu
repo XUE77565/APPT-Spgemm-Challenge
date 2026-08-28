@@ -47,6 +47,42 @@ __global__ void count_intermediates_par_kernel(
     if (lane == 0) ub[i] = s;
 }
 
+// 融合版(docs/27 §4.6):warp-per-row 一趟出 flop + span_lo/len + max_b_len(省 1 launch + 一趟 A×B 遍历)
+// ⚠ 仅 AA 路径(count 的外层 = dB_rp 与 row_span 的 dA_rp 在 att 下语义不同,att 保留双核)
+__global__ void count_flop_span_kernel(
+    const int *A_row_ptr, const int *A_col_idx, int A_rows,
+    const int *B_row_ptr, const int *B_col_idx,
+    int *ub, int *span_lo, int *span_len, int *max_b_len)
+{
+    int warp = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    int lane = threadIdx.x & 31;
+    int i = warp;
+    if (i >= A_rows) return;
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int s = 0, lo = INT_MAX, hi = -1, mb = 0;
+    for (int p = rs + lane; p < re; p += 32) {
+        int k = A_col_idx[p];
+        int b0 = B_row_ptr[k], b1 = B_row_ptr[k + 1];
+        s += b1 - b0;
+        if (b0 < b1) {
+            int c0 = B_col_idx[b0], c1 = B_col_idx[b1 - 1];
+            lo = min(lo, c0); hi = max(hi, c1); mb = max(mb, b1 - b0);
+        }
+    }
+    for (int off = 16; off > 0; off >>= 1) {
+        s += __shfl_down_sync(0xFFFFFFFF, s, off);
+        lo = min(lo, __shfl_down_sync(0xFFFFFFFF, lo, off));
+        hi = max(hi, __shfl_down_sync(0xFFFFFFFF, hi, off));
+        mb = max(mb, __shfl_down_sync(0xFFFFFFFF, mb, off));
+    }
+    if (lane == 0) {
+        ub[i] = s;
+        span_lo[i] = (lo == INT_MAX) ? 0 : lo;
+        span_len[i] = (hi < lo) ? 0 : (hi - lo + 1);
+        if (max_b_len) max_b_len[i] = mb;
+    }
+}
+
 #ifndef HASH_CAP
 #define HASH_CAP 16384         // 重行桶 hash 表最大槽位(→ col+val = 128KB/块)
 #endif
@@ -1939,8 +1975,13 @@ static void hash_product(
     int *d_maxbl;   d_maxbl   = decltype(d_maxbl)(dev_alloc(A_rows * sizeof(int)));   // 行 k 集内 B 行最大长(LLB 输入)
     long long total_flop = 0;
     prof("count_flop", [&]{
-        count_intermediates_par_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
-        row_span_kernel<<<(A_rows + 255) / 256, 256>>>(dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_span_lo, d_span_len, d_maxbl);
+        if (!att)
+            count_flop_span_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(
+                dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_flop, d_span_lo, d_span_len, d_maxbl);
+        else {   // att:count 外层=dB_rp(CSC)与 row_span 外层=dA_rp 语义不同,保留双核
+            count_intermediates_par_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(dB_rp, dB_ci, A_rows, d_flop);
+            row_span_kernel<<<(A_rows + 255) / 256, 256>>>(dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_span_lo, d_span_len, d_maxbl);
+        }
         CHECK_CUDA(cudaGetLastError());
         total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
