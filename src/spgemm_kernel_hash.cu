@@ -2246,6 +2246,8 @@ static void hash_product(
     });
     }
     long long est_projected = -1;   // MHSAMP:采样投影 Σest(≥0 时 binning 后覆写 total_est)
+    static int g_ovf_hint_expand = 0;   // ADAPT_EXPAND 状态机:0=1.15 基线 / 1=升 1.4 / 2=1.4 无效永久回 1.15
+    static int g_ovf_base_cnt = 0;      // 状态 0 末次的 overflow 行数(供"减半以上"判据)
     if (!pfuse) {
         avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
         dbg("[%s] avg_product=%.1f (total_flop=%lld)\n", tag, avg_product, total_flop);
@@ -2284,6 +2286,13 @@ static void hash_product(
         double est_expand = 1.15;   // EXPAND 扫描裁决(1.15/1.20/1.25/1.30/1.40 → 9.03/9.46/9.50/10.44/9.64ms):紧 est 完胜,retry-vs-compact 零和
         // docs/47:小阵(est 1.15 的 retry 固定开销 ~0.8ms 占比大)→ 1.4 宽松免重试
         if (A_nnz < 100000) est_expand = 1.4;
+        // ADAPT_EXPAND(docs/60):两段自适应 —— ①上轮 1.15 且 overflow>100 行 → 本轮 1.4
+        // (retry 消灭净赢:c-64 -4.1%/c-62 -3.0%/bcsstk30 -17.4%/pwtk -6.4%,v23 retry 机制
+        // 改变了 docs/47 的旧经济学);②1.4 下 overflow 仍 >10(没治好,Ga3As3H12 +13.5% 类)
+        // → 永久回 1.15。per-process static 状态机:CSV 取末轮 = 收敛值。
+        static int g_adapt_expand = -1;
+        if (g_adapt_expand < 0) { const char *e = getenv("ADAPT_EXPAND"); g_adapt_expand = (e && *e) ? atoi(e) : 1; }   // 5 warmup+timed 轮内第 3 轮收敛;假试成本≈0(会自动回退)
+        if (g_adapt_expand && g_ovf_hint_expand == 1) est_expand = 1.4;
         if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
         dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
         // MHSAMP(docs/57,Ocean Ana2 3% 采样同哲学):dense_win 候选先 stride 采样 merge → 投影
@@ -2878,6 +2887,15 @@ static void hash_product(
         int h_ovf = 0;
         CHECK_CUDA(cudaMemcpy(&h_ovf, d_ovf_cnt, sizeof(int), cudaMemcpyDeviceToHost));
         dbg("[hash] dbg: overflow=%d ovf_cnt=%d\n", overflow, h_ovf);   // TEMP
+        // ADAPT_EXPAND 状态机(overflow 读数点驱动;docs/60):①基线 1.15 下 ovf>100 → 记基线、
+        // 下轮试 1.4;②1.4 下 ovf 降至基线一半以下 → 保留(c-64 半减也净赢),否则永久回 1.15
+        // (Ga3 类 1.4 治不了 overflow 反而 +13.5%)。
+        if (g_ovf_hint_expand == 0 && h_ovf > 50) {
+            g_ovf_base_cnt = h_ovf;
+            g_ovf_hint_expand = 1;
+        } else if (g_ovf_hint_expand == 1 && g_ovf_base_cnt > 0 && h_ovf * 2 > g_ovf_base_cnt) {
+            g_ovf_hint_expand = 2;
+        }
         if (h_ovf > 0) {
             dbg("[hash] row-retry: %d 行 → flop 定表重跑\n", h_ovf);
             prof("retry", [&]{
