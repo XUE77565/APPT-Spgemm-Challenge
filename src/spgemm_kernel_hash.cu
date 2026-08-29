@@ -745,18 +745,25 @@ __global__ void hash_dense_direct_kernel(
         }
         __syncthreads();
         if (PB2_STAGE >= 3) {
-            if (warp == 0) {
-                int seglen = (w + 31) / 32;
-                int lo = lane * seglen, hi = min(lo + seglen, w);
-                int run = 0;
-                for (int j = lo; j < hi; j++) { dpref[j] = run; run += dflag[j]; }
-                int excl = run;
-                for (int off = 1; off < 32; off <<= 1) {
-                    int v = __shfl_up_sync(0xffffffff, excl, off);
-                    if (lane >= off) excl += v;
-                }
-                for (int j = lo; j < hi; j++) dpref[j] += excl - run;
+            // docs/46 全 warp 并行前缀(原 warp0 串行 169 elem/lane → 每 warp 只 w/nw 个)
+            int nwarp = blockDim.x >> 5;
+            int seglen = (w + nwarp * 32 - 1) / (nwarp * 32);
+            int t0 = (warp * 32 + lane) * seglen;
+            int t1 = min(t0 + seglen, w);
+            int run = 0;
+            for (int j = t0; j < t1; j++) { dpref[j] = run; run += dflag[j]; }
+            int excl = run;
+            for (int off = 1; off < 32; off <<= 1) {
+                int v = __shfl_up_sync(0xffffffff, excl, off);
+                if (lane >= off) excl += v;
             }
+            __shared__ int wsum46[32];
+            if (lane == 31) wsum46[warp] = excl;
+            __syncthreads();
+            if (tid == 0) { int acc = 0; for (int x = 0; x < nwarp; x++) { int t = wsum46[x]; wsum46[x] = acc; acc += t; } }
+            __syncthreads();
+            int woff46 = wsum46[warp];
+            for (int j = t0; j < t1; j++) dpref[j] += woff46;
         }
         __syncthreads();
         if (PB2_STAGE >= 4) {
