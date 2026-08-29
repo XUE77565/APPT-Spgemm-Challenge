@@ -58,3 +58,11 @@ MH_K=32(merge 只读前 32/128 partition,数据量 ÷4):**全面更糟** —— 
    与字节无关),不是字节限制 —— 减字节(K=32)不减链;标量路径再丢 uint4 宽度 → 2× 反坏。
    与 MHSAMP(减引用 14×,toll 不变)合并看:引用数也不是完整模型 —— 待统一解释。
    **可行动结论:mh_merge toll 无法靠数据量削减;出路 = 锁频(需管理员)/相位融合/消 D2H 同步。**
+
+## 7. Ocean 侧核对(ocean/src/main.cu:72,08-30 补)
+
+**Ocean 每进程单发 spgemm.run,无 warmup 迭代**(仅 cudaFree(0) 热 context)—— 其 estimation/
+analysis 小 kernel 同样吃冷启动 toll;我们内部 3 timed+warmup 取末轮 = 口径更暖(memory 的
+"warmup 深度利我们 1-3%" 实证)。⇒ 锁频后:①冷热不对称消失(对我们略不利)②双方小相位都
+提速(对我们更有利,front-half 占比更高)。§4 的 −8.8% 投影假设 Ocean 不动,**真实净比值收益
+估 −5~7%**,但同条件锁频是更干净的论文口径(双方法同 DVFS 环境)。
