@@ -1,0 +1,437 @@
+Refresh 仅 'Auto' 列 × 337 阵(DENSE_TIMEOUT=600s)→ compare/ocean337/methods_cmp_clean.csv.csv
+
+[1/337] 333SP          Auto=10.712     (10.0s)
+[2/337] 3Dspectralwave Auto=31.666     (14.6s)
+[3/337] 3Dspectralwave2 Auto=13.296     (9.0s)
+[4/337] 3dtube         Auto=6.925      (5.5s)
+[5/337] AS365          Auto=11.801     (10.0s)
+[6/337] BenElechi1     Auto=9.513      (7.8s)
+[7/337] Bump_2911      Auto=106.66     (44.3s)
+[8/337] CO             Auto=18.204     (7.1s)
+[9/337] Chevron4       Auto=4.352      (7.7s)
+[10/337] CoupCons3D     Auto=19.225     (12.7s)
+[11/337] Cube_Coup_dt0  Auto=351.873    (44.4s)
+[12/337] CurlCurl_2     Auto=6.535      (7.3s)
+[13/337] CurlCurl_3     Auto=9.8        (8.3s)
+[14/337] CurlCurl_4     Auto=18.415     (11.6s)
+[15/337] Dubcova3       Auto=4.211      (5.9s)
+[16/337] Emilia_923     Auto=36.003     (12.8s)
+[17/337] F1             Auto=69.142     (12.0s)
+[18/337] F2             Auto=14.672     (6.3s)
+[19/337] FEM_3D_thermal2 Auto=2.419      (6.4s)
+[20/337] Fault_639      Auto=25.264     (10.7s)
+[21/337] Flan_1565      Auto=141.877    (42.9s)
+[22/337] Freescale1     Auto=8.931      (13.6s)
+[23/337] Ga10As10H30    Auto=26.701     (6.6s)
+[24/337] Ga19As19H42    Auto=46.351     (7.5s)
+[25/337] Ga3As3H12      Auto=55.115     (6.8s)
+[26/337] Ga41As41H72    Auto=102.51     (10.3s)
+[27/337] GaAsH6         Auto=21.51      (6.0s)
+[28/337] Ge87H76        Auto=40.565     (7.1s)
+[29/337] Ge99H100       Auto=44.584     (7.4s)
+[30/337] Geo_1438       Auto=54.388     (19.4s)
+[31/337] H2O            Auto=5.167      (5.9s)
+[32/337] HTC_336_4438   Auto=19.573     (5.7s)
+[33/337] HTC_336_9129   Auto=21.784     (5.7s)
+[34/337] Hook_1498      Auto=59.202     (31.8s)
+[35/337] Long_Coup_dt6  Auto=99.644     (35.9s)
+[36/337] M6             Auto=10.909     (9.6s)
+[37/337] ML_Laplace     Auto=38.965     (14.7s)
+[38/337] NLR            Auto=12.991     (10.5s)
+[39/337] Reuters911     Auto=5.525      (5.2s)
+[40/337] Serena         Auto=64.736     (31.8s)
+[41/337] Si10H16        Auto=3.46       (5.3s)
+[42/337] Si34H36        Auto=22.277     (6.4s)
+[43/337] Si41Ge41H72    Auto=89.051     (9.3s)
+[44/337] Si87H76        Auto=29.941     (7.9s)
+[45/337] SiO            Auto=4.601      (5.5s)
+[46/337] SiO2           Auto=239.988    (9.1s)
+[47/337] Stanford_Berkeley Auto=331.251    (8.8s)
+[48/337] StocF-1465     Auto=17.445     (10.2s)
+[49/337] TSC_OPF_1047   Auto=5.842      (5.5s)
+[50/337] TSC_OPF_300    Auto=5.655      (5.3s)
+[51/337] TSOPF_FS_b300  Auto=72.937     (7.1s)
+[52/337] TSOPF_FS_b300_c2 Auto=273.295    (23.7s)
+[53/337] TSOPF_FS_b39_c7 Auto=25.361     (6.1s)
+[54/337] TSOPF_FS_b9_c6 Auto=8.844      (5.3s)
+[55/337] TSOPF_RS_b2052_c1 Auto=8.598      (7.7s)
+[56/337] TSOPF_RS_b2383 Auto=30.672     (11.2s)
+[57/337] TSOPF_RS_b2383_c1 Auto=30.642     (11.1s)
+[58/337] TSOPF_RS_b678_c2 Auto=8.868      (8.4s)
+[59/337] Zd_Jac2        Auto=5.584      (5.7s)
+[60/337] Zd_Jac2_db     Auto=2.03       (5.4s)
+[61/337] Zd_Jac3        Auto=6.709      (5.7s)
+[62/337] Zd_Jac3_db     Auto=2.02       (5.2s)
+[63/337] Zd_Jac6        Auto=5.988      (5.8s)
+[64/337] Zd_Jac6_db     Auto=1.912      (5.4s)
+[65/337] a0nsdsil       Auto=17.98      (5.7s)
+[66/337] a2nnsnsl       Auto=18.031     (5.7s)
+[67/337] a5esindl       Auto=12.171     (5.6s)
+[68/337] af_0_k101      Auto=11.283     (9.0s)
+[69/337] af_1_k101      Auto=11.289     (9.0s)
+[70/337] af_2_k101      Auto=11.323     (9.0s)
+[71/337] af_3_k101      Auto=11.29      (9.0s)
+[72/337] af_4_k101      Auto=11.343     (9.0s)
+[73/337] af_5_k101      Auto=11.478     (9.2s)
+[74/337] af_shell1      Auto=10.752     (8.6s)
+[75/337] af_shell10     Auto=28.783     (16.0s)
+[76/337] af_shell2      Auto=10.758     (8.6s)
+[77/337] af_shell3      Auto=10.801     (8.6s)
+[78/337] af_shell4      Auto=10.761     (8.6s)
+[79/337] af_shell5      Auto=10.769     (8.6s)
+[80/337] af_shell6      Auto=10.759     (8.6s)
+[81/337] af_shell7      Auto=10.8       (8.8s)
+[82/337] af_shell8      Auto=10.772     (8.6s)
+[83/337] af_shell9      Auto=10.789     (8.6s)
+[84/337] appu           Auto=11.162     (6.2s)
+[85/337] atmosmodd      Auto=4.129      (8.6s)
+[86/337] atmosmodj      Auto=4.137      (8.5s)
+[87/337] atmosmodl      Auto=4.342      (8.2s)
+[88/337] atmosmodm      Auto=4.34       (8.2s)
+[89/337] audikw_1       Auto=166.158    (37.5s)
+[90/337] auto           Auto=5.448      (6.3s)
+[91/337] av41092        Auto=6.651      (5.8s)
+[92/337] bbmat          Auto=3.232      (5.7s)
+[93/337] bcsstk30       Auto=3.236      (5.3s)
+[94/337] bcsstk35       Auto=1.679      (5.4s)
+[95/337] bcsstk36       Auto=1.529      (5.2s)
+[96/337] bcsstk39       Auto=2.128      (5.4s)
+[97/337] bloweya        Auto=7.115      (5.4s)
+[98/337] bloweybl       Auto=5.977      (5.4s)
+[99/337] bloweybq       Auto=11.28      (5.3s)
+[100/337] bmw3_2         Auto=9.713      (7.2s)
+[101/337] bmw7st_1       Auto=6.689      (6.6s)
+[102/337] bmwcra_1       Auto=13.824     (7.6s)
+[103/337] bone010        Auto=80.393     (31.5s)
+[104/337] boneS01        Auto=6.901      (6.3s)
+[105/337] boneS10        Auto=56.138     (15.7s)
+[106/337] brainpc2       Auto=10.842     (5.7s)
+[107/337] bundle1        Auto=6.184      (5.2s)
+[108/337] c-43           Auto=2.92       (5.2s)
+[109/337] c-45           Auto=4.216      (5.2s)
+[110/337] c-53           Auto=6.085      (5.2s)
+[111/337] c-57           Auto=17.588     (6.0s)
+[112/337] c-58           Auto=6.898      (5.3s)
+[113/337] c-62           Auto=7.505      (5.3s)
+[114/337] c-62ghs        Auto=8.782      (5.3s)
+[115/337] c-64           Auto=21.527     (5.9s)
+[116/337] c-64b          Auto=21.683     (5.8s)
+[117/337] c-66           Auto=7.825      (5.3s)
+[118/337] c-66b          Auto=8.479      (5.5s)
+[119/337] c-67           Auto=8.806      (5.4s)
+[120/337] c-67b          Auto=9.014      (5.5s)
+[121/337] c-71           Auto=15.142     (5.6s)
+[122/337] c-73           Auto=78.6       (23.5s)
+[123/337] c-73b          Auto=79.171     (23.6s)
+[124/337] c-big          Auto=291.741    (22.1s)
+[125/337] cage13         Auto=9.313      (8.1s)
+[126/337] cage14         Auto=36.988     (17.1s)
+[127/337] cage15         Auto=148.467    (63.9s)
+[128/337] cant           Auto=4.508      (5.8s)
+[129/337] case39         Auto=50.825     (19.6s)
+[130/337] case9          Auto=8.863      (5.3s)
+[131/337] cfd2           Auto=2.707      (5.7s)
+[132/337] circuit_4      Auto=17.15      (5.5s)
+[133/337] cnr-2000       Auto=9.589      (5.8s)
+[134/337] conf5_4-8x8-05 Auto=2.116      (6.1s)
+[135/337] conf5_4-8x8-10 Auto=2.138      (6.1s)
+[136/337] conf5_4-8x8-15 Auto=2.122      (6.1s)
+[137/337] conf5_4-8x8-20 Auto=2.118      (6.0s)
+[138/337] conf6_0-8x8-20 Auto=2.127      (6.0s)
+[139/337] conf6_0-8x8-30 Auto=2.12       (6.1s)
+[140/337] conf6_0-8x8-80 Auto=2.141      (6.1s)
+[141/337] consph         Auto=7.758      (6.2s)
+[142/337] cop20k_A       Auto=3.397      (5.7s)
+[143/337] crankseg_1     Auto=36.4       (7.3s)
+[144/337] crankseg_2     Auto=56.727     (8.3s)
+[145/337] crplat2        Auto=1.037      (5.2s)
+[146/337] crystk02       Auto=1.69       (5.2s)
+[147/337] crystk03       Auto=2.391      (5.3s)
+[148/337] ct20stif       Auto=3.036      (5.5s)
+[149/337] delaunay_n21   Auto=6.265      (7.1s)
+[150/337] delaunay_n22   Auto=12.146     (9.3s)
+[151/337] delaunay_n23   Auto=23.959     (13.4s)
+[152/337] delaunay_n24   Auto=47.774     (34.8s)
+[153/337] dielFilterV2clx Auto=35.896     (12.1s)
+[154/337] dielFilterV2real Auto=66.777     (30.5s)
+[155/337] dielFilterV3clx Auto=128.531    (15.0s)
+[156/337] dielFilterV3real Auto=289.668    (43.1s)
+[157/337] email-Enron    Auto=5.34       (5.2s)
+[158/337] eu-2005        Auto=62.46      (9.8s)
+[159/337] ex11           Auto=1.68       (5.4s)
+[160/337] exdata_1       Auto=14.54      (5.5s)
+[161/337] fcondp2        Auto=9.227      (6.4s)
+[162/337] fem_filter     Auto=7.099      (5.9s)
+[163/337] fem_hifreq_circuit Auto=25.188     (14.5s)
+[164/337] filter3D       Auto=3.958      (5.8s)
+[165/337] fp             Auto=3.261      (5.3s)
+[166/337] fullb          Auto=10.976     (6.4s)
+[167/337] gearbox        Auto=9.393      (6.0s)
+[168/337] germany_osm    Auto=13.707     (9.8s)
+[169/337] gsm_106857     Auto=27.443     (11.2s)
+[170/337] gupta1         Auto=39.772     (19.3s)
+[171/337] gupta2         Auto=97.745     (20.6s)
+[172/337] gupta3         Auto=149.276    (7.6s)
+[173/337] gyro           Auto=2.39       (5.3s)
+[174/337] gyro_k         Auto=2.368      (5.2s)
+[175/337] halfb          Auto=10.372     (6.4s)
+[176/337] hangGlider_3   Auto=9.761      (5.6s)
+[177/337] hangGlider_4   Auto=7.197      (5.8s)
+[178/337] hangGlider_5   Auto=7.477      (6.1s)
+[179/337] hood           Auto=8.905      (7.3s)
+[180/337] hugebubbles-00000 Auto=28.851     (18.3s)
+[181/337] hugebubbles-00010 Auto=36.914     (18.9s)
+[182/337] hugebubbles-00020 Auto=39.878     (20.8s)
+[183/337] hugetrace-00010 Auto=19.736     (12.7s)
+[184/337] hugetrace-00020 Auto=27.491     (15.6s)
+[185/337] hugetric-00010 Auto=12.081     (9.5s)
+[186/337] hugetric-00020 Auto=13.072     (10.0s)
+[187/337] iChem_Jacobian Auto=3.208      (7.0s)
+[188/337] in-2004        Auto=99.229     (9.0s)
+[189/337] inline_1       Auto=89.377     (14.5s)
+[190/337] invextr1_new   Auto=4.047      (5.7s)
+[191/337] kim2           Auto=6.537      (10.1s)
+[192/337] kkt_power      Auto=27.389     (9.1s)
+[193/337] laminar_duct3D Auto=4.977      (6.4s)
+[194/337] largebasis     Auto=3.499      (7.2s)
+[195/337] ldoor          Auto=35.735     (15.1s)
+[196/337] li             Auto=3.496      (5.5s)
+[197/337] lowThrust_10   Auto=5.258      (5.2s)
+[198/337] lowThrust_11   Auto=5.258      (5.2s)
+[199/337] lowThrust_12   Auto=5.41       (5.2s)
+[200/337] lowThrust_13   Auto=5.439      (5.3s)
+[201/337] lowThrust_4    Auto=6.882      (5.2s)
+[202/337] lowThrust_5    Auto=4.425      (5.2s)
+[203/337] lowThrust_6    Auto=4.709      (5.2s)
+[204/337] lowThrust_7    Auto=4.819      (5.2s)
+[205/337] lowThrust_8    Auto=5.026      (5.2s)
+[206/337] lowThrust_9    Auto=5.128      (5.2s)
+[207/337] m14b           Auto=2.824      (5.6s)
+[208/337] m_t1           Auto=16.011     (7.1s)
+[209/337] mixtank_new    Auto=4.272      (5.8s)
+[210/337] mono_500Hz     Auto=8.021      (8.1s)
+[211/337] mouse_gene     Auto=598.037    (29.2s)
+[212/337] msc10848       Auto=3.406      (5.4s)
+[213/337] msc23052       Auto=1.552      (5.3s)
+[214/337] msdoor         Auto=16.032     (9.5s)
+[215/337] mult_dcop_01   Auto=19.664     (19.6s)
+[216/337] mult_dcop_02   Auto=19.577     (19.6s)
+[217/337] mult_dcop_03   Auto=19.765     (19.6s)
+[218/337] nasasrb        Auto=2.802      (5.5s)
+[219/337] nd12k          Auto=70.517     (8.5s)
+[220/337] nd24k          Auto=150.311    (11.7s)
+[221/337] nd3k           Auto=12.0       (5.9s)
+[222/337] nd6k           Auto=29.24      (6.7s)
+[223/337] nemeth01       Auto=0.577      (5.2s)
+[224/337] nemeth18       Auto=0.542      (5.2s)
+[225/337] nemeth19       Auto=0.643      (5.2s)
+[226/337] nemeth20       Auto=1.047      (5.2s)
+[227/337] nemeth21       Auto=1.846      (5.4s)
+[228/337] nemeth22       Auto=1.949      (5.3s)
+[229/337] nemeth23       Auto=2.298      (5.4s)
+[230/337] nemeth24       Auto=2.313      (5.3s)
+[231/337] nemeth25       Auto=2.304      (5.3s)
+[232/337] nemeth26       Auto=2.313      (5.4s)
+[233/337] net100         Auto=9.672      (5.6s)
+[234/337] net125         Auto=13.658     (5.9s)
+[235/337] net150         Auto=18.381     (6.3s)
+[236/337] net50          Auto=4.687      (5.2s)
+[237/337] net75          Auto=6.715      (5.5s)
+[238/337] nlpkkt120      Auto=69.834     (35.7s)
+[239/337] nlpkkt80       Auto=29.004     (10.1s)
+[240/337] ns3Da          Auto=4.908      (5.7s)
+[241/337] offshore       Auto=3.437      (6.1s)
+[242/337] ohne2          Auto=19.011     (8.7s)
+[243/337] oilpan         Auto=3.085      (5.6s)
+[244/337] olafu          Auto=1.686      (5.2s)
+[245/337] opt1           Auto=4.073      (5.3s)
+[246/337] para-10        Auto=21.669     (6.9s)
+[247/337] para-4         Auto=15.63      (7.1s)
+[248/337] para-5         Auto=21.607     (7.0s)
+[249/337] para-6         Auto=21.628     (6.8s)
+[250/337] para-7         Auto=21.739     (7.0s)
+[251/337] para-8         Auto=21.72      (7.2s)
+[252/337] para-9         Auto=21.608     (6.8s)
+[253/337] patents        Auto=10.173     (11.1s)
+[254/337] pattern1       Auto=72.471     (7.2s)
+[255/337] pcrystk02      Auto=1.751      (5.2s)
+[256/337] pcrystk03      Auto=2.382      (5.2s)
+[257/337] pct20stif      Auto=3.039      (5.3s)
+[258/337] pdb1HYS        Auto=8.362      (6.0s)
+[259/337] pf2177         Auto=4.601      (5.3s)
+[260/337] pkustk01       Auto=1.663      (5.1s)
+[261/337] pkustk02       Auto=1.017      (5.1s)
+[262/337] pkustk03       Auto=2.999      (5.5s)
+[263/337] pkustk04       Auto=24.843     (6.0s)
+[264/337] pkustk05       Auto=3.127      (5.4s)
+[265/337] pkustk06       Auto=3.496      (5.4s)
+[266/337] pkustk07       Auto=5.729      (5.4s)
+[267/337] pkustk08       Auto=7.643      (5.4s)
+[268/337] pkustk09       Auto=1.372      (5.2s)
+[269/337] pkustk10       Auto=3.981      (5.5s)
+[270/337] pkustk11       Auto=6.355      (5.7s)
+[271/337] pkustk12       Auto=65.203     (20.6s)
+[272/337] pkustk13       Auto=12.151     (5.8s)
+[273/337] pkustk14       Auto=28.134     (6.9s)
+[274/337] pli            Auto=3.546      (5.2s)
+[275/337] poisson3Db     Auto=4.526      (6.2s)
+[276/337] pre2           Auto=47.752     (21.2s)
+[277/337] pwtk           Auto=8.524      (7.3s)
+[278/337] raefsky3       Auto=1.121      (5.5s)
+[279/337] raefsky4       Auto=2.031      (5.3s)
+[280/337] rajat16        Auto=45.238     (21.0s)
+[281/337] rajat17        Auto=47.382     (21.4s)
+[282/337] rajat18        Auto=41.486     (21.0s)
+[283/337] rajat20        Auto=38.554     (21.2s)
+[284/337] rajat25        Auto=41.428     (21.1s)
+[285/337] rajat28        Auto=39.583     (21.1s)
+[286/337] rajat31        Auto=10.552     (13.3s)
+[287/337] ramage02       Auto=6.36       (5.3s)
+[288/337] rgg_n_2_19_s0  Auto=5.566      (5.8s)
+[289/337] rgg_n_2_20_s0  Auto=10.576     (6.7s)
+[290/337] rgg_n_2_21_s0  Auto=20.734     (8.8s)
+[291/337] rgg_n_2_22_s0  Auto=41.38      (12.9s)
+[292/337] rma10          Auto=2.945      (5.8s)
+[293/337] road_central   Auto=26.917     (14.4s)
+[294/337] road_usa       Auto=38.211     (18.4s)
+[295/337] s3dkq4m2       Auto=3.732      (6.3s)
+[296/337] s3dkt3m2       Auto=2.485      (5.8s)
+[297/337] ship_001       Auto=10.102     (6.0s)
+[298/337] ship_003       Auto=8.928      (6.5s)
+[299/337] shipsec1       Auto=6.594      (6.4s)
+[300/337] shipsec5       Auto=8.827      (6.9s)
+[301/337] shipsec8       Auto=6.366      (6.3s)
+[302/337] sinc18         Auto=3.779      (5.6s)
+[303/337] sme3Da         Auto=2.717      (5.5s)
+[304/337] sme3Db         Auto=5.877      (6.2s)
+[305/337] sme3Dc         Auto=9.087      (6.4s)
+[306/337] soc-Slashdot0811 Auto=13.431     (5.6s)
+[307/337] soc-Slashdot0902 Auto=14.581     (5.6s)
+[308/337] sparsine       Auto=3.621      (5.6s)
+[309/337] srb1           Auto=2.733      (5.3s)
+[310/337] std1_Jac2      Auto=4.571      (5.7s)
+[311/337] std1_Jac3      Auto=5.128      (5.7s)
+[312/337] std1_Jac3_db   Auto=1.611      (5.2s)
+[313/337] t3dh           Auto=6.28       (6.4s)
+[314/337] t3dh_a         Auto=6.21       (6.0s)
+[315/337] t3dh_e         Auto=6.208      (5.9s)
+[316/337] thermal2       Auto=3.966      (7.3s)
+[317/337] thread         Auto=10.518     (6.0s)
+[318/337] torso1         Auto=190.889    (9.0s)
+[319/337] torso3         Auto=3.234      (6.9s)
+[320/337] trdheim        Auto=2.848      (5.3s)
+[321/337] troll          Auto=10.974     (6.3s)
+[322/337] tsyl201        Auto=3.574      (5.4s)
+[323/337] vanbody        Auto=2.856      (5.5s)
+[324/337] vsp_bcsstk30_500sep_10in_1Kout Auto=7.225      (5.9s)
+[325/337] vsp_befref_fxm_2_4_air02 Auto=5.202      (5.4s)
+[326/337] vsp_model1_crew1_cr42_south31 Auto=20.135     (19.7s)
+[327/337] vsp_msc10848_300sep_100in_1Kout Auto=7.387      (5.5s)
+[328/337] vsp_south31_slptsk Auto=18.645     (19.2s)
+[329/337] water_tank     Auto=2.059      (5.8s)
+[330/337] wb-edu         Auto=770.397    (35.0s)
+[331/337] web-BerkStan   Auto=16.371     (6.7s)
+[332/337] web-Google     Auto=12.473     (7.0s)
+[333/337] web-NotreDame  Auto=10.297     (5.4s)
+[334/337] webbase-1M     Auto=44.845     (6.6s)
+[335/337] windscreen     Auto=2.105      (5.6s)
+[336/337] x104           Auto=13.638     (7.1s)
+[337/337] xenon2         Auto=2.945      (6.4s)
+
+=== 几何均值(ms) ===
+  cu          31.581
+  Auto        10.624
+  Ocean        5.918
+  opSparse    17.433
+  HSMU        14.426
+  bhSparse    40.528
+  dense     2477.293
+  cublas     634.532
+
+=== Auto 选择(共 337 阵)===  hash 337 / merge3 0
+
+=== Auto vs cuSPARSE:赢 247 / 输 24,几何均值(Auto/cuSPARSE) 0.223× ===
+  name                   n       C_nnz  cuSPARSE      Auto    ratio
+  Stanford_Berkeley  683446    78130972    45.694   331.251    7.25×
+  webbase-1M       1000005    51111996     9.512    44.845    4.71×
+  hugetric-00020   7122792    44609736     5.449    13.072    2.40×
+  hugetric-00010   6592765    41276239     5.104    12.081    2.37×
+  web-Google        916428    29710164     7.529    12.473    1.66×
+  TSOPF_RS_b2383     38120    74318317    19.261    30.672    1.59×
+  TSOPF_RS_b2383_c1   38120    74318317    19.273    30.642    1.59×
+  Chevron4          711450    17706328     3.089     4.352    1.41×
+  c-71               76638    52538716    11.109    15.142    1.36×
+  M6               3501776    68984930     8.464    10.909    1.29×
+  Freescale1       3428755    45276331     6.943     8.931    1.29×
+  NLR              4163763    82016497    10.102    12.991    1.29×
+  AS365            3799275    74616587     9.225    11.801    1.28×
+  333SP            3712815    71961733     8.466    10.712    1.27×
+  delaunay_n22     4194304    86836968     9.811    12.146    1.24×
+  ... 另有 9 个
+
+=== Auto vs Ocean:赢 27 / 输 310,几何均值(Auto/Ocean) 1.795× ===
+  name                   n       C_nnz     Ocean      Auto    ratio
+  wb-edu           9845725   630077764     1.462   770.397  526.95×
+  Cube_Coup_dt0    2164760   552667840     4.027   351.873   87.38×
+  Flan_1565        1564794   509685948     4.027   141.877   35.23×
+  Bump_2911        2911419   560173611     4.027   106.660   26.49×
+  Ga41As41H72       268096   231455088     4.027   102.510   25.46×
+  Long_Coup_dt6    1470152   388670368     4.027    99.644   24.74×
+  Si41Ge41H72       185639   173776869     4.027    89.051   22.11×
+  F1                343791   224484403     4.027    69.142   17.17×
+  Serena           1391349   315805689     4.027    64.736   16.08×
+  Hook_1498        1498023   312415749     4.027    59.202   14.70×
+  Ga3As3H12          61349    62181563     4.027    55.115   13.69×
+  Geo_1438         1437960   274478976     4.027    54.388   13.51×
+  Ga19As19H42       133123   108051533     4.027    46.351   11.51×
+  Ge99H100          112985   105811785     4.027    44.584   11.07×
+  Ge87H76           112985    99053985     4.027    40.565   10.07×
+  ... 另有 295 个
+
+=== Auto vs opSparse:赢 225 / 输 93,几何均值(Auto/opSparse) 0.553× ===
+  name                   n       C_nnz  opSparse      Auto    ratio
+  wb-edu           9845725   630077764    91.272   770.397    8.44×
+  webbase-1M       1000005    51111996    14.038    44.845    3.19×
+  road_central    14081816    69990710     8.652    26.917    3.11×
+  web-Google        916428    29710164     4.024    12.473    3.10×
+  hugetrace-00020 16002413    99652167     9.142    27.491    3.01×
+  hugebubbles-0002021198119   132690161    13.552    39.878    2.94×
+  hugebubbles-0000018318143   113009849     9.906    28.851    2.91×
+  hugebubbles-0001019458087   121526577    12.750    36.914    2.90×
+  Cube_Coup_dt0    2164760   552667840   123.740   351.873    2.84×
+  hugetrace-00010 12057441    74977771     7.248    19.736    2.72×
+  kkt_power        2063494    93265642    10.147    27.389    2.70×
+  hugetric-00010   6592765    41276239     4.596    12.081    2.63×
+  hugetric-00020   7122792    44609736     4.993    13.072    2.62×
+  germany_osm     11548845    42720261     5.755    13.707    2.38×
+  rajat31          4690002    53118754     5.112    10.552    2.06×
+  ... 另有 78 个
+
+=== Auto vs HSMU:赢 299 / 输 38,几何均值(Auto/HSMU) 0.736× ===
+  name                   n       C_nnz      HSMU      Auto    ratio
+  c-big             345241   447991461    67.461   291.741    4.32×
+  wb-edu           9845725   630077764   222.495   770.397    3.46×
+  Cube_Coup_dt0    2164760   552667840   134.682   351.873    2.61×
+  dielFilterV3clx   420408   247299354    74.297   128.531    1.73×
+  Stanford_Berkeley  683446    78130972   203.790   331.251    1.63×
+  lowThrust_4        13562    28327028     4.730     6.882    1.45×
+  bloweybq           10001   100020001     7.842    11.280    1.44×
+  kkt_power        2063494    93265642    19.175    27.389    1.43×
+  dielFilterV3real 1102824   688649400   206.522   289.668    1.40×
+  web-Google        916428    29710164     9.392    12.473    1.33×
+  inline_1          503712   253084638    72.640    89.377    1.23×
+  ML_Laplace        377002    95882884    32.148    38.965    1.21×
+  nlpkkt80         1062400   154663144    24.760    29.004    1.17×
+  CurlCurl_4       2380515   133384865    15.900    18.415    1.16×
+  F2                 71505    39648121    12.721    14.672    1.15×
+  ... 另有 23 个
+
+=== Auto vs bhSparse:赢 316 / 输 1,几何均值(Auto/bhSparse) 0.235× ===
+  name                   n       C_nnz  bhSparse      Auto    ratio
+  Cube_Coup_dt0    2164760   552667840   278.281   351.873    1.26×
+
+=== Auto vs dense:赢 138 / 输 0,几何均值(Auto/dense) 0.002× ===
+  name                   n       C_nnz     dense      Auto    ratio
+
+=== Auto vs cuBLAS:赢 138 / 输 0,几何均值(Auto/cuBLAS) 0.008× ===
+  name                   n       C_nnz    cuBLAS      Auto    ratio
