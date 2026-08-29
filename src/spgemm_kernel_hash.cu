@@ -1745,7 +1745,8 @@ struct ToLL {   // thrust scan 输入升 64 位(thrust 按输入 value_type 累�
 // 几千倍,裸 flop 定表 = 内存爆炸根源之一,docs/21);超全局表上限 → 不可重试(保持 overflow → 整阵回退)
 __global__ void retry_prep_kernel(
     const int *rows, int n, const int *flop,
-    long long *rht, int *row_ovf, int *overflow_flag, int ncols)
+    long long *rht, int *row_ovf, int *overflow_flag, int ncols,
+    const int *span_len = nullptr, unsigned long long *sum_span = nullptr /*docs/53 GPU 侧门*/)
 {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= n) return;
@@ -1757,6 +1758,7 @@ __global__ void retry_prep_kernel(
     while (h < 2 * f) h <<= 1;
     rht[t] = h;
     row_ovf[row] = 1;   // 已在 accumulate 记录时置位;此处幂等
+    if (span_len && sum_span) atomicAdd(sum_span, (unsigned long long)span_len[row]);   // docs/53
 }
 // slot:重试区按行 id 的槽位数(=min(flop, ncols);非重试行为 0,先 memset)
 __global__ void retry_slot_kernel(const int *rows, int n, const int *flop, int *rslot, int ncols)
@@ -2692,8 +2694,18 @@ static void hash_product(
                 CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));   // 清 accumulate 的旧标志;不可重试行会重置
                 d_rht  = decltype(d_rht)(dev_alloc(h_ovf * sizeof(long long)));
                 d_rtab = decltype(d_rtab)(dev_alloc((h_ovf + 1) * sizeof(long long)));
+                unsigned long long *d_sum_span = decltype(d_sum_span)(dev_alloc(sizeof(unsigned long long)));
+                CHECK_CUDA(cudaMemset(d_sum_span, 0, sizeof(unsigned long long)));
                 retry_prep_kernel<<<(h_ovf + 255) / 256, 256>>>(
-                    d_ovf_rows, h_ovf, d_flop, d_rht, d_row_ovf, d_overflow, A_cols);
+                    d_ovf_rows, h_ovf, d_flop, d_rht, d_row_ovf, d_overflow, A_cols,
+                    d_span_len, d_sum_span);
+                unsigned long long h_sum_span = 0;
+                CHECK_CUDA(cudaMemcpy(&h_sum_span, d_sum_span, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+                dev_free(d_sum_span);
+                // docs/53 GPU 侧门:avg_span ≤ n/4 → 窗口;否则 hash_global(web-Google +531% 教训)
+                bool retry_use_window = h_ovf > 0 && (double)h_sum_span / h_ovf <= (double)A_cols / 4.0;
+                dbg("[hash] docs/53 retry 门: avg_span=%.0f n/4=%.0f → %s\n",
+                    (double)h_sum_span / h_ovf, A_cols / 4.0, retry_use_window ? "window" : "hash_global");
                 thrust::exclusive_scan(thrust::device_ptr<long long>(d_rht),
                                        thrust::device_ptr<long long>(d_rht + h_ovf),
                                        thrust::device_ptr<long long>(d_rtab));
@@ -2708,7 +2720,27 @@ static void hash_product(
                                        thrust::device_ptr<long long>(d_roff + 1));   // Fix#3(审查):int 累加 2^31 回绕,同 est_scan 坑
                 long long r_slots;
                 CHECK_CUDA(cudaMemcpy(&r_slots, d_roff + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
-                if (r_slots > 0) {
+                if (r_slots > 0 && retry_use_window) {
+                    // docs/53 溢出换窗口内核(GPU 侧门已判定 avg_span≤n/4):
+                    // hash_dense_window_kernel(SMEM 恒定,窗口序免排)替 hash_global + cub sort
+                    rk  = decltype(rk)(dev_alloc((size_t)r_slots * sizeof(unsigned long long)));
+                    rv  = decltype(rv)(dev_alloc((size_t)r_slots * sizeof(double)));
+                    {   size_t wsm = ((size_t)DENSE_MAX_N * 9 + 3) / 4 * 4 + (size_t)DENSE_MAX_N * sizeof(int);
+                        CHECK_CUDA(cudaFuncSetAttribute(hash_dense_window_kernel,
+                                                        cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
+                        hash_dense_window_kernel<<<h_ovf, 512, wsm>>>(
+                            dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
+                            d_roff, d_rslot, rk, rv, d_row_nnz, d_overflow,
+                            d_ovf_rows, d_ovf_cnt, d_row_ovf,
+                            d_ovf_rows, d_span_lo, d_flop, d_maxbl);
+                        CHECK_CUDA(cudaGetLastError());
+                    }
+                    d_retry_rows = d_ovf_rows; d_retry_n = h_ovf;
+                    d_retry_off = d_roff; d_retry_key = rk; d_retry_val = rv;
+                    dbg("[hash] docs/53 retry→window: %d 行(r_slots=%lld)免排序\n", h_ovf, r_slots);
+                }
+                else if (r_slots > 0) {
+                    // 原 hash_global 路径(span>n/4 的 retry 行)
                     // 表 arena 总量 = rtab[h_ovf-1] + rht[h_ovf-1](exclusive scan 只写 [0..h_ovf-1])
                     long long last_h, rt_prev;
                     CHECK_CUDA(cudaMemcpy(&last_h, d_rht + (h_ovf - 1), sizeof(long long), cudaMemcpyDeviceToHost));
