@@ -539,19 +539,20 @@ __global__ void hash_dense_count_kernel(
     int *row_nnz,
     const int *bucket_rows /*nullable,同 window kernel*/,
     const int *span_lo /*nullable*/,
-    const int *row_flop = nullptr, const int *row_maxbl = nullptr /*Phase B v2-lite*/)
+    const int *row_flop = nullptr, const int *row_maxbl = nullptr /*Phase B v2-lite*/,
+    int cnt_w = DENSE_CNT_W /*DCFUSE:动态窗宽 = min(DENSE_CNT_W, ceil4(n)),小阵 occupancy↑*/)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
     int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
-    extern __shared__ __align__(8) unsigned char csmem[];   // [DENSE_CNT_W] byte flags
+    extern __shared__ __align__(8) unsigned char csmem[];   // [cnt_w] byte flags
     __shared__ int wcnt[32];                                 // blockDim 1024 = 32 warp
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int total = 0;
     int lo0 = span_lo ? span_lo[i] : 0;
-    int nw_win = (n - lo0 + DENSE_CNT_W - 1) / DENSE_CNT_W;
+    int nw_win = (n - lo0 + cnt_w - 1) / cnt_w;
     for (int wi = 0; wi < nw_win; wi++) {
-        int c0 = lo0 + wi * DENSE_CNT_W, c1 = min(c0 + DENSE_CNT_W, n);
+        int c0 = lo0 + wi * cnt_w, c1 = min(c0 + cnt_w, n);
         int w = c1 - c0;
         for (int j = tid; j < w; j += blockDim.x) csmem[j] = 0;
         __syncthreads();
@@ -568,8 +569,19 @@ __global__ void hash_dense_count_kernel(
             }
         }
         __syncthreads();
+        // DCFUSE:向量化归约 —— 4 flag/iter(1×LDS.128 + 位运算)替代逐字节 LDS;flag∈{0,1}
+        // 使 nonzero-byte 判定可折叠:u 的每 byte 位 = 该 byte 是否非零 → popc 即计数。
         int cnt = 0;
-        for (int j = tid; j < w; j += blockDim.x) cnt += csmem[j];
+        int w4 = w & ~3;
+        const uint32_t *csm4 = (const uint32_t*)csmem;
+        for (int j4 = tid; j4 < (w4 >> 2); j4 += blockDim.x) {
+            uint32_t v = csm4[j4];
+            if (v) {
+                uint32_t u = v | (v >> 8) | (v >> 16) | (v >> 24);
+                cnt += __popc(u & 0x01010101u);
+            }
+        }
+        for (int j = w4 + tid; j < w; j += blockDim.x) cnt += csmem[j];
         for (int off = 16; off; off >>= 1) cnt += __shfl_down_sync(0xffffffff, cnt, off);
         if (lane == 0) wcnt[warp] = cnt;
         __syncthreads();
@@ -2334,6 +2346,13 @@ static void hash_product(
         if (dense_win_mode) dense_nr = A_rows;
         else if (!dense_mode && h_cnt[BIN_DITER] > 0) { dense_nr = h_cnt[BIN_DITER]; dense_rows = d_sort + h_off[BIN_DITER]; }
         if (dense_nr > 0) {
+            // DCFUSE(docs/56):dense_count 相位瘦身 —— 砍 D2H 同步/门 pre-pass/est 坍缩重扫
+            // + count kernel 动态窗宽与向量化归约。"省一遍产品扫描"经论证不成立(低 dup 下
+            // gapped+compact 的 24B/entry 搬运 ≥ 4B/product 的 count 扫描;D5H csort 教训同向),
+            // 但相位内 ~0.5-0.7ms 纯开销可省 → 翻 brainpc2(1.020)/c-64(1.039)级近赢阵。
+            static int g_dcfuse = -1;
+            if (g_dcfuse < 0) { const char *e = getenv("DCFUSE"); g_dcfuse = (e && *e) ? atoi(e) : 1; }   // 交替 A/B 全胜(brainpc2 -5.6/c-58 -13.5/mult_dcop -9.9/bloweya -4.8,无回归)→ 默认开;DCFUSE=0 关
+            const bool dcf = g_dcfuse > 0;
             // 矩阵级路径不再走下方 accumulate 分支(那三处 memset 挪到这里,计时内);mixed 路径 per-bin 头会再清,无害
             prof("dense_count", [&]{
                 CHECK_CUDA(cudaMemset(d_overflow, 0, sizeof(int)));
@@ -2343,7 +2362,8 @@ static void hash_product(
                 // <1.5/1.74/4.64 完全重叠,docs/29 §8 开放问题;机械可解释的只有微型 dense 集:
                 // cnr-2000(73 行/0.3% est)/ohne2(69 行/0.13%)纯固定开销亏损)。
                 // 门 = dense 行数 ≥ 1000 且 Σest_dense ≥ 5% total_est,否则方案5 整体跳过回 legacy。
-                {
+                // DCFUSE:矩阵级(dense_nr==A_rows 且 ≥1000)两条件平凡成立 → 免 dense_sum+D2H。
+                if (!(dcf && dense_nr == A_rows && dense_nr >= 1000)) {
                     unsigned long long *d_s2 = decltype(d_s2)(dev_alloc(2 * sizeof(long long)));
                     CHECK_CUDA(cudaMemset(d_s2, 0, 2 * sizeof(long long)));
                     dense_sum_kernel<<<(dense_nr + 255) / 256, 256>>>(
@@ -2360,18 +2380,30 @@ static void hash_product(
                     }
                 }
                 size_t csm = (size_t)DENSE_CNT_W;   // byte flag(docs/45 bitmap 回退)
+                int cnt_w = DENSE_CNT_W;
+                if (dcf) {   // 动态窗宽:n 小则窗缩(n=27k 阵从 64KB→32KB SMEM = 2→3 CTA/SM)
+                    unsigned long long want = ((unsigned long long)A_cols + 3) & ~3ull;
+                    cnt_w = (int)(want < (unsigned long long)DENSE_CNT_W ? want : DENSE_CNT_W);
+                    csm = (size_t)cnt_w;
+                }
                 if (csm > 48 * 1024)
                     CHECK_CUDA(cudaFuncSetAttribute(hash_dense_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)csm));
                 hash_dense_count_kernel<<<dense_nr, 512, csm>>>(
                     dA_rp, dA_ci, dB_rp, dB_ci, upper_tri, A_rows, A_cols,
-                    d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr, d_flop, d_maxbl);
+                    d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr, d_flop, d_maxbl, cnt_w);
                 CHECK_CUDA(cudaGetLastError());
                 unsigned long long *d_sums = decltype(d_sums)(dev_alloc(2 * sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_sums, 0, 2 * sizeof(long long)));
                 dense_sum_kernel<<<(dense_nr + 255) / 256, 256>>>(
                     dense_rows, dense_nr, d_est, d_row_nnz, nullptr, d_sums, d_sums + 1);
-                CHECK_CUDA(cudaMemcpy(&dense_est_sum, d_sums, sizeof(long long), cudaMemcpyDeviceToHost));
-                CHECK_CUDA(cudaMemcpy(&dense_nnz_sum, d_sums + 1, sizeof(long long), cudaMemcpyDeviceToHost));
+                if (dcf) {   // 一次 16B D2H 取两和(两次小 D2H = 两次流水线停顿)
+                    unsigned long long h_sums[2];
+                    CHECK_CUDA(cudaMemcpy(h_sums, d_sums, 2 * sizeof(long long), cudaMemcpyDeviceToHost));
+                    dense_est_sum = (long long)h_sums[0]; dense_nnz_sum = (long long)h_sums[1];
+                } else {
+                    CHECK_CUDA(cudaMemcpy(&dense_est_sum, d_sums, sizeof(long long), cudaMemcpyDeviceToHost));
+                    CHECK_CUDA(cudaMemcpy(&dense_nnz_sum, d_sums + 1, sizeof(long long), cudaMemcpyDeviceToHost));
+                }
                 dev_free(d_sums);
                 // dense 行 est 置 0 → d_off 重扫:gapped 偏移坍缩进 hash 侧空间(tmp 才能按缩容量分配;
                 // d_off 是全行 est 前缀,不重扫则 heavy/hash 行偏移仍指旧空间 → 越界)。
@@ -2379,6 +2411,19 @@ static void hash_product(
                 // ⚠ D5H(方案5 扩展到 hash 行,docs/31):bins 1-10 先 MODE=1 count-only 出精确 row_nnz,
                 //    数值 pass 改 MODE=2 直写 dC(小行有序免排/大行原地 csort),compact 对这些行消失。
                 //    门 = dup = total_flop/total_est < 8(Ocean type1 的 compaction 经济学同款)。
+                // DCFUSE 免坍缩(实验性,默认关):d_off 保留全行 est 前缀,tmp 按 host 已知
+                // total_est 定容,免 zero_est+重扫+D2H。分解实测(ab_dcfuse_decomp)pool 扩容
+                // 成本 > 省下的重扫 —— brainpc2 10.18 vs 10.10 / c-64 21.86 vs 21.38,全阵净负
+                // → 默认 DCF_BUDGET_GB=0(永远坍缩);kernel 改进(窗宽+归约)才是收益来源。
+                static long long dcf_budget = -1;
+                if (dcf_budget < 0) {
+                    const char *e = getenv("DCF_BUDGET_GB");
+                    dcf_budget = (e && *e) ? atoll(e) * 1024LL * 1024LL * 1024LL : 0LL;
+                }
+                const bool no_collapse = dcf && total_est > 0 && (unsigned long long)total_est * 32ull <= (unsigned long long)dcf_budget;
+                if (no_collapse) {
+                    tmp_slots_dev = total_est;
+                } else {
                 if (dense_rows)
                     zero_est_kernel<<<(dense_nr + 255) / 256, 256>>>(d_est, dense_rows, dense_nr);
                 else
@@ -2394,6 +2439,7 @@ static void hash_product(
                         thrust::device_ptr<long long>(d_off + 1));
                 }
                 CHECK_CUDA(cudaMemcpy(&tmp_slots_dev, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
+                }
             });
             dbg("[%s] 方案5:count pass %d dense 行(Σest=%lld Σnnz=%lld)→ cnnz_scan 后直写终态\n",
                 tag, dense_nr, dense_est_sum, dense_nnz_sum);
