@@ -2173,6 +2173,8 @@ static void hash_product(
         // 保留 1.4 松弛让欠估尾部消失;大矩阵是内存域 —— 1.15 紧 est,retry 摊薄可忽略。
         // (bcsstk30 教训:1.15 下 143 行欠估 → retry 0.74ms = 总预算 30%,1.76× 落后主因)
         double est_expand = 1.15;   // EXPAND 扫描裁决(1.15/1.20/1.25/1.30/1.40 → 9.03/9.46/9.50/10.44/9.64ms):紧 est 完胜,retry-vs-compact 零和
+        // docs/47:小阵(est 1.15 的 retry 固定开销 ~0.8ms 占比大)→ 1.4 宽松免重试
+        if (A_nnz < 100000) est_expand = 1.4;
         if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
         dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
         prof("mh_merge", [&]{
