@@ -171,25 +171,28 @@ __global__ void mh_merge_kernel(
     const int *row_flop,                // [A_rows] 每行精确乘积数(精确上界,封顶 MinHash 高估)
     double expand,                      // EST_EXPAND(运行时:小阵 1.4 免重试 / 大阵 1.15 省内存)
     int *est_nnz,                       // [A_rows] output
-    int sample_stride = 0)              // MHSAMP:>1 时紧凑采样 grid(S 块,块→行 = bid×stride;实测
+    int sample_stride = 0,              // MHSAMP:>1 时紧凑采样 grid(S 块,块→行 = bid×stride;实测
                                         // 28k 空块早退仍收全价 = dispatch/延迟限制,mod-skip 无效)
+    int mh_k = MH_M)                    // MH_K(docs/57 续):merge 只读每行 sketch 前 mh_k 个 partition
+                                        // —— DVFS toll ∝ 冷数据量,128→32 = 散射读 512→128B/行(÷4);
+                                        // 构造侧仍写满 128;估计器 m 同步缩(CV 9%→18%,须 A/B retry)
 {
     int row = (sample_stride > 1) ? (int)blockIdx.x * sample_stride : (int)blockIdx.x;
     if (row >= A_rows) return;
     int tid = threadIdx.x;
 
     extern __shared__ int smem_merge_raw[];
-    unsigned int *smem_merge = (unsigned int*)smem_merge_raw;   // [MH_M] uint32
-    int base_i = tid * 4;                                       // 每线程 owning partitions [base_i..base_i+3]
-    smem_merge[base_i + 0] = MH_EMPTY;
-    smem_merge[base_i + 1] = MH_EMPTY;
-    smem_merge[base_i + 2] = MH_EMPTY;
-    smem_merge[base_i + 3] = MH_EMPTY;
+    unsigned int *smem_merge = (unsigned int*)smem_merge_raw;   // [mh_k] uint32(smem 由 host 按 mh_k 配)
+    const int ppt = mh_k >> 5;                                   // partitions/thread(32 线程;mh_k≥32)
+    int base_i = tid * ppt;                                      // 每线程 owning [base_i..base_i+ppt)
+    for (int k = 0; k < ppt; k++) smem_merge[base_i + k] = MH_EMPTY;
     __syncthreads();
 
     int start_elem = A_row_ptr[row];
     int end_elem = A_row_ptr[row + 1];
+    if (ppt == 4) {
     // 逐引用 B 行,vectorized uint4 min-merge(每线程固定 owning 4 个 partition → 无 race、无需内 sync)
+    // (= MH_K=128 默认路径,与历史逐位一致)
     for (int e = start_elem; e < end_elem; e++) {
         int row_b = A_col_ind[e];
         const uint4 *bsk4 = (const uint4*)(b_mh + (size_t)row_b * MH_M);   // 行首 16B 对齐(512B/行)
@@ -200,12 +203,24 @@ __global__ void mh_merge_kernel(
         if (v.z < sm[2]) sm[2] = v.z;
         if (v.w < sm[3]) sm[3] = v.w;
     }
+    } else {
+    // MH_K<128 通用路径:每线程 owning ppt 个 partition,标量 loads(ppt=1 时 32 线程 × 4B = 128B/行)
+    for (int e = start_elem; e < end_elem; e++) {
+        int row_b = A_col_ind[e];
+        const unsigned int *bsk = b_mh + (size_t)row_b * MH_M;   // 跨距仍 MH_M(构造写满 128)
+        unsigned int *sm = smem_merge + base_i;
+        for (int k = 0; k < ppt; k++) {
+            unsigned int v = bsk[base_i + k];
+            if (v < sm[k]) sm[k] = v;
+        }
+    }
+    }
     __syncthreads();
 
-    // 估计 reduce(单 warp):sum_min = Σ min_j(非空);V = 非空 partition 数
+    // 估计 reduce(单 warp):sum_min = Σ min_j(非空);V = 非空 partition 数(m = mh_k)
     double sum_min = 0.0;
     int V = 0;
-    for (int k = 0; k < 4; k++) {
+    for (int k = 0; k < ppt; k++) {
         unsigned int mv = smem_merge[base_i + k];
         if (mv != MH_EMPTY) { sum_min += (double)mv; V++; }
     }
@@ -217,15 +232,18 @@ __global__ void mh_merge_kernel(
     if (tid == 0) {
         double E;
         int v = V;
+        // MH_K<128 时读的是 distinct 的 K/MH_M 均匀子集(构造按 hash 派 128 partition)→ 估计后
+        // 乘 MH_M/mh_k 放回全集(首版漏乘 = 4× 系统性低估:TSOPF Σest 58M vs 真值 231.7M 实锤)。
+        const double k_scale = (double)MH_M / (double)mh_k;
         if (v == 0) {
             E = 0.0;                                                      // 空行
-        } else if (v < MH_M) {
-            E = (double)MH_M * log((double)MH_M / (double)(MH_M - v));   // linear counting(小范围)
+        } else if (v < mh_k) {
+            E = (double)mh_k * log((double)mh_k / (double)(mh_k - v)) * k_scale;   // linear counting(小范围)
         } else {
             // min_j/2^32 ~ Exp(1/(D/m)) ⇒ E[min_j] = m·2^32/D ⇒ D ≈ m²·2^32/Σmin_j(算术均值,无偏)。
             // 旧式 2^32·Σ(1/min_j) 是调和均值,Jensen 高估 ~ln 倍(exdata_1 17.85×/TSOPF 20× 根因);
             // 首版修正漏了因子 m(低 EST 128 倍,exdata_1 est 254k vs C 11.3M)——都已修(2026-08-26)。
-            E = (double)MH_M * MH_M * 0x100000000LL / sum_min;
+            E = (double)mh_k * mh_k * 0x100000000LL / sum_min * k_scale;
         }
         int temp = (int)(E * expand);
         if (temp < 1) temp = 1;
@@ -2190,7 +2208,17 @@ static void hash_product(
             CHECK_CUDA(cudaGetLastError());
         });
         int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
-        int smem_p2 = MH_M * sizeof(unsigned int);   // [MH_M] uint32(smem_merge)
+        // MH_K(docs/57 续):merge 只读前 K 个 partition —— DVFS toll ∝ 冷数据量,128B/行(K=32)
+        // vs 512B/行(K=128)。估计器 CV 9%→18%,风险 = est 噪声改变 binning/retry,须 A/B 验证。
+        static int g_mh_k = -1;
+        if (g_mh_k < 0) {
+            const char *e = getenv("MH_K");
+            int v = (e && *e) ? atoi(e) : MH_M;
+            if (v != 32 && v != 64 && v != 128) v = MH_M;   // 只接受 32/64/128(32 线程×ppt 整除)
+            g_mh_k = v;
+        }
+        const int mh_k = g_mh_k;
+        int smem_p2 = mh_k * sizeof(unsigned int);   // [mh_k] uint32(smem_merge;host 按 K 配)
         // 自适应 EXPAND(2026-08-26):小计算量矩阵是延迟域 —— retry 的 ~0.7ms 固定延迟占比大,
         // 保留 1.4 松弛让欠估尾部消失;大矩阵是内存域 —— 1.15 紧 est,retry 摊薄可忽略。
         // (bcsstk30 教训:1.15 下 143 行欠估 → retry 0.74ms = 总预算 30%,1.76× 落后主因)
@@ -2214,7 +2242,7 @@ static void hash_product(
             prof("mh_merge", [&]{   // 采样 pass(紧凑 grid = S 块;计入 mh_merge 相位)
                 CHECK_CUDA(cudaMemset(d_est, 0, (size_t)A_rows * sizeof(int)));
                 mh_merge_kernel<<<S, p2_block, smem_p2>>>(
-                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est, samp_stride);
+                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est, samp_stride, mh_k);
                 CHECK_CUDA(cudaGetLastError());
             });
             long long s_sum = thrust::reduce(
@@ -2238,7 +2266,7 @@ static void hash_product(
         if (samp_stride == 0) {
             prof("mh_merge", [&]{
                 mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est);
+                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est, 0, mh_k);
                 CHECK_CUDA(cudaGetLastError());
             });
         }

@@ -47,3 +47,14 @@ stride 采样 merge(紧凑 grid,S=2048 行)→ 投影 Σest 过 DENSE_MIN_FRAC �
 - `/tmp/mhs_nsys.nsys-rep`:nsys 现场(kernel 1.75ms × 6 instances 实锤)
 - MHSAMP 代码(默认关):kernel `sample_stride` 参数 + host 采样分支 + est_fill_kernel +
   binning 后 total_est 覆写;`DCFUSE` 同批在 docs/56
+
+## 6. MH_K 否决记录(2026-08-30 第 3 轮)
+
+MH_K=32(merge 只读前 32/128 partition,数据量 ÷4):**全面更糟** —— TSOPF +7.7%/brainpc2
++20.6%/c-64 +30.1%,mh_merge 反而 ~2×(1.86→3.71ms)。两处教训:
+1. **首版数学错**:读 K/MH_M 子集须乘 MH_M/K 放回(TSOPF Σest 58M vs 真值 231.7M = 4× 低估,
+   dense 门失效走 legacy 12.6s);修复后 Σest 232.0M ✓ cnnz ✓。
+2. **toll 模型修正**:DVFS toll 是**延迟链限制**(每 sketch 引用一条冷 load 链,链数 = Σa_len,
+   与字节无关),不是字节限制 —— 减字节(K=32)不减链;标量路径再丢 uint4 宽度 → 2× 反坏。
+   与 MHSAMP(减引用 14×,toll 不变)合并看:引用数也不是完整模型 —— 待统一解释。
+   **可行动结论:mh_merge toll 无法靠数据量削减;出路 = 锁频(需管理员)/相位融合/消 D2H 同步。**
