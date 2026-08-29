@@ -170,9 +170,11 @@ __global__ void mh_merge_kernel(
     const unsigned int *b_mh,           // [B_rows * MH_M] uint32 from Phase 1
     const int *row_flop,                // [A_rows] 每行精确乘积数(精确上界,封顶 MinHash 高估)
     double expand,                      // EST_EXPAND(运行时:小阵 1.4 免重试 / 大阵 1.15 省内存)
-    int *est_nnz)                       // [A_rows] output
+    int *est_nnz,                       // [A_rows] output
+    int sample_stride = 0)              // MHSAMP:>1 时紧凑采样 grid(S 块,块→行 = bid×stride;实测
+                                        // 28k 空块早退仍收全价 = dispatch/延迟限制,mod-skip 无效)
 {
-    int row = blockIdx.x;
+    int row = (sample_stride > 1) ? (int)blockIdx.x * sample_stride : (int)blockIdx.x;
     if (row >= A_rows) return;
     int tid = threadIdx.x;
 
@@ -241,6 +243,13 @@ __global__ void mh_merge_kernel(
         if (fl > 0 && est > fl) est = fl;
         est_nnz[row] = est;
     }
+}
+
+// MHSAMP:dense-注定阵的 est 门专用填充(min(flop,n) 上界;布局消费者不存在 —— d_off 随 est
+// 置零重扫,tmp 只按坍缩后 hash 侧定容,total_est 由投影值在 binning 后覆写)
+__global__ void est_fill_kernel(const int *row_flop, int n, int *est, int A_rows) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < A_rows) { int f = row_flop[i]; est[i] = f < n ? f : n; }
 }
 
 // localLoadBalance 移植(docs/27 §4.2,Ocean AccumulatorCommon.cuh:67 同款语义):
@@ -2162,6 +2171,7 @@ static void hash_product(
         total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
     double avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
+    long long est_projected = -1;   // MHSAMP:采样投影 Σest(≥0 时 binning 后覆写 total_est)
     dbg("[%s] avg_product=%.1f (total_flop=%lld)\n", tag, avg_product, total_flop);
     if (avg_product <= AVG_FLOP_THR) {
         dbg("[%s] 低均度 → est=精确 flop(免 MinHash)\n", tag);
@@ -2189,11 +2199,49 @@ static void hash_product(
         if (A_nnz < 100000) est_expand = 1.4;
         if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
         dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
-        prof("mh_merge", [&]{
-            mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est);
-            CHECK_CUDA(cudaGetLastError());
-        });
+        // MHSAMP(docs/57,Ocean Ana2 3% 采样同哲学):dense_win 候选先 stride 采样 merge → 投影
+        // Σest 过 DENSE_MIN_FRAC 门 → 判定 dense-注定:全量 merge 免,d_est=min(flop,n)
+        // (dense_win+DIRECT5 下 per-row est 只喂门,d_off 会随 est 置零重扫,布局零消费);
+        // total_est 用投影值覆写(uc 路由的 dup 信号保持诚实)。非 dense → 回全量 merge,代价 =
+        // 采样 merge(~5% 量)+1 次 D2H。A_rows≥1000 保证 规模门必走矩阵级分支(est_d≥投影 →
+        // est_d×20<total_est 恒假),d_est 膨胀值不会漏进任何布局消费者。
+        static int g_mhsamp = -1;
+        if (g_mhsamp < 0) { const char *e = getenv("MHSAMP"); g_mhsamp = (e && *e) ? atoi(e) : 0; }
+        int samp_stride = 0;
+        if (g_mhsamp && !att && A_rows >= 1000 && A_cols > DENSE_MAX_N && A_cols <= 200000 /*DENSE_WIN_MAX_N*/) {
+            samp_stride = (A_rows + 2047) / 2048;
+            int S = (A_rows + samp_stride - 1) / samp_stride;
+            prof("mh_merge", [&]{   // 采样 pass(紧凑 grid = S 块;计入 mh_merge 相位)
+                CHECK_CUDA(cudaMemset(d_est, 0, (size_t)A_rows * sizeof(int)));
+                mh_merge_kernel<<<S, p2_block, smem_p2>>>(
+                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est, samp_stride);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            long long s_sum = thrust::reduce(
+                thrust::make_transform_iterator(thrust::device_ptr<int>(d_est), ToLL()),
+                thrust::make_transform_iterator(thrust::device_ptr<int>(d_est + A_rows), ToLL()), 0LL);
+            est_projected = S > 0 ? (long long)((double)s_sum / S * A_rows) : -1;
+            double density = (double)est_projected / ((double)A_rows * A_cols);
+            if (est_projected < 0 || density < DENSE_MIN_FRAC) {
+                samp_stride = 0;   // 非 dense-注定:回全量(下方 stride=0 重算全部行)
+                est_projected = -1;
+                dbg("[%s] MHSAMP:投影密度 %.1f%% < %.0f%% → 回全量 merge\n", tag, density * 100, DENSE_MIN_FRAC * 100);
+            } else {
+                dbg("[%s] MHSAMP:投影密度 %.1f%%(Σ=%lld)→ dense-注定,免全量 merge(S=%d)\n",
+                    tag, density * 100, est_projected, S);
+                prof("mh_merge", [&]{   // est=min(flop,n) 全行填充(门专用;并入 mh_merge 相位)
+                    est_fill_kernel<<<(A_rows + 255) / 256, 256>>>(d_flop, A_cols, d_est, A_rows);
+                    CHECK_CUDA(cudaGetLastError());
+                });
+            }
+        }
+        if (samp_stride == 0) {
+            prof("mh_merge", [&]{
+                mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
+                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est);
+                CHECK_CUDA(cudaGetLastError());
+            });
+        }
         dev_free(d_mh);
     }
     long long total_est = 0;
@@ -2268,6 +2316,7 @@ static void hash_product(
         CHECK_CUDA(cudaMemcpyAsync(h_off, d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaMemcpyAsync(&total_est, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaStreamSynchronize(0));
+        if (est_projected >= 0) total_est = est_projected;   // MHSAMP:d_est=min(flop,n) 的 scan 非 Σest 真值 → 投影覆写(dup 路由保持诚实)
         dbg("[%s] diter bin=%d 行 / %d\n", tag, h_cnt[BIN_DITER], A_rows);   // TEMP:docs/24 路由观测
     });
 
