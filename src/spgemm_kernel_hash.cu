@@ -2653,7 +2653,9 @@ static void hash_product(
                         dA_rp, dA_ci, dA_val, rows_ptr, n, ht, PRIV_W, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
                 } else {
-                    int hblk = (bi >= 6) ? 512 : HASH_BLOCK;   // docs/42 续:大表 bin 双倍线程(SMEM 限制 CTA 数,线程补占用)
+                    // docs/44 per-bin block 梯(Ocean BLOCK_SIZES 同哲学):
+                    // 小表(ht≤512)64T×32CTA/SM = 最大行并行;中表 256T;大表(≥2048)512T
+                    int hblk = (bi <= 3) ? 64 : (bi <= 5) ? 256 : 512;
                     hash_spa_kernel<0><<<n, hblk, smem_flat, cur_s>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, ht, d_off,
