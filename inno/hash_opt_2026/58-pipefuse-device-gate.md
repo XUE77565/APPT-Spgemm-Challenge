@@ -36,3 +36,15 @@
   的浮点比较从 host(double 除法)变为 device 同式计算 —— 同表达式同结果 ✓。
 - d_mh 无条件分配:256MB 上限内;pool 行为(no_collapse 教训:pool 扩容成本)—— 若 A/B 见
   分配回归,再收上限。
+
+## 5. A/B 判决(2026-08-30,solo 交替 ×4):全中性 → 间隙理论死亡
+
+TSOPF −0.5/brainpc2 −0.2/c-64 +0.3/Ga3 +0.4/mult_dcop −0.4/bloweya +2.3/pwtk −0.1/333SP +0.1;
+mh_merge 相位全部不动(1.833→1.839 等);nnz 全对;gate 阵零回归。device 门基础设施正确
+(total_flop 逐位一致)但消 count_flop 后的 host 空档对 toll 无效。
+
+**toll 定论(合并全部证据)**:与 grid/工作量/字节/前序空档全部无关,只与运行历史负载形态
+有关 —— h2d/d2h 在 copy engine 执行、SM 长闲 → 时钟 345MHz,front-half 小 kernel 全家冷跑
+(construct 149μs vs 隔离 ~40μs = 3×;merge 1.7ms vs 40μs = 40×,延迟链对时钟最敏感)。
+**代码侧无解;出路 = 管理员锁频(双卡 + Ocean 同条件重测 = 更公平的论文口径)**。
+PIPEFUSE 默认关保留(device 门/规约基建可能复用);step-2(binning 折入)取消 —— 前提已死。

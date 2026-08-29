@@ -1,0 +1,16 @@
+matrix                   off        on    delta  nnz
+exdata_1               14.77     14.71    -0.4%  OK
+TSOPF_FS_b300_c2   FAIL
+dielFilterV3clx       127.96    127.59    -0.3%  OK
+bloweya                 7.32      7.89    +7.8%  OK
+c-58                    7.80      7.34    -5.9%  OK
+mult_dcop_03           19.78     17.75   -10.2%  OK
+vsp_south31        FAIL
+Cube_Coup_dt0         537.35    533.56    -0.7%  OK
+rajat16            FAIL
+pre2                   47.67     47.72    +0.1%  OK
+web-Google             12.47     12.50    +0.3%  OK
+ohne2                  19.63     19.09    -2.8%  OK
+cnr-2000                9.58      9.54    -0.4%  OK
+SiO2                  232.37    243.15    +4.6%  OK
+webbase-1M             45.40     45.13    -0.6%  OK
