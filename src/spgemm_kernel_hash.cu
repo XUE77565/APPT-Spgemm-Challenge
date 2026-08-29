@@ -630,17 +630,17 @@ __global__ void hash_dense_count_kernel(
             }
         }
         __syncthreads();
-        // DCFUSE:向量化归约 —— 4 flag/iter(1×LDS.128 + 位运算)替代逐字节 LDS;flag∈{0,1}
-        // 使 nonzero-byte 判定可折叠:u 的每 byte 位 = 该 byte 是否非零 → popc 即计数。
+        // DCFUSE:向量化归约 —— 4 flag/iter(1×LDS.32 + popc)替代逐字节 LDS。flag 值域 {0,1}
+        // ⇒ 每字节非零 ⟺ bit0 置位,__popc(v & 0x01010101) 即计数。
+        // ⚠ 首版 v|v>>8|v>>16|v>>24 的"折叠"是字节渗漏 bug:高字节混入低字节位 → 零字节被
+        // 误计(c-64 cnnz 155,006,041→164,556,377 = +6.2% 实锤;v23 前全对)。flag 单比特
+        // 根本无需折叠。
         int cnt = 0;
         int w4 = w & ~3;
         const uint32_t *csm4 = (const uint32_t*)csmem;
         for (int j4 = tid; j4 < (w4 >> 2); j4 += blockDim.x) {
             uint32_t v = csm4[j4];
-            if (v) {
-                uint32_t u = v | (v >> 8) | (v >> 16) | (v >> 24);
-                cnt += __popc(u & 0x01010101u);
-            }
+            if (v) cnt += __popc(v & 0x01010101u);
         }
         for (int j = w4 + tid; j < w; j += blockDim.x) cnt += csmem[j];
         for (int off = 16; off; off >>= 1) cnt += __shfl_down_sync(0xffffffff, cnt, off);
