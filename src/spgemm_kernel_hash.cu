@@ -126,8 +126,10 @@ __global__ void mh_construct_kernel(
     const int *B_row_ptr, const int *B_col_ind,
     int B_rows, int B_nnz,
     unsigned int *global_mh,           // [B_rows * MH_M] uint32
-    int rows_per_block)
+    int rows_per_block,
+    const int *avg_gate = nullptr)     // PIPEFUSE:门命中(avg_product≤64)→ 空转(est=flop 由 merge 直填)
 {
+    if (avg_gate && *avg_gate == 1) return;
     int row_start = blockIdx.x * rows_per_block;
     int row_end = min(row_start + rows_per_block, B_rows);
     if (row_start >= B_rows) return;
@@ -173,10 +175,18 @@ __global__ void mh_merge_kernel(
     int *est_nnz,                       // [A_rows] output
     int sample_stride = 0,              // MHSAMP:>1 时紧凑采样 grid(S 块,块→行 = bid×stride;实测
                                         // 28k 空块早退仍收全价 = dispatch/延迟限制,mod-skip 无效)
-    int mh_k = MH_M)                    // MH_K(docs/57 续):merge 只读每行 sketch 前 mh_k 个 partition
+    int mh_k = MH_M,                    // MH_K(docs/57 续):merge 只读每行 sketch 前 mh_k 个 partition
                                         // —— DVFS toll ∝ 冷数据量,128→32 = 散射读 512→128B/行(÷4);
                                         // 构造侧仍写满 128;估计器 m 同步缩(CV 9%→18%,须 A/B retry)
+    const int *avg_gate = nullptr)      // PIPEFUSE:门命中 → est=flop 直填(与 memcpy 路径逐位同值)
 {
+    if (avg_gate && *avg_gate == 1) {          // device 门(PIPEFUSE):block 一致早退
+        if ((sample_stride <= 1 || (int)blockIdx.x * sample_stride < A_rows) && threadIdx.x == 0) {
+            int row0 = (sample_stride > 1) ? (int)blockIdx.x * sample_stride : (int)blockIdx.x;
+            if (row0 < A_rows) est_nnz[row0] = row_flop[row0];
+        }
+        return;
+    }
     int row = (sample_stride > 1) ? (int)blockIdx.x * sample_stride : (int)blockIdx.x;
     if (row >= A_rows) return;
     int tid = threadIdx.x;
@@ -268,6 +278,30 @@ __global__ void mh_merge_kernel(
 __global__ void est_fill_kernel(const int *row_flop, int n, int *est, int A_rows) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < A_rows) { int f = row_flop[i]; est[i] = f < n ? f : n; }
+}
+
+// PIPEFUSE step-1(docs/58):count_flop 后不再回传 host —— device 侧规约 total_flop + avg_product
+// 门,construct/merge 无条件背靠背 launch(门命中时自退化),host 读数推迟到 binning 已有同步。
+// 动机:reduce 的 host 空档是 DVFS toll 源之一(345MHz 冷频率下小 kernel 全家变慢)。
+__global__ void flop_reduce_kernel(const int *d_flop, int A_rows, unsigned long long *d_total) {
+    __shared__ unsigned long long s[256];
+    int t = threadIdx.x;
+    unsigned long long p = 0;
+    for (int i = blockIdx.x * blockDim.x + t; i < A_rows; i += gridDim.x * blockDim.x)
+        p += (unsigned long long)d_flop[i];
+    // block 归约(256T = 8 warp:warp shfl → per-warp partial → 8 lane 终归约 → block atomic)
+    for (int off = 16; off; off >>= 1) p += __shfl_down_sync(0xffffffff, p, off);
+    if (t % 32 == 0) s[t / 32] = p;
+    __syncthreads();
+    if (t < 8) {
+        unsigned long long v = s[t];
+        for (int off = 4; off; off >>= 1) v += __shfl_down_sync(0xff, v, off);
+        if (t == 0) atomicAdd(d_total, v);
+    }
+}
+__global__ void avg_gate_kernel(const unsigned long long *d_total, int A_rows, int thr, int *d_gate) {
+    if (threadIdx.x == 0 && blockIdx.x == 0)
+        *d_gate = (A_rows > 0 && (double)*d_total / A_rows <= (double)thr) ? 1 : 0;
 }
 
 // localLoadBalance 移植(docs/27 §4.2,Ocean AccumulatorCommon.cuh:67 同款语义):
@@ -2177,6 +2211,28 @@ static void hash_product(
     int *d_span_len; d_span_len = decltype(d_span_len)(dev_alloc(A_rows * sizeof(int)));
     int *d_maxbl;   d_maxbl   = decltype(d_maxbl)(dev_alloc(A_rows * sizeof(int)));   // 行 k 集内 B 行最大长(LLB 输入)
     long long total_flop = 0;
+    // PIPEFUSE step-1(docs/58):count_flop 后不再 host 回传 —— device 规约 total_flop + avg 门,
+    // construct/merge 无条件背靠背 launch(门命中自退化),host 读数推迟到 binning 已有同步。
+    // 动机:reduce 的 host 空档 = GPU 掉频空档(DVFS toll,docs/57),消它让 mh 链在热频率衔接。
+    // 鲸鱼防护:d_mh 无条件分配上限 256MB(A_rows×MH_M×4B 超限回退老流程)。
+    static int g_pipefuse = -1;
+    if (g_pipefuse < 0) { const char *e = getenv("PIPEFUSE"); g_pipefuse = (e && *e) ? atoi(e) : 0; }
+    unsigned long long *d_tflop = nullptr; int *d_avg_gate = nullptr;
+    const bool pfuse = g_pipefuse && !att && A_rows > 0
+        && ((unsigned long long)A_rows * MH_M * sizeof(unsigned int)) <= (256ull << 20);
+    double avg_product = 0.0;
+    if (pfuse) {
+        d_tflop = decltype(d_tflop)(dev_alloc(sizeof(long long)));
+        d_avg_gate = decltype(d_avg_gate)(dev_alloc(sizeof(int)));
+        prof("count_flop", [&]{
+            count_flop_span_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(
+                dA_rp, dA_ci, A_rows, dB_rp, dB_ci, d_flop, d_span_lo, d_span_len, d_maxbl);
+            CHECK_CUDA(cudaMemset(d_tflop, 0, sizeof(long long)));
+            flop_reduce_kernel<<<(A_rows + 255) / 256, 256>>>(d_flop, A_rows, d_tflop);
+            avg_gate_kernel<<<1, 1>>>(d_tflop, A_rows, AVG_FLOP_THR, d_avg_gate);
+            CHECK_CUDA(cudaGetLastError());
+        });
+    } else {
     prof("count_flop", [&]{
         if (!att)
             count_flop_span_kernel<<<(A_rows * 32 + 255) / 256, 256>>>(
@@ -2188,10 +2244,13 @@ static void hash_product(
         CHECK_CUDA(cudaGetLastError());
         total_flop = thrust::reduce(thrust::device_ptr<int>(d_flop), thrust::device_ptr<int>(d_flop + A_rows), 0LL);
     });
-    double avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
+    }
     long long est_projected = -1;   // MHSAMP:采样投影 Σest(≥0 时 binning 后覆写 total_est)
-    dbg("[%s] avg_product=%.1f (total_flop=%lld)\n", tag, avg_product, total_flop);
-    if (avg_product <= AVG_FLOP_THR) {
+    if (!pfuse) {
+        avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
+        dbg("[%s] avg_product=%.1f (total_flop=%lld)\n", tag, avg_product, total_flop);
+    }
+    if (!pfuse && avg_product <= AVG_FLOP_THR) {
         dbg("[%s] 低均度 → est=精确 flop(免 MinHash)\n", tag);
         CHECK_CUDA(cudaMemcpy(d_est, d_flop, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToDevice));
     } else {
@@ -2204,7 +2263,7 @@ static void hash_product(
         int grid_p1 = (A_rows + rows_per_block - 1) / rows_per_block;
         prof("mh_construct", [&]{
             mh_construct_kernel<<<grid_p1, HASH_BLOCK, smem_p1>>>(
-                dB_rp, dB_ci, A_rows, A_nnz, d_mh, rows_per_block);
+                dB_rp, dB_ci, A_rows, A_nnz, d_mh, rows_per_block, pfuse ? d_avg_gate : nullptr);
             CHECK_CUDA(cudaGetLastError());
         });
         int p2_block = MH_M / 4;                      // 单 warp(32):每线程 owning 4 partitions,vectorized uint4 merge
@@ -2236,7 +2295,7 @@ static void hash_product(
         static int g_mhsamp = -1;
         if (g_mhsamp < 0) { const char *e = getenv("MHSAMP"); g_mhsamp = (e && *e) ? atoi(e) : 0; }
         int samp_stride = 0;
-        if (g_mhsamp && !att && A_rows >= 1000 && A_cols > DENSE_MAX_N && A_cols <= 200000 /*DENSE_WIN_MAX_N*/) {
+        if (g_mhsamp && !pfuse && !att && A_rows >= 1000 && A_cols > DENSE_MAX_N && A_cols <= 200000 /*DENSE_WIN_MAX_N*/) {
             samp_stride = (A_rows + 2047) / 2048;
             int S = (A_rows + samp_stride - 1) / samp_stride;
             prof("mh_merge", [&]{   // 采样 pass(紧凑 grid = S 块;计入 mh_merge 相位)
@@ -2266,7 +2325,8 @@ static void hash_product(
         if (samp_stride == 0) {
             prof("mh_merge", [&]{
                 mh_merge_kernel<<<A_rows, p2_block, smem_p2>>>(
-                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est, 0, mh_k);
+                    dA_rp, dA_ci, A_rows, d_mh, d_flop, est_expand, d_est, 0, mh_k,
+                    pfuse ? d_avg_gate : nullptr);
                 CHECK_CUDA(cudaGetLastError());
             });
         }
@@ -2343,7 +2403,15 @@ static void hash_product(
         CHECK_CUDA(cudaMemcpyAsync(h_cnt, d_cnt,  N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaMemcpyAsync(h_off, d_offb, N_BINS * sizeof(int), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaMemcpyAsync(&total_est, d_off + A_rows, sizeof(long long), cudaMemcpyDeviceToHost));
+        if (pfuse)   // PIPEFUSE:count_flop 的 device 规约在此取回(消一个独立 host 同步点)
+            CHECK_CUDA(cudaMemcpyAsync(&total_flop, d_tflop, sizeof(long long), cudaMemcpyDeviceToHost));
         CHECK_CUDA(cudaStreamSynchronize(0));
+        if (pfuse) {
+            avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
+            dbg("[%s] avg_product=%.1f (total_flop=%lld, PIPEFUSE 延迟取回)\n", tag, avg_product, total_flop);
+            dev_free(d_tflop); dev_free(d_avg_gate);
+            d_tflop = nullptr; d_avg_gate = nullptr;
+        }
         if (est_projected >= 0) total_est = est_projected;   // MHSAMP:d_est=min(flop,n) 的 scan 非 Σest 真值 → 投影覆写(dup 路由保持诚实)
         dbg("[%s] diter bin=%d 行 / %d\n", tag, h_cnt[BIN_DITER], A_rows);   // TEMP:docs/24 路由观测
     });
