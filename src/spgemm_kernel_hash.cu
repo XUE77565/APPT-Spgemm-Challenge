@@ -2214,6 +2214,7 @@ static void hash_product(
     const int *d_retry_rows = nullptr; int d_retry_n = 0;
     const long long *d_retry_off = nullptr;
     const unsigned long long *d_retry_key = nullptr; const double *d_retry_val = nullptr;
+    bool d_retry_needs_sort = false;   // docs/54:retry 乱序输出需 csort(compact 段路由)
     long long *d_rht = nullptr, *d_rtab = nullptr, *d_roff = nullptr;
     int *d_rslot = nullptr, *d_rsb = nullptr, *d_rse = nullptr;
     int *rtc = nullptr; double *rtv = nullptr;
@@ -2718,28 +2719,36 @@ static void hash_product(
                     rtv = decltype(rtv)(dev_alloc((size_t)rt_total * sizeof(double)));
                     rk  = decltype(rk)(dev_alloc((size_t)r_slots * sizeof(unsigned long long)));
                     rv  = decltype(rv)(dev_alloc((size_t)r_slots * sizeof(double)));
-                    rk2 = decltype(rk2)(dev_alloc((size_t)r_slots * sizeof(unsigned long long)));
-                    rv2  = decltype(rv2)(dev_alloc((size_t)r_slots * sizeof(double)));
-                    // hash_global 逐行表偏移:exclusive_scan 已给 [0..h_ovf-1],[0]=0 ✓
+                    // docs/54:retry 免排序(仅 h_ovf<1000;web-Google 8720 行 +16% 教训 = 大集 csort 慢于 cub)
+                    bool retry_sortfree = h_ovf < 1000;
                     hash_global_kernel<<<h_ovf, HASH_BLOCK>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         d_ovf_rows, h_ovf, d_rht, d_rtab, rtc, rtv,
                         d_roff, d_rslot, r_slots, rk, rv, d_row_nnz, d_overflow,
                         d_ovf_rows, d_ovf_cnt, d_row_ovf);
-                    d_rsb = decltype(d_rsb)(dev_alloc(h_ovf * sizeof(int)));
-                    d_rse = decltype(d_rse)(dev_alloc(h_ovf * sizeof(int)));
-                    heavy_seg_kernel<<<(h_ovf + 255) / 256, 256>>>(
-                        d_ovf_rows, h_ovf, d_roff, d_row_nnz, d_rsb, d_rse);
-                    size_t rcb = 0;
-                    CHECK_CUDA(cub::DeviceSegmentedRadixSort::SortPairs(
-                        nullptr, rcb, rk, rk2, rv, rv2, r_slots, h_ovf, d_rsb, d_rse));
-                    rct = dev_alloc(rcb);
-                    CHECK_CUDA(cub::DeviceSegmentedRadixSort::SortPairs(
-                        rct, rcb, rk, rk2, rv, rv2, r_slots, h_ovf, d_rsb, d_rse));
                     // retry_prep 遇不可重试行会重置 overflow → 仍有则整阵回退
                     d_retry_rows = d_ovf_rows; d_retry_n = h_ovf;
-                    d_retry_off = d_roff; d_retry_key = rk2; d_retry_val = rv2;
-                    dbg("[hash] row-retry: %d 行完成(r_slots=%lld) → 继续(免整阵回退)\n", h_ovf, r_slots);
+                    d_retry_off = d_roff; d_retry_key = rk; d_retry_val = rv;
+                    if (retry_sortfree) {
+                        d_retry_needs_sort = true;
+                        dbg("[hash] docs/54 retry 免排序: %d 行(r_slots=%lld)→csort\n", h_ovf, r_slots);
+                    } else {
+                        // 大 retry 集:回退 cub 分段排序(单次批量排序 > 逐行 csort)
+                        rk2 = decltype(rk2)(dev_alloc((size_t)r_slots * sizeof(unsigned long long)));
+                        rv2 = decltype(rv2)(dev_alloc((size_t)r_slots * sizeof(double)));
+                        d_rsb = decltype(d_rsb)(dev_alloc(h_ovf * sizeof(int)));
+                        d_rse = decltype(d_rse)(dev_alloc(h_ovf * sizeof(int)));
+                        heavy_seg_kernel<<<(h_ovf + 255) / 256, 256>>>(
+                            d_ovf_rows, h_ovf, d_roff, d_row_nnz, d_rsb, d_rse);
+                        size_t rcb = 0;
+                        CHECK_CUDA(cub::DeviceSegmentedRadixSort::SortPairs(
+                            nullptr, rcb, rk, rk2, rv, rv2, r_slots, h_ovf, d_rsb, d_rse));
+                        rct = dev_alloc(rcb);
+                        CHECK_CUDA(cub::DeviceSegmentedRadixSort::SortPairs(
+                            rct, rcb, rk, rk2, rv, rv2, r_slots, h_ovf, d_rsb, d_rse));
+                        d_retry_key = rk2; d_retry_val = rv2;
+                        d_retry_needs_sort = false;
+                    }
                 }
             });
         }
@@ -2996,11 +3005,23 @@ static void hash_product(
                 CHECK_CUDA(cudaGetLastError());
             }
         }
-        if (d_retry_n > 0) {   // 行级重试的行:从重试区(已分段排序)拷到 CSR
-            if (d_retry_n > 0 && d_retry_n <= A_rows)   // TEMP:守卫+定位
-                hash_compact_copy_kernel<<<d_retry_n, 256>>>(
-                    d_retry_rows, d_retry_n, d_retry_off, d_row_nnz, dC_rp,
-                    d_retry_key, d_retry_val, dC_ci, d_val, nullptr);
+        if (d_retry_n > 0) {
+            if (d_retry_needs_sort) {
+                // docs/54:retry 免排序路径 —— hash_global 乱序输出 → csort 善后
+                if (d_retry_n > 0 && d_retry_n <= A_rows) {
+                    // 用适中的 csort 配置(retry 行的 row_nnz 通常 ≤ 16384)
+                    launch_csort<256, 64>(d_retry_n, d_retry_rows, d_retry_off, d_row_nnz, dC_rp,
+                                          (unsigned long long*)d_retry_key, (double*)d_retry_val,
+                                          dC_ci, d_val, nullptr);
+                    CHECK_CUDA(cudaGetLastError());
+                }
+            } else {
+                // 原路径(已排序,纯 copy)
+                if (d_retry_n > 0 && d_retry_n <= A_rows)
+                    hash_compact_copy_kernel<<<d_retry_n, 256>>>(
+                        d_retry_rows, d_retry_n, d_retry_off, d_row_nnz, dC_rp,
+                        d_retry_key, d_retry_val, dC_ci, d_val, nullptr);
+            }
         }
         CHECK_CUDA(cudaGetLastError());
     });
