@@ -529,7 +529,7 @@ __global__ void hash_dense_window_kernel(
 //   count pass:只标记 flag(1B/列,免 dval 8B+atomicAdd)→ row_nnz = 精确 distinct(无 cap,永不 ovf);
 //   numeric pass:窗口升序直写 dC 精确偏移 —— dense 行的 gapped 写 + compact copy 整体消失。
 // hash 行不动(结构已同 Ocean type2 est 工作流)。DIRECT5=1 开启,默认关。
-#define DENSE_CNT_W 65536   // 计数窗口(SMEM 1B/列;数值 pass 窗口 DENSE_MAX_N 不同不影响总数)
+#define DENSE_CNT_W 262144  // docs/45:bitmap 后窗口放大 4×(SMEM = 262144/8 = 32KB bitmap)
 
 // count pass:窗口扫描标 flag + 块归约;窗口划分与数值 pass 不同也无妨( disjoint cover 计数同)。
 __global__ void hash_dense_count_kernel(
@@ -544,8 +544,11 @@ __global__ void hash_dense_count_kernel(
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
     int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
-    extern __shared__ __align__(8) unsigned char csmem[];   // [DENSE_CNT_W] flags
-    __shared__ int wcnt[16];                                 // blockDim 512 = 16 warp
+    // docs/45:bitmap(1bit/列)替 byte flag —— clear 成本 /8(c-73 的 dense_count=16ms 主因是
+    // 每窗清 DENSE_CNT_W 字节;bitmap 只清 DENSE_CNT_W/32 个 word)
+    extern __shared__ __align__(8) unsigned char csmem[];   // [DENSE_CNT_W/32] uint32 bitmap
+    uint32_t *bmp = (uint32_t*)csmem;
+    __shared__ int wcnt[32];                                 // blockDim 1024 = 32 warp
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int total = 0;
     int lo0 = span_lo ? span_lo[i] : 0;
@@ -553,7 +556,8 @@ __global__ void hash_dense_count_kernel(
     for (int wi = 0; wi < nw_win; wi++) {
         int c0 = lo0 + wi * DENSE_CNT_W, c1 = min(c0 + DENSE_CNT_W, n);
         int w = c1 - c0;
-        for (int j = tid; j < w; j += blockDim.x) csmem[j] = 0;
+        int nw32 = (w + 31) >> 5;
+        for (int j = tid; j < nw32; j += blockDim.x) bmp[j] = 0;
         __syncthreads();
         for (int p = rs + warp; p < re; p += nw) {
             int k = A_col_idx[p];
@@ -561,19 +565,20 @@ __global__ void hash_dense_count_kernel(
             int ke = dev_lower_bound(B_col_idx, ks, B_row_ptr[k + 1], c1);
             for (int q = ks + lane; q < ke; q += 32) {
                 int j = B_col_idx[q] - c0;
+                if (j < 0 || j >= w) continue;
                 int col = c0 + j;
-                if (upper_tri && col < i) continue;   // 与数值 pass 同过滤位置(标记前)
-                csmem[j] = 1;
+                if (upper_tri && col < i) continue;
+                atomicOr(&bmp[j >> 5], 1u << (j & 31));   // 不同 bit 无争用
             }
         }
         __syncthreads();
         int cnt = 0;
-        for (int j = tid; j < w; j += blockDim.x) cnt += csmem[j];
+        for (int j = tid; j < nw32; j += blockDim.x) cnt += __popc(bmp[j]);
         for (int off = 16; off; off >>= 1) cnt += __shfl_down_sync(0xffffffff, cnt, off);
         if (lane == 0) wcnt[warp] = cnt;
         __syncthreads();
         if (tid == 0) { int s = 0; for (int x = 0; x < nw; x++) s += wcnt[x]; total += s; }
-        __syncthreads();   // 读完 wcnt 才可进入下一窗口清 flags
+        __syncthreads();
     }
     if (tid == 0) row_nnz[i] = total;
 }
@@ -2348,7 +2353,7 @@ static void hash_product(
                         return;
                     }
                 }
-                size_t csm = (size_t)DENSE_CNT_W;
+                size_t csm = ((size_t)DENSE_CNT_W + 7) / 8;   // bitmap 字节数
                 if (csm > 48 * 1024)
                     CHECK_CUDA(cudaFuncSetAttribute(hash_dense_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)csm));
                 hash_dense_count_kernel<<<dense_nr, 512, csm>>>(
