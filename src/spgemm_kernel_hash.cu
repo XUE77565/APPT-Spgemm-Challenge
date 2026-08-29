@@ -598,8 +598,8 @@ __global__ void scatter_alen_kernel(const int *rows, int nr, const int *alen, in
 // 首窗一次 lower_bound 定位到 span_lo,越窗列回写 atomicMin(= O(1) 推进,免重复二分);
 // 下一窗起点 = 全体越窗列的最小列(数据驱动,跳空窗)。窗口宽 PB2_W(SMEM 17B/列:
 // val8+flag1+pref4+cursor4 → 12900 列 ≈ 219KB)。
-#define PB2_W 12900   // 游标版窗口宽(SMEM 预算 13B×W + 双游标区 ≤ ~227KB)
-#define SMAP_SMEM_MAX 7300   // a_len ≤ 此值的行游标进 SMEM(docs/35 §3:TSOPF 修法;预算 2×4B×7300)
+#define PB2_W 5400    // docs/42:窗宽缩到 5400 → 2CTA/SM(Ocean 6400×1024T×2CTA 同哲学;12900×512T×1CTA 只用了 SM 一半线程)
+#define SMAP_SMEM_MAX 5400   // 随 PB2_W 缩(2×4B×5400)
 __global__ void hash_dense_direct_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
@@ -634,7 +634,7 @@ __global__ void hash_dense_direct_kernel(
     int out = 0;
     int lo0 = span_lo ? span_lo[i] : 0;
 
-    int logG = (row_flop && row_maxbl) ? local_load_balance(a_len, row_flop[i], row_maxbl[i], 5, 9)
+    int logG = (row_flop && row_maxbl) ? local_load_balance(a_len, row_flop[i], row_maxbl[i], 5, 10)
                                        : 5;
     int G = 1 << logG, num_groups = blockDim.x >> logG;
     int my_group = tid >> logG, my_id = tid & (G - 1);
@@ -2875,7 +2875,7 @@ static void hash_product(
             int uc = g_pb2cur;
             if (uc == 1 && total_est > 0 && (double)total_flop / (double)total_est >= 4.0)
                 uc = 0;
-            hash_dense_direct_kernel<<<dense_nr, 512, wsm>>>(
+            hash_dense_direct_kernel<<<dense_nr, 1024, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr,
                 d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, uc);
