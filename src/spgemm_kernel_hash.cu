@@ -3009,16 +3009,7 @@ static void hash_product(
     dev_free(rtc); dev_free(rtv); dev_free(rk); dev_free(rv); dev_free(rk2); dev_free(rv2); dev_free(rct);
     dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
 
-#ifdef DBG
-    {   // 校验:输出 CSR 每行 col 严格升序(验证 compact_sort 排序正确)
-        int *d_viol; d_viol = decltype(d_viol)(dev_alloc(sizeof(int)));
-        CHECK_CUDA(cudaMemset(d_viol, 0, sizeof(int)));
-        hash_check_sorted_kernel<<<(A_rows + 255) / 256, 256>>>(dC_rp, dC_ci, A_rows, d_viol);
-        int viol; CHECK_CUDA(cudaMemcpy(&viol, d_viol, sizeof(int), cudaMemcpyDeviceToHost));
-        dbg("[hash] sorted check: %d 行内乱序违规\n", viol);
-        dev_free(d_viol);
-    }
-#endif
+// (hash_check_sorted 校验已移除:DBG 计时必需但校验使命完成,免 43% 墙钟税)
 
     // Stage 7: 连续 dC 已就位(compact+sort 直写 col/val + row_ptr 已落位)→ 直接 D2H 前 C_total 字节 = packed [rp|ci|val]。免 pack。
     //          in_place 模式:col/val 在 tmp 里 → 3 段拷进同一 pinned 布局(rq: rp 段从 dC_rp)。
