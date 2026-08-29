@@ -1125,7 +1125,7 @@ __global__ void hash_spa_kernel(
     extern __shared__ __align__(8) int smem[];
     int   *sh_col = smem;                      // [ht_size]
     double *sh_val = (double*)(smem + ht_size);  // [ht_size]
-    for (int s = tid; s < ht_size; s += HASH_BLOCK) { sh_col[s] = -1; sh_val[s] = 0.0f; }
+    for (int s = tid; s < ht_size; s += blockDim.x) { sh_col[s] = -1; sh_val[s] = 0.0f; }
     __syncthreads();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
@@ -1133,11 +1133,11 @@ __global__ void hash_spa_kernel(
     // (Ocean localLoadBalance 同款语义,治 Ge99 类 4.4× 的负载不均;G 可到 HASH_BLOCK=整 block/k)
     int logG;
     if (llb && row_flop && row_maxbl)
-        logG = local_load_balance(re - rs, row_flop[i], row_maxbl[i], 2, 31 - __clz((unsigned)HASH_BLOCK));
+        logG = local_load_balance(re - rs, row_flop[i], row_maxbl[i], 2, 31 - __clz((unsigned)blockDim.x));
     else
         logG = (ht_size <= 64) ? 2 : (ht_size <= 256) ? 3 : (ht_size <= 1024) ? 4 : 5;
     int G = 1 << logG;
-    int num_groups = HASH_BLOCK / G;
+    int num_groups = blockDim.x / G;
     int my_group = tid / G, my_id = tid % G;
     for (int p = rs + my_group; p < re; p += num_groups) {   // 并行 k(stride num_groups)
         int k = A_col_idx[p];
@@ -1164,12 +1164,12 @@ __global__ void hash_spa_kernel(
     __syncthreads();
     if (MODE == 1) {   // count-only:occupancy 即精确 distinct;溢出行已在上面标记(row_nnz 留给 retry)
         int cnt = 0;
-        for (int s = tid; s < ht_size; s += HASH_BLOCK) cnt += (sh_col[s] != -1);
+        for (int s = tid; s < ht_size; s += blockDim.x) cnt += (sh_col[s] != -1);
         for (int off = 16; off; off >>= 1) cnt += __shfl_down_sync(0xffffffff, cnt, off);
-        __shared__ int ccnt[HASH_BLOCK / 32 > 16 ? HASH_BLOCK / 32 : 16];
+        __shared__ int ccnt[32];
         if ((tid & 31) == 0) ccnt[tid >> 5] = cnt;
         __syncthreads();
-        if (tid == 0) { int t = 0; for (int x = 0; x < (HASH_BLOCK >> 5); x++) t += ccnt[x]; row_nnz[i] = t; }
+        if (tid == 0) { int t = 0; for (int x = 0; x < (blockDim.x >> 5); x++) t += ccnt[x]; row_nnz[i] = t; }
         return;
     }
 
@@ -1180,8 +1180,8 @@ __global__ void hash_spa_kernel(
     long long base = row_off[i];
     if (ht_size <= CSORT_HT) {
         // compact 到前部:chunked 读进寄存器→sync→写前部(read-before-write 防 race)
-        for (int it = 0; it < (ht_size + HASH_BLOCK - 1) / HASH_BLOCK; it++) {
-            int s = it * HASH_BLOCK + tid;
+        for (int it = 0; it < (ht_size + blockDim.x - 1) / blockDim.x; it++) {
+            int s = it * blockDim.x + tid;
             int c = -1; double v = 0.0f;
             if (s < ht_size) { c = sh_col[s]; v = sh_val[s]; }
             __syncthreads();
@@ -1191,7 +1191,7 @@ __global__ void hash_spa_kernel(
         int count = cnt;
         if (MODE == 2) {   // 精确偏移直写(有序,免 compact;count pass 已保证无溢出)
             int base2 = exact_rp[i];
-            for (int k = tid; k < count; k += HASH_BLOCK) {
+            for (int k = tid; k < count; k += blockDim.x) {
                 int c = sh_col[k]; double v = sh_val[k]; int rank = 0;
                 for (int j = 0; j < count; j++) if (sh_col[j] < c) rank++;
                 dC_ci[base2 + rank] = c;
@@ -1202,7 +1202,7 @@ __global__ void hash_spa_kernel(
         }
         // SAFETY:行槽位 cap = est(= row_off 差);欠估行(distinct>est)越界写会砸下一行 → 守卫+overflow
         long long cap = row_off[i + 1] - row_off[i];
-        for (int k = tid; k < count; k += HASH_BLOCK) {      // count-sort:数 < 自己的 → rank → 落有序位
+        for (int k = tid; k < count; k += blockDim.x) {      // count-sort:数 < 自己的 → rank → 落有序位
             int c = sh_col[k]; double v = sh_val[k]; int rank = 0;
             for (int j = 0; j < count; j++) if (sh_col[j] < c) rank++;
             if (rank >= cap) { atomicExch(overflow_flag, 1); continue; }
@@ -1217,7 +1217,7 @@ __global__ void hash_spa_kernel(
     } else if (MODE == 2) {
         // 大行 MODE=2:无序直写 dC(精确偏移;行内乱序 → 原地 csort 善后)
         int base2 = exact_rp[i];
-        for (int s = tid; s < ht_size; s += HASH_BLOCK) {
+        for (int s = tid; s < ht_size; s += blockDim.x) {
             int c = sh_col[s];
             if (c >= 0) {
                 int pos = atomicAdd(&cnt, 1);
@@ -1228,7 +1228,7 @@ __global__ void hash_spa_kernel(
     } else {
         // 大行:无序 extract(交 compact_sort;SAFETY:cap=est 守卫同上)
         long long cap = row_off[i + 1] - row_off[i];
-        for (int s = tid; s < ht_size; s += HASH_BLOCK) {
+        for (int s = tid; s < ht_size; s += blockDim.x) {
             int c = sh_col[s];
             if (c >= 0) {
                 int pos = atomicAdd(&cnt, 1);
@@ -2653,7 +2653,8 @@ static void hash_product(
                         dA_rp, dA_ci, dA_val, rows_ptr, n, ht, PRIV_W, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow);
                 } else {
-                    hash_spa_kernel<0><<<n, HASH_BLOCK, smem_flat, cur_s>>>(
+                    int hblk = (bi >= 6) ? 512 : HASH_BLOCK;   // docs/42 续:大表 bin 双倍线程(SMEM 限制 CTA 数,线程补占用)
+                    hash_spa_kernel<0><<<n, hblk, smem_flat, cur_s>>>(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, ht, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf,
