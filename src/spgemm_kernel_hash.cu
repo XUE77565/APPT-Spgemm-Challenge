@@ -1911,7 +1911,8 @@ __global__ void compute_bucket_kernel(
     const int *flop, int diter_thr,
     const int *span_len,   // 每行真实列跨度(docs/24:替代 n 近似)
     int *bucket_id, int *counts,
-    int n_cols = 0)        // DIM2:span≤n/4 护栏
+    int n_cols = 0,        // DIM2:span 护栏(DIM2=0 时传 0 关闭)
+    int span_factor = 16)  // SPANF:重行 span 门系数(默认 16 = v4)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
@@ -1951,7 +1952,10 @@ __global__ void compute_bucket_kernel(
     const long long fl64 = (long long)flop[i];
     const bool dup_ok = (fl64 < 8LL * e) || (fl64 >= 16384 && fl64 < 64LL * e);   // DIM2-s:超重行 dup<64
     if (false) {}
-    else if (diter_thr > 0 && flop[i] >= diter_thr && (e >= 2048 || dim2) && 16LL * flop[i] >= (long long)span_len[i] && dup_ok) bid = BIN_DITER;
+    // SPANF(docs/62 实验):重行 span 门系数 env 化(默认 16 = v4 原值)。c-big straggler
+    // (span 345k/flop 16-30k)挂 16× 门;并行 clear 下固定窗真实开销 ~2-3× 非 77×,值得实测 4×。
+    else if (diter_thr > 0 && flop[i] >= diter_thr && (e >= 2048 || dim2) &&
+             (long long)span_factor * flop[i] >= (long long)span_len[i] && dup_ok) bid = BIN_DITER;
     else if (e > HASH_CAP) bid = BIN_HEAVY;          // heavy:全局表(2026-08-25,不再回退 merge)
     else {
         int bi = 0, ht = 32;
@@ -2422,7 +2426,9 @@ static void hash_product(
         if (g_diter < 0) { const char *e = getenv("DITER_MIN_FLOP"); g_diter = (e && *e) ? atoi(e) : 4096; }
         static int g_dim2 = -1;
         if (g_dim2 < 0) { const char *e = getenv("DIM2"); g_dim2 = (e && *e) ? atoi(e) : 0; }   // docs/61:双维路由基建(默认关 —— c-big straggler 实测挂 v4 span 门 19491/19578,路由无解需窗口内核经济学升级)
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0);
+        static int g_spanf = -1;
+        if (g_spanf < 0) { const char *e = getenv("SPANF"); g_spanf = (e && *e) ? atoi(e) : 16; }   // docs/62:重行 span 门系数(默认 16 = v4;净窗实验 4)
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
