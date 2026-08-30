@@ -28,7 +28,8 @@ bool parse_mm_header(std::ifstream &file, MatrixMarketHeader &header) {
     
     // 检查是否为 pattern 格式
     header.is_pattern = (line.find("pattern") != std::string::npos);
-    header.is_symmetric = (line.find("symmetric") != std::string::npos);
+    header.is_symmetric = (line.find("symmetric") != std::string::npos)
+                          || (line.find("Hermitian") != std::string::npos);   // Hermitian 同样镜像展开(2026-08-30 cnnz 审计:3Dspectralwave×2 曾因此算成 T·T)
     
     // 跳过注释行
     while (std::getline(file, line)) {
@@ -61,7 +62,8 @@ bool read_matrix_market(const char *filename, void **buffer_out,
     std::string bs(banner);
     for (char &ch : bs) ch = (char)tolower((unsigned char)ch);
     bool is_pattern = (bs.find("pattern") != std::string::npos);
-    bool is_symmetric = (bs.find("symmetric") != std::string::npos);
+    bool is_symmetric = (bs.find("symmetric") != std::string::npos)
+                        || (bs.find("hermitian") != std::string::npos);   // (已 tolower)Hermitian = 模式镜像对称
     bool is_complex = (bs.find("complex") != std::string::npos);
 
     // 跳过剩余注释行
