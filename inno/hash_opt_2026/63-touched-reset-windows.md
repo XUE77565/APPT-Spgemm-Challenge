@@ -40,3 +40,15 @@ if (!old) touched[atomicAdd(&nt, 1)] = j;
 - atomicExch/atomicAdd on dflag/nt 的争用(高密度窗 P≈W 时反而比纯写慢)→ 高密度行
   (est/span > 1/4)走旧路径,低密度行走 touched(按行二选一,免 per-window 分支)
 - touched 容量 SMEM 预算:P 上界 = min(flop_in_window, W);预分配溢出 → 回退全窗 clear
+
+## 5. 前置实验否决:块并行 prefix(08-30 实测)
+
+docs/63 §2 的前置步骤"全块并行 prefix 替代 warp0 串行"实测**真回归**:交替新旧 binary 同环
+境,c-64 direct 15.55→21.15(+36%)/brainpc2 7.13→9.24(+30%);3Dspec2 反而无感(68.7)。
+**机理教训**:warp0 串行扫描时其余 31 warp 停在 barrier 上是零成本的(它们反正要等 prefix
+才能 emit);块并行版引入 3 次 1024 线程全块 __syncthreads/窗 + 全线程指令 —— **大 CTA 的
+sync 比闲置贵**。已回滚(工作树 = c680fe9 状态)。
+
+**对 §2 主设计的修正**:prefix 非 3Dspec2 主税(替换它无感)→ 68.9ms 的主税在别处
+(clear?accumulate 的 lower_bound?待 nsys 分解),touched-reset 的预期收益需重新评估后
+再实施。低密度行 profile 应先用 nsys/相位内分解定位真税源,勿再凭模型动手。
