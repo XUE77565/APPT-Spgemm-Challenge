@@ -1930,7 +1930,9 @@ __global__ void compute_bucket_kernel(
     }
     int dense_bin = (sl0 <= 451) ? 0 : (sl0 <= 906) ? 1 : (sl0 <= 1818) ? 2
                   : (sl0 <= 3641) ? 3 : (sl0 <= 7284) ? 4 : 5;
-    bool dim2 = (dense_bin <= hash_bin) && sl0 > 0 && n_cols > 0 && 4LL * sl0 <= (long long)n_cols;
+    // ⚠ CPU 逐行分析(08-30):c-big 全部 straggler 行卡在 span≤n/4 护栏(其余门全过)——
+    // Ocean 数据驱动窗口本就处理大 span,护栏对 DIM2-s 分支放宽到 span≤n(hash_bin 侧自然限流)。
+    bool dim2 = (dense_bin <= hash_bin) && sl0 > 0 && n_cols > 0 && (long long)sl0 <= (long long)n_cols;
     // 门 v2(333SP +160%/F2 +13% 教训:窄跨度但 est 小的行在 batched/hash 本来就快,勿偷):
     // 极窄 span≤512:数组比任何 hash 表都小,只要 e>64 就值得;中段 512<span≤2048:须 est≥2048
     // (= v4 门的"hash 伺候不了的大表行")。两档都要求 est≥span/2(数组利用率)。
@@ -2419,7 +2421,7 @@ static void hash_product(
         static int g_diter = -1;   // dense-iter 重行阈值(DITER_MIN_FLOP,默认 4096;0=关)
         if (g_diter < 0) { const char *e = getenv("DITER_MIN_FLOP"); g_diter = (e && *e) ? atoi(e) : 4096; }
         static int g_dim2 = -1;
-        if (g_dim2 < 0) { const char *e = getenv("DIM2"); g_dim2 = (e && *e) ? atoi(e) : 1; }   // docs/61 双维路由(默认开;DIM2=0 关)
+        if (g_dim2 < 0) { const char *e = getenv("DIM2"); g_dim2 = (e && *e) ? atoi(e) : 0; }   // docs/61:双维路由基建(默认关 —— c-big straggler 实测挂 v4 span 门 19491/19578,路由无解需窗口内核经济学升级)
         compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
@@ -2441,6 +2443,7 @@ static void hash_product(
         }
         if (est_projected >= 0) total_est = est_projected;   // MHSAMP:d_est=min(flop,n) 的 scan 非 Σest 真值 → 投影覆写(dup 路由保持诚实)
         dbg("[%s] diter bin=%d 行 / %d\n", tag, h_cnt[BIN_DITER], A_rows);   // TEMP:docs/24 路由观测
+
     });
 
     // ---- 全 bin Hybrid Value(docs/24 §4.1):ht≥4096 的大表 bin 的 value 池(keys 留 SMEM,occupancy ×3)。
