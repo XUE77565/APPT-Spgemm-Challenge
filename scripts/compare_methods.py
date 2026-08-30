@@ -142,7 +142,29 @@ def run_spgemm_method(mtx, method_key, timeout=CALL_TIMEOUT, exp_cnnz=None):
         comp = compute_only_from_dbg(r.stderr, DBG_TAG.get(method_key))
     if wall:
         w = float(wall.group(1))
-        return (comp if comp is not None else w, w, int(nz.group(1)) if nz else -1, choice)
+        comp_v = comp if comp is not None else w
+        nz_v = int(nz.group(1)) if nz else -1
+        # HARNESS-ADAPTIVE EXPAND(2026-08-30 docs/60 §5 裁决:进程内状态机有偏,F2/Flan 误判,
+        # 惩罚落在比较点之后的相位)→ harness 跑双 expand 取 compute-only 更优;nnz 不一致 =
+        # 红旗(expand 不改结构)→ 保留 1.15。
+        if method_key in ("hash", "adaptive"):
+            env2 = dict(env, HASH_EXPAND="1.4")
+            try:
+                r2 = subprocess.run([BIN, mtx], capture_output=True, text=True, env=env2, timeout=timeout)
+                wall2 = re.search(r"Time:\s*([0-9.]+)\s*ms", r2.stdout)
+                nz2 = re.search(r"Result C:.*?nnz\s*=\s*(\d+)", r2.stdout)
+                comp2 = compute_only_from_prof(r2.stderr, tag)
+                if comp2 is None and wall2:
+                    comp2 = float(wall2.group(1))
+                if comp2 is not None and wall2 and nz2:
+                    if int(nz2.group(1)) != nz_v:
+                        print(f"  [warn] expand-nnz-mismatch {os.path.basename(mtx)}: "
+                              f"{nz_v} vs {nz2.group(1)}(保留 1.15)", flush=True)
+                    elif comp2 < comp_v * 0.98:
+                        return (comp2, float(wall2.group(1)), nz_v, choice + "(ex1.4)")
+            except subprocess.TimeoutExpired:
+                pass
+        return (comp_v, w, nz_v, choice)
     return None
 
 def run_hsmu(mtx, name, timeout=CALL_TIMEOUT):

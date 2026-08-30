@@ -2313,7 +2313,7 @@ static void hash_product(
         // 改变了 docs/47 的旧经济学);②1.4 下 overflow 仍 >10(没治好,Ga3As3H12 +13.5% 类)
         // → 永久回 1.15。per-process static 状态机:CSV 取末轮 = 收敛值。
         static int g_adapt_expand = -1;
-        if (g_adapt_expand < 0) { const char *e = getenv("ADAPT_EXPAND"); g_adapt_expand = (e && *e) ? atoi(e) : 1; }   // 5 warmup+timed 轮内第 3 轮收敛;假试成本≈0(会自动回退)
+        if (g_adapt_expand < 0) { const char *e = getenv("ADAPT_EXPAND"); g_adapt_expand = (e && *e) ? atoi(e) : 0; }   // 08-30 裁决:进程内比较天然有偏(v3 在 F2/Flan 上误判,惩罚落在比较点之后的相位)→ 自适应移 harness 层(compare_methods 双 expand 取优);binary 默认固定 1.15
         if (g_adapt_expand && (g_ovf_hint_expand == 1 || g_ovf_hint_expand == 4)) est_expand = 1.4;
         if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
         dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
