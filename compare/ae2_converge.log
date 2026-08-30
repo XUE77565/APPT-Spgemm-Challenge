@@ -1,0 +1,7 @@
+c-64             收敛=1.40 comp=20.5
+bcsstk30         收敛=1.40 comp=3.4
+rajat25          收敛=1.15 comp=40.3
+cage15           收敛=1.15 comp=148.3
+inline_1         收敛=1.40 comp=167.2
+dielFilterV3clx  收敛=1.15 comp=162.0
+F2 固定交替: 1.15=17.39 1.4=21.38

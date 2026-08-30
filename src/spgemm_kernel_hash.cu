@@ -1910,20 +1910,34 @@ __global__ void compute_bucket_kernel(
     const int *est, const int *A_row_ptr, int A_rows, int ultra_thr,
     const int *flop, int diter_thr,
     const int *span_len,   // 每行真实列跨度(docs/24:替代 n 近似)
-    int *bucket_id, int *counts)
+    int *bucket_id, int *counts,
+    int n_cols = 0)        // DIM2:span≤n/4 护栏
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
     int e = est[i];
     int bid;
     int sl0 = span_len[i];
+    // DIM2(docs/61 双维路由复活,保守版):Ocean 逐行双维代价比较(dense_bin ≤ hash_bin → dense)
+    // 移植 —— 但 v4 门全保留,双维只【增补】est<2048 的行:hash_bin 先按梯算出(含 2× 松弛),
+    // dense_bin 按 span 六档;dense_bin ≤ hash_bin ∧ flop≥4096 ∧ 16flop≥span ∧ dup<8 ∧ span≤n/4
+    // → 也进 BIN_DITER。预期捕获 c-big 类(Ocean 捕 7.7% 行 dense,我们 0.03%);F2 类靠
+    // flop/dup 门继续受保护。DNF 防复发:dbg 打印路由量级 + cnnz 对 scipy。
+    int hash_bin = 0, ht = 32;
+    {
+        int target = (e <= 4096) ? 2 * e : e;
+        while (ht < target && ht < HASH_CAP) { ht <<= 1; hash_bin++; }
+    }
+    int dense_bin = (sl0 <= 451) ? 0 : (sl0 <= 906) ? 1 : (sl0 <= 1818) ? 2
+                  : (sl0 <= 3641) ? 3 : (sl0 <= 7284) ? 4 : 5;
+    bool dim2 = (dense_bin <= hash_bin) && sl0 > 0 && n_cols > 0 && 4LL * sl0 <= (long long)n_cols;
     // 门 v2(333SP +160%/F2 +13% 教训:窄跨度但 est 小的行在 batched/hash 本来就快,勿偷):
     // 极窄 span≤512:数组比任何 hash 表都小,只要 e>64 就值得;中段 512<span≤2048:须 est≥2048
     // (= v4 门的"hash 伺候不了的大表行")。两档都要求 est≥span/2(数组利用率)。
     if (e > 64 && sl0 > 0 && sl0 <= 256 && 2LL * e >= (long long)sl0) {
         // 小跨度 dense(docs/37;门 v3=收缩到 Ocean dense0 精确槽位:span≤256):pwtk +145%/F2 +14%
         // 教训 = 高 dup 行 dense 付逐乘积原子、hash 只付逐 distinct,中窄跨度(257-2048)反复被偷;
-        // 256 内数组比一切 hash 表小且密集,是唯一稳定赢的槽位(nemeth18 全族实证)。
+        // 256 内数组比一切 hash 表都小且密集,是唯一稳定赢的槽位(nemeth18 全族实证)。
         bid = 14;
     }
     else if (e <= ultra_thr) bid = BIN_ULTRA;             // ultra:线性免 hash
@@ -1932,8 +1946,10 @@ __global__ void compute_bucket_kernel(
     // 真判据 = 我方 hash 对该行的速度 ∝ 表大小:F2 的行 est~1-2k → hash 9.7 G/s 本来就快,
     // 送窗口反而亏;c-58 的重行 est 3-10k → 大表低占用 hash 0.96 G/s,窗口大胜。est≥2048
     // = "hash 伺候不了的大表行"(docs/24 §门控三版)
-    else if (diter_thr > 0 && flop[i] >= diter_thr && e >= 2048 && 16LL * flop[i] >= (long long)span_len[i] &&
-             (long long)flop[i] < 8LL * e) bid = BIN_DITER;
+    const long long fl64 = (long long)flop[i];
+    const bool dup_ok = (fl64 < 8LL * e) || (fl64 >= 16384 && fl64 < 64LL * e);   // DIM2-s:超重行 dup<64
+    if (false) {}
+    else if (diter_thr > 0 && flop[i] >= diter_thr && (e >= 2048 || dim2) && 16LL * flop[i] >= (long long)span_len[i] && dup_ok) bid = BIN_DITER;
     else if (e > HASH_CAP) bid = BIN_HEAVY;          // heavy:全局表(2026-08-25,不再回退 merge)
     else {
         int bi = 0, ht = 32;
@@ -2246,7 +2262,7 @@ static void hash_product(
     });
     }
     long long est_projected = -1;   // MHSAMP:采样投影 Σest(≥0 时 binning 后覆写 total_est)
-    static int g_ovf_hint_expand = 0;   // ADAPT_EXPAND 状态机:0=1.15 基线 / 1=升 1.4 / 2=1.4 无效永久回 1.15
+    static int g_ovf_hint_expand = 0;   // ADAPT_EXPAND 状态机:0=1.15 基线 / 1=试 1.4 / 3=回测 1.15 / 4=定 1.4 / 2=定 1.15
     static int g_ovf_base_cnt = 0;      // 状态 0 末次的 overflow 行数(供"减半以上"判据)
     if (!pfuse) {
         avg_product = A_rows ? (double)total_flop / A_rows : 0.0;
@@ -2292,7 +2308,7 @@ static void hash_product(
         // → 永久回 1.15。per-process static 状态机:CSV 取末轮 = 收敛值。
         static int g_adapt_expand = -1;
         if (g_adapt_expand < 0) { const char *e = getenv("ADAPT_EXPAND"); g_adapt_expand = (e && *e) ? atoi(e) : 1; }   // 5 warmup+timed 轮内第 3 轮收敛;假试成本≈0(会自动回退)
-        if (g_adapt_expand && g_ovf_hint_expand == 1) est_expand = 1.4;
+        if (g_adapt_expand && (g_ovf_hint_expand == 1 || g_ovf_hint_expand == 4)) est_expand = 1.4;
         if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
         dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
         // MHSAMP(docs/57,Ocean Ana2 3% 采样同哲学):dense_win 候选先 stride 采样 merge → 投影
@@ -2402,7 +2418,9 @@ static void hash_product(
         CHECK_CUDA(cudaMemset(d_cnt, 0, N_BINS * sizeof(int)));   // 先清零(fused kernel 内 atomicAdd 累加)
         static int g_diter = -1;   // dense-iter 重行阈值(DITER_MIN_FLOP,默认 4096;0=关)
         if (g_diter < 0) { const char *e = getenv("DITER_MIN_FLOP"); g_diter = (e && *e) ? atoi(e) : 4096; }
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt);
+        static int g_dim2 = -1;
+        if (g_dim2 < 0) { const char *e = getenv("DIM2"); g_dim2 = (e && *e) ? atoi(e) : 1; }   // docs/61 双维路由(默认开;DIM2=0 关)
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0);
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
@@ -2887,14 +2905,23 @@ static void hash_product(
         int h_ovf = 0;
         CHECK_CUDA(cudaMemcpy(&h_ovf, d_ovf_cnt, sizeof(int), cudaMemcpyDeviceToHost));
         dbg("[hash] dbg: overflow=%d ovf_cnt=%d\n", overflow, h_ovf);   // TEMP
-        // ADAPT_EXPAND 状态机(overflow 读数点驱动;docs/60):①基线 1.15 下 ovf>100 → 记基线、
-        // 下轮试 1.4;②1.4 下 ovf 降至基线一半以下 → 保留(c-64 半减也净赢),否则永久回 1.15
-        // (Ga3 类 1.4 治不了 overflow 反而 +13.5%)。
-        if (g_ovf_hint_expand == 0 && h_ovf > 50) {
-            g_ovf_base_cnt = h_ovf;
-            g_ovf_hint_expand = 1;
-        } else if (g_ovf_hint_expand == 1 && g_ovf_base_cnt > 0 && h_ovf * 2 > g_ovf_base_cnt) {
-            g_ovf_hint_expand = 2;
+        // ADAPT_EXPAND 状态机 v2(docs/60 修订:时序判据替代"减半保留"):①基线 1.15 下
+        // ovf>50 → 记已计相位和,下轮试 1.4;②1.4 轮相位和 > 1.15 轮 ×1.05 → 永久回退。
+        // 修订原因:v1 的减半规则误升大表矩阵(c-big +45%/Flan_1565 +45%/inline_1 +46%,
+        // overflow 确实减半但表更大更慢);rajat25(9亿nnz 赢家)与 cage15(9.3亿 受害者)同规模
+        // ⇒ 规模门无效,只有实测时序能分开。prof.total = 截至本相位(含 count..retry)累计,
+        // 两轮同口径可比。
+        {
+            static double g_try14_t = 0.0;
+            double t_now = prof.total;
+            if (g_ovf_hint_expand == 0 && h_ovf > 50) {
+                g_ovf_hint_expand = 1;              // 下轮试 1.4
+            } else if (g_ovf_hint_expand == 1) {
+                g_try14_t = t_now;                   // 本轮 = 1.4,记时
+                g_ovf_hint_expand = 3;              // 下轮回测 1.15
+            } else if (g_ovf_hint_expand == 3) {
+                g_ovf_hint_expand = (g_try14_t <= t_now * 1.02) ? 4 : 2;   // 相邻轮对比,1.4 不慢 2% 才留
+            }
         }
         if (h_ovf > 0) {
             dbg("[hash] row-retry: %d 行 → flop 定表重跑\n", h_ovf);
