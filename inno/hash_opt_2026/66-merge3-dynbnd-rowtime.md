@@ -63,10 +63,26 @@ count/merge kernel 在桶并行下兑现 −10.5%(每行 5 warp vs 1 warp 的延
 - 这是 docs/63 §6 遗留"per-row 判据需逐行计时采集"的兑现,也是 B 线(merge3)接入
   C 线(dispatcher)的数据地基
 
-## 5. 待办
+## 5. per-row 判决(08-31 采数,前 4 阵;周期数 = clock64,GPU 独占下与负载无关)
 
-- [ ] v2b:修正则后 C-nnz 红旗复验(v2 首轮 nnz 抓错行,未验)
-- [ ] ROWTIME 真实阵采数:band 族 + c-big/F2/web-Google/rajat 类 → 判据画像
-- [ ] 宽带 +5.7% 损失机理(相位分解)
-- [ ] 行自适应 K(重行更多桶)——straggler 证据到位后再做
-- [ ] 判据画像 → compute_bucket_kernel 加 BIN_MERGE3 路由(C 线合流)
+| 阵 | 可比行 | Σt_mrg/Σt_hash | 全部十分位 t_mrg/t_hash 中位 | mrg 胜率 |
+|---|---|---|---|---|
+| er_n32000_x16(dup=1) | 31900 | 3.18×劣 | 2.7-4.0× | **0%** |
+| band_n32000_x128(dup~10) | 32000 | 10.9×劣 | 11-17× | **0%** |
+| skew_n32000_x24(重尾) | 30872 | 21.0×劣 | 3.2-55× | **0%** |
+| F2(真实,dup 5-10) | 65737 | 19.9×劣 | 9-32× | **0%** |
+
+**判决:merge3 对我们 hash_spa 无行级生态位**——dup=1(无 hash 红利)也输 3×;
+k-way merge 的 O(distinct×num_k) 段扫描 vs hash 的 O(flop) 原子插入,全特征域溃败。
+dispatcher 0/337 从矩阵级猜测升格为**逐行实测证明**。B 线(SpGEMM 调度)就此关闭;
+merge3 保留价值 = ATT 分层交付物(deck design4)+ 论文对比基线。
+(merge3 行时 = flop-ub 单 pass 全成本;hash 行时 = 建表+插入+extract 全成本;ovf 行已剔。)
+
+## 6. 待办(修订)
+
+- [x] C-nnz 红旗复验(count 路真实跑,n8000 双版 28,514,400 一致)
+- [x] ROWTIME 采数 + 判决(§5;c-58/brainpc2 补充中)
+- [x] ~~行自适应 K~~(生态位已否决,不再需要)
+- [x] ~~BIN_MERGE3 路由~~(同上)
+- [ ] Ocean-C(Ana2 统计安全系数)= 剩余可移植机制;B 残余阀低优先
+- [ ] 净窗 → 复验 36 阵 → v28

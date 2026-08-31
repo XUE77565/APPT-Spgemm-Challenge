@@ -13,7 +13,8 @@ sys.path.insert(0, HERE)
 import compare_methods as CM
 
 def run(mtx, method, rt_env, rt_path):
-    env = dict(os.environ, USE_MEMPOOL="1", METHOD=method, MP_HOST_MB="8192", rt_env: rt_path)
+    env = dict(os.environ, USE_MEMPOOL="1", METHOD=method, MP_HOST_MB="8192")
+    env[rt_env] = rt_path
     try:
         r = subprocess.run([CM.BIN, mtx], capture_output=True, text=True, env=env, timeout=1800)
     except subprocess.TimeoutExpired:

@@ -3197,21 +3197,6 @@ static void hash_product(
                 CHECK_CUDA(cudaGetLastError());
             }
         });
-        if (d_rt) {   // docs/66:逐行周期 + 特征(flop/est/span/ovf)落盘;ovf 行已由 retry 重做,t_hash 失真 → 分析时剔除
-            std::vector<unsigned long long> h_rt(A_rows);
-            std::vector<int> h_fl(A_rows), h_es(A_rows), h_sp(A_rows), h_ov(A_rows);
-            CHECK_CUDA(cudaMemcpy(h_rt.data(), d_rt, (size_t)A_rows * sizeof(unsigned long long), cudaMemcpyDeviceToHost));
-            CHECK_CUDA(cudaMemcpy(h_fl.data(), d_flop, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
-            CHECK_CUDA(cudaMemcpy(h_es.data(), d_est_save, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
-            CHECK_CUDA(cudaMemcpy(h_sp.data(), d_span_len, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
-            CHECK_CUDA(cudaMemcpy(h_ov.data(), d_row_ovf, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
-            const int *h_rp = (const int*)A_buffer;
-            for (int r = 0; r < A_rows; r++)
-                fprintf(hrt_f, "%d %d %d %d %d %d %llu\n", r, h_rp[r + 1] - h_rp[r], h_fl[r], h_es[r], h_sp[r], h_ov[r], h_rt[r]);
-            fclose(hrt_f); hrt_f = nullptr;
-            dbg("[%s] rowtime(%d 行)→ %s\n", tag, A_rows, hrt_path);
-            dev_free(d_est_save);
-        }
         CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));   // MODE=2 理论不再溢出(count 同表已插过);防御复查
         if (overflow) {   // 不可重试行(flop 超表上限)→ 整阵回退(与 legacy 口径一致)
             fprintf(stderr, "[hash] OVERFLOW(D5H): 某 hash 行 distinct > HASH_CAP=%d → 回退 merge\n", HASH_CAP);
@@ -3320,6 +3305,22 @@ static void hash_product(
     //          in_place 模式:col/val 在 tmp 里 → 3 段拷进同一 pinned 布局(rq: rp 段从 dC_rp)。
 
     void *C_buffer = nullptr;
+    if (d_rt) {   // docs/66:逐行周期 + 特征(flop/est/span/ovf)落盘(管线公共尾,全路径覆盖);
+        // ovf 行已由 retry 重做,t_hash 失真 → 分析时剔除;cyc=0 = 该行未走 hash_spa(dense/ultra/全局表路径)
+        std::vector<unsigned long long> h_rt(A_rows);
+        std::vector<int> h_fl(A_rows), h_es(A_rows), h_sp(A_rows), h_ov(A_rows);
+        CHECK_CUDA(cudaMemcpy(h_rt.data(), d_rt, (size_t)A_rows * sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpy(h_fl.data(), d_flop, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpy(h_es.data(), d_est_save, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpy(h_sp.data(), d_span_len, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+        CHECK_CUDA(cudaMemcpy(h_ov.data(), d_row_ovf, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+        const int *h_rp = (const int*)A_buffer;
+        for (int r = 0; r < A_rows; r++)
+            fprintf(hrt_f, "%d %d %d %d %d %d %llu\n", r, h_rp[r + 1] - h_rp[r], h_fl[r], h_es[r], h_sp[r], h_ov[r], h_rt[r]);
+        fclose(hrt_f); hrt_f = nullptr;
+        dbg("[%s] rowtime(%d 行)→ %s\n", tag, A_rows, hrt_path);
+        dev_free(d_est_save);
+    }
     CHECK_CUDA(pinned_d2h_alloc(&C_buffer, C_total));
     prof("d2h", [&]{
         if (in_place) {
