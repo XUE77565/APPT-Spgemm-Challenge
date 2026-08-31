@@ -78,3 +78,11 @@ in-2004(6.84× 最大单点)
 
 compact+sort 22.7ms(25%)+ retry 7.7ms:hash 域排序税 + 欠估 retry(harness 双 expand
 在 CSV 口径已部分兜底;单发口径仍有)。dense_direct 28.4 也非零。待 Ga 族修法定型后回看。
+
+## 6. 中间带不可单轴切(08-31 深夜终审)
+
+Ge99/crankseg_1(OCCGATE wash / LADDER −6~7% 的中间带)的 diter 行 span/est 分布:
+Ge99 p10=12.1/p50=15.3/p90=30;crankseg_1 p50=23/p90=24.7 —— 与 c-64 留 dense 的行
+(span/est≈12.3)在 12-15 带【直接重叠】。OCCGATE 系数任何单向调节必伤一侧
+(1/16 已是占用单轴的最优线)。中间带收割 = LADDER v1(kc-aware + compact 摊账),
+净窗标定。今晚实验链就此闭合:OCCGATE(v28 候选)→ LADDER v1(排队)。
