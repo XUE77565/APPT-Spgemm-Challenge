@@ -142,3 +142,11 @@ in-2004 类的真解未变:小行处理的地板税,需要"多行共块"而非"�
 | wash/无操作 | Ge99 / crankseg_1 / c-58 / mult_dcop / brainpc2 / dielFilterV2real / c-64(周期中性) | 7 阵 |
 
 v28 预期:7 墙钟赢 × 平均 ~9%(3Dspec2 −32%)≈ geomean −0.8~1.2%,赢面 +4~6。
+
+## 12. 环境围城与测量基建方向(09-01)
+
+封锁实况:xuejing spec-cpu/NEMU 长跑(已 2天21小时)+ gem5 滚动,load 27-58 持续 3 天,
+净窗短期无望。全链终审(v28/LADDER 标定)皆需净窗 → **对策候选:cudaGraph 捕获管线**
+(捕获一次、每轮单 API replay,消 host 去调度间隙)→ compute-only 对 CPU 负载近免疫;
+亦为论文测量口径卖点。障碍:管线内 mid-flight D2H(est_scan total/MHSAMP/桶宽)破坏
+捕获,需分段图或去同步化。净窗三件套(排水器/v28 脚本/calib 脚本)继续守望。
