@@ -3176,14 +3176,17 @@ static void hash_product(
                        + 2 * (size_t)SMAP_SMEM_MAX * sizeof(int);
             CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
             static int g_pb2cur = -1;
-            if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e && atoi(e) == 0) ? 0 : 1; }
+            if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e) ? atoi(e) : 1; }
             // docs/39 路由 v4:dup≥4 → search(全局,含 bin 行)。Cube_Coup dup=7.24/TSOPF_FS dup≥4;
             // 全部 cursor 赢家 dup≤2.1(rajat 1.00/c-73 1.48/vsp 1.12/mult_dcop 1.0/brainpc2 2.1)。
-            int uc = g_pb2cur;
+            int uc = (g_pb2cur == 0) ? 0 : 1;
             // docs/63 §6(08-31 终版):dup≥4→search 门【窄化到 n>1M】—— 全裸删实测 Cube_Coup_dt0
             // +263%(dup 门是它的保护门);但 c-64 -11%/TSOPF_FS_b39 -27%/3Dspec2 -14% 想要行自选
             // (现代 cursor 优于 docs/39 时代)。经验判据:唯一输家 n=2.16M,全部赢家 n<700k。
-            if (uc == 1 && A_rows > 1000000 && total_est > 0
+            // ⚠ docs/66 §8 复核:上段"三赢"测于 load11-34 污染窗(该 session 路由不变的 web-Google
+            // 都 +69.6%);逐行周期(负载免疫)cursor 6 阵全胜 1.24-6.3×,交替矩阵级 cursor 5/6 不劣。
+            // PB2_CURSOR=2 = 强制 cursor 无视 dup 门(Cube_Coup 终审用)。
+            if (uc == 1 && g_pb2cur != 2 && A_rows > 1000000 && total_est > 0
                 && (double)total_flop / (double)total_est >= 4.0)
                 uc = 0;
             hash_dense_direct_kernel<<<dense_nr, 1024, wsm>>>(

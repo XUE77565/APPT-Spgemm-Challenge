@@ -81,8 +81,33 @@ merge3 保留价值 = ATT 分层交付物(deck design4)+ 论文对比基线。
 ## 6. 待办(修订)
 
 - [x] C-nnz 红旗复验(count 路真实跑,n8000 双版 28,514,400 一致)
-- [x] ROWTIME 采数 + 判决(§5;c-58/brainpc2 补充中)
-- [x] ~~行自适应 K~~(生态位已否决,不再需要)
-- [x] ~~BIN_MERGE3 路由~~(同上)
+- [x] ROWTIME 采数 + 判决(§5)
+- [x] dense 单遍直写(§7,commit b9137a6):count 5.2×/numeric 2.26×,宽带 count 路 2.87×
+- [x] ~~行自适应 K / BIN_MERGE3 路由~~(生态位已否决)
 - [ ] Ocean-C(Ana2 统计安全系数)= 剩余可移植机制;B 残余阀低优先
 - [ ] 净窗 → 复验 36 阵 → v28
+
+## 7. dense 单遍直写(用户钦点"两次精确 count 也改一下";commit b9137a6)
+
+count 路径(count+numeric 两遍 merge 迭代)→ 小跨度桶 SMEM dense 直写:
+- `bucket_count_kernel` flags 直计(O(flop) 幂等置位 + popcount,无原子)→ **5.2×**
+- `bucket_merge{,_flop}_kernel` dense 累加 + 32 lane 连续段顺序发射(real_nnz 副产物)→ **2.26×**
+- **三条实测教训内建**:①盲扩 SMEM → occupancy 14→3 blocks/SM(band128 flop 相位 0.85→2.0ms)
+  → merge 模式恒保基础 SMEM + numeric 拆双 launch;②L<128 = 原子地址地板(band128 L=51
+  dense 2× 劣)→ eligible = 128≤L≤dcap;③空 dense launch ~5ms 块调度税 + 双 launch 防双跑
+  → bnd kernel 顺带 atomicMax(max_span),host D2H 一个 int(~10μs)得精确 dcap。
+- 实测:band_n8000_x1024 count 路 597→208ms(**2.87×**);band_128/16 逐位不变(dcap 门全跳过)。
+  门:MRG3_DENSE_SPAN 默认开;DYN_BND=0 → dense 自动关。
+
+## 8. dense_direct 逐行 cursor/search 判据(DD_ROWTIME;docs/63 §6 遗留的终审)
+
+**方法**:hash_dense_direct_kernel 逐行 clock64 + 路径模式落盘;PB2_CURSOR 1/0 双跑 +
+HASH_ROWTIME 特征 join。周期数负载免疫 —— 这正是本工具的杀器(见下)。
+
+**判决(推翻 docs/63 §6)**:cursor 六阵逐行【全胜】1.24-6.30×,无任何特征门可让 search 赢
+(最优门 ≡ 全选 cursor);交替矩阵级 cursor 5/6 不劣(−2.5% ~ −12.0%,TSOPF 噪声内)。
+docs/63 §6 的"search 三赢"(c-64 −11%/TSOPF −27%/3Dspec2 −14%)是 load 11-34 污染假象
+—— 同场 web-Google 路由不变却 +69.6% = 噪声带实锤。**教训(入血泪纪律):凡 load>10 窗内
+的 A/B 结论一律未定论,逐行周期数据优先于墙钟。**
+生产含义:<1M 行阵生产态本已 cursor(无动作);唯一 >1M dup 阵 Cube_Coup(2.16M)被 dup 门
+强切 search —— PB2_CURSOR=2(强制 cursor)终审中,胜则删 dup 门(commit 已加 override)。

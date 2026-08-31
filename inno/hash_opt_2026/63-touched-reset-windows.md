@@ -53,11 +53,31 @@ sync 比闲置贵**。已回滚(工作树 = c680fe9 状态)。
 (clear?accumulate 的 lower_bound?待 nsys 分解),touched-reset 的预期收益需重新评估后
 再实施。低密度行 profile 应先用 nsys/相位内分解定位真税源,勿再凭模型动手。
 
-## 6. 路由规则实验(08-31):dup≥4→search 一刀切两头不讨好,回滚
+## 6. 路由规则实验(08-31)~~:dup≥4→search 一刀切两头不讨好~~ 【§6b 复核:本节结论是污染假象】
 
-废除全局规则(让行自选 avgB 路由)的 A/B:**Cube_Coup_dt0 +262.6%**(110.8→401.8 灾难,
-dup 规则的存在理由实证)/ **TSOPF_FS_b39_c7 −27.1%**(25.3→18.4,现代 cursor 比 docs/39
-时代的更适合它)/ 3Dspec2 −14%(同日交替强制对照:search 121.2 vs cursor 103.8)。
-判据困境:Cube_Coup 与 TSOPF 同为 dup≥4 且行 avgB≥64,一个要 search 一个要 cursor,
-无手头特征可分。**已回滚**(工作树 = 裸 dup 规则);留档:per-row 判据需采集
-(avgB 分布 × 两路径逐行计时)后重设计,dup 全局门是 Cube_Coup 的保护门勿再裸删。
+> **⚠ 08-31 晚更正(docs/66 §8 复核)**:本节的 A/B 数字全测于 load 11-34 污染窗。铁证:
+> 同场 web-Google(n<1M,两版路由【完全相同】)竟 +69.6% —— 该 session 噪声带 ±70%,
+> "Cube_Coup +263%/TSOPF −27%/3Dspec2 −14%"全部无效。逐行周期数据(负载免疫)判决:
+> cursor 在 c-64/TSOPF/c-58/brainpc2/mult_dcop/3Dspec2 六阵【全胜】1.24-6.30×
+> (mult_dcop 6.30×/3Dspec2 4.36×/brainpc2 3.65×);交替矩阵级 cursor 5/6 不劣。
+> 生产态(<1M 行)本就 cursor —— 本节"回滚"实为回到正确态,但理由错了。
+> dup 门的存废待 Cube_Coup(唯一 >1M dup 阵)PB2_CURSOR=2 终审。
+
+**原记录(留档,勿再引用)**:废除全局规则的 A/B:Cube_Coup_dt0 +262.6%/TSOPF_FS_b39_c7
+−27.1%/3Dspec2 −14%。判据困境:同特征异嗜好。已回滚(工作树 = 裸 dup 规则);per-row
+判据采集已由 docs/66 §8 兑现(DD_ROWTIME)。
+
+### 6b. 逐行判据实测(08-31,DD_ROWTIME,clock64 周期负载免疫)
+
+| 阵 | cursor 逐行优势 | 逐行中位 t_cur/t_srh | 交替矩阵级 |
+|---|---|---|---|
+| mult_dcop_03 | **6.30×** | 0.15 | −12.0% |
+| 3Dspectralwave2 | **4.36×** | 0.23 | −7.7% |
+| brainpc2 | **3.65×** | 0.26 | −9.7% |
+| TSOPF_FS_b39_c7 | 1.62× | 0.61 | 噪声内 |
+| c-58 | 1.35× | 0.68 | −2.9% |
+| c-64 | 1.24× | 0.73 | −2.5% |
+
+无任何特征门可让 search 赢:最优门全部 = 全选 cursor。c-64 唯一 t_cur/t_srh>1 尾部
+(avgB 6211 极重行)占比极小。**判决定稿:hash_dense_direct 无 search 生态位,uc=1 恒 cursor**
+(待 Cube_Coup 终审后删 dup 门)。
