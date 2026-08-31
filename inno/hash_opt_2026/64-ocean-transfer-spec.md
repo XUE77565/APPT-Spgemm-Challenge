@@ -72,3 +72,12 @@ global buffer 溢出)+ numeric。
 HASH_BIN(prime):{331, 673, 1327, 2719, 5441?…}(Common.h:158 档);numeric 从 331 起
 (最小 bin 不支持 numeric)。DENSE_BIN = 各档 SMEM/(val+flag 字节)−32;numeric dense =
 SMEM/(8+1)−4。symbolic 溢出 buffer = rows/100 × (max_product+6),0xFF 填充。
+
+## 5. ROI 重估(08-31,B 实现前的现状核查)
+
+精读我们的 retry 链(accumulate 内收集 → h_ovf D2H → flop 定表重跑 hash_global → 排序 →
+compact 路由)后发现:**retry 风暴的主体已被 ADAPT_EXPAND 吃掉**(v26 大胜的根源正是
+expand=1.4 消灭了千行级 overflow;c-64 残余 retry 仅 0.29ms)。B 的真实残余价值 =
+0.3-3ms/阵 的固定成本(3Dspec2 类)——**降级到第二优先**。
+**A(双梯相对路由)升为第一**:它是结构性缺口(docs/61 双维实验证明 v4 门挡对了路但
+绝对阈值无法跨形态),也是 C/D 的地基。新序:**A → B(残余 retry 阀)→ C → D**。
