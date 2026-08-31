@@ -1194,13 +1194,15 @@ __global__ void hash_spa_kernel(
     const int *row_flop = nullptr,      // localLoadBalance 输入(行 flop);null=旧静态 G
     const int *row_maxbl = nullptr,     // 行 k 集内 B 行最大长;null=旧静态 G
     int llb = 0,                        // LLB=1:按行动态 G(docs/27 §4.2)
-    const int *exact_rp = nullptr, int *dC_ci = nullptr, double *dC_val = nullptr)   // MODE=2
+    const int *exact_rp = nullptr, int *dC_ci = nullptr, double *dC_val = nullptr,   // MODE=2
+    unsigned long long *rowtime = nullptr)   // HASH_ROWTIME:逐行执行周期(docs/66;周期对 DVFS 免疫)
 {
     int idx = blockIdx.x;
     if (idx >= n_in_bucket) return;
     int i = bucket_rows[idx];                  // 实际行号
     if (MODE == 2 && row_ovf[i]) return;       // count pass 溢出行已由 retry 处理(compact 末段拷)
     int tid = threadIdx.x;
+    unsigned long long rt0 = rowtime ? clock64() : 0;   // 未处理行保持 0(标记区分)
     int mask = ht_size - 1;
 
     extern __shared__ __align__(8) int smem[];
@@ -1251,6 +1253,7 @@ __global__ void hash_spa_kernel(
         if ((tid & 31) == 0) ccnt[tid >> 5] = cnt;
         __syncthreads();
         if (tid == 0) { int t = 0; for (int x = 0; x < (blockDim.x >> 5); x++) t += ccnt[x]; row_nnz[i] = t; }
+        if (rowtime && tid == 0) rowtime[i] = clock64() - rt0;
         return;
     }
 
@@ -1279,6 +1282,7 @@ __global__ void hash_spa_kernel(
                 dC_val[base2 + rank] = v;
             }
             __syncthreads();
+            if (rowtime && tid == 0) rowtime[i] = clock64() - rt0;
             return;   // row_nnz 已由 count pass 写过(精确)
         }
         // SAFETY:行槽位 cap = est(= row_off 差);欠估行(distinct>est)越界写会砸下一行 → 守卫+overflow
@@ -1324,6 +1328,7 @@ __global__ void hash_spa_kernel(
             row_nnz[i] = (cnt <= cap) ? cnt : (int)cap;
         }
     }
+    if (rowtime && tid == 0) rowtime[i] = clock64() - rt0;   // 大/小行公共尾(extract 完成)
 }
 
 // hash_spa_hkv_kernel:Hybrid Value 全 bin 版(docs/24 §4.1,治大表行低占用):
@@ -1952,10 +1957,16 @@ __global__ void compute_bucket_kernel(
     const long long fl64 = (long long)flop[i];
     const bool dup_ok = (fl64 < 8LL * e) || (fl64 >= 16384 && fl64 < 64LL * e);   // DIM2-s:超重行 dup<64
     if (false) {}
-    // SPANF(docs/62 实验):重行 span 门系数 env 化(默认 16 = v4 原值)。c-big straggler
-    // (span 345k/flop 16-30k)挂 16× 门;并行 clear 下固定窗真实开销 ~2-3× 非 77×,值得实测 4×。
-    else if (diter_thr > 0 && flop[i] >= diter_thr && (e >= 2048 || dim2) &&
-             (long long)span_factor * flop[i] >= (long long)span_len[i] && dup_ok) bid = BIN_DITER;
+    // SPANF(docs/62 实验):重行 span 门系数 env 化(默认 16 = v4 原值)。
+    // Ocean-A(docs/64 机制 A,OR-退化):v4 全门命中 ∨ 双梯分支(dim2=dense_bin≤hash_bin ∧
+    // flop≥4096 ∧ e≤HASH_CAP)。双梯分支【免】16×flop≥span 与 est≥2048 —— 双梯本身已是
+    // "数组不比表贵"的跨形态判据;c-big straggler(span 345k/flop 16-30k,19491/19578 挂 16× 门)
+    // 由此入窗;F2(est 1-2k hash 本来快)由 flop≥4096+dup_ok 继续挡。dup_ok 两支共用
+    // (docs/37 高 dup 行 dense 付逐乘积原子)。DIM2 env 默认关 → 生产路由逐位不变。
+    else if (diter_thr > 0 && dup_ok &&
+             ((flop[i] >= diter_thr && e >= 2048 &&
+               (long long)span_factor * flop[i] >= (long long)span_len[i])
+              || (dim2 && flop[i] >= 4096 && e <= HASH_CAP))) bid = BIN_DITER;
     else if (e > HASH_CAP) bid = BIN_HEAVY;          // heavy:全局表(2026-08-25,不再回退 merge)
     else {
         int bi = 0, ht = 32;
@@ -2388,6 +2399,14 @@ static void hash_product(
     int *d_ovf_rows; d_ovf_rows = decltype(d_ovf_rows)(dev_alloc(A_rows * sizeof(int)));
     int *d_ovf_cnt;  d_ovf_cnt  = decltype(d_ovf_cnt)(dev_alloc(sizeof(int)));
     int *d_row_ovf;  d_row_ovf  = decltype(d_row_ovf)(dev_alloc(A_rows * sizeof(int)));   // 重试行标记(compact 路由)
+    // HASH_ROWTIME=path:hash_spa 逐行执行周期(docs/66 采数,判 merge3 路由);null=生产零开销
+    unsigned long long *d_rt = nullptr; FILE *hrt_f = nullptr; const char *hrt_path = getenv("HASH_ROWTIME");
+    if (hrt_path && *hrt_path) {
+        hrt_f = fopen(hrt_path, "w");
+        if (hrt_f) { d_rt = decltype(d_rt)(dev_alloc(A_rows * sizeof(unsigned long long))); CHECK_CUDA(cudaMemset(d_rt, 0, (size_t)A_rows * sizeof(unsigned long long))); }
+    }
+    int *d_est_save = nullptr;   // est 快照(dense 置零前;rowtime 分析用;0 = 该路径未走 bucketing)
+    if (d_rt) { d_est_save = decltype(d_est_save)(dev_alloc(A_rows * sizeof(int))); CHECK_CUDA(cudaMemset(d_est_save, 0, (size_t)A_rows * sizeof(int))); }
     // 重试区(行级重试输出;compact 末段读)+ 重试中间缓冲(docs/21 Fix0:此前从不释放,每调用泄漏
     // r_slots×32B + rt_total×12B,warmup 多轮累加 → rajat 类 OOM 崩溃的帮凶)
     const int *d_retry_rows = nullptr; int d_retry_n = 0;
@@ -2429,6 +2448,7 @@ static void hash_product(
         static int g_spanf = -1;
         if (g_spanf < 0) { const char *e = getenv("SPANF"); g_spanf = (e && *e) ? atoi(e) : 16; }   // docs/62:重行 span 门系数(默认 16 = v4;净窗实验 4)
         compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf);
+        if (d_rt) CHECK_CUDA(cudaMemcpy(d_est_save, d_est, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToDevice));   // est 快照:dense 路径后续会置零
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
                                thrust::device_ptr<int>(d_offb));
@@ -2652,7 +2672,7 @@ static void hash_product(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, ht, d_off,
                     d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf,
-                    d_flop, d_maxbl);
+                    d_flop, d_maxbl, 0, nullptr, nullptr, nullptr, d_rt);
                 d5h_rows += n;
                 CHECK_CUDA(cudaGetLastError());
             }
@@ -2898,7 +2918,7 @@ static void hash_product(
                         dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                         rows_ptr, n, ht, d_off,
                         d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf,
-                        d_flop, d_maxbl, g_llb);
+                        d_flop, d_maxbl, g_llb, nullptr, nullptr, nullptr, d_rt);
                 }
             }
         }
@@ -3173,10 +3193,25 @@ static void hash_product(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, ht, d_off,
                     d_tmp_key, d_tmp_val, d_row_nnz, d_overflow, d_ovf_rows, d_ovf_cnt, d_row_ovf,
-                    d_flop, d_maxbl, 0, dC_rp, dC_ci, d_val);
+                    d_flop, d_maxbl, 0, dC_rp, dC_ci, d_val, d_rt);
                 CHECK_CUDA(cudaGetLastError());
             }
         });
+        if (d_rt) {   // docs/66:逐行周期 + 特征(flop/est/span/ovf)落盘;ovf 行已由 retry 重做,t_hash 失真 → 分析时剔除
+            std::vector<unsigned long long> h_rt(A_rows);
+            std::vector<int> h_fl(A_rows), h_es(A_rows), h_sp(A_rows), h_ov(A_rows);
+            CHECK_CUDA(cudaMemcpy(h_rt.data(), d_rt, (size_t)A_rows * sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpy(h_fl.data(), d_flop, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpy(h_es.data(), d_est_save, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpy(h_sp.data(), d_span_len, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpy(h_ov.data(), d_row_ovf, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+            const int *h_rp = (const int*)A_buffer;
+            for (int r = 0; r < A_rows; r++)
+                fprintf(hrt_f, "%d %d %d %d %d %d %llu\n", r, h_rp[r + 1] - h_rp[r], h_fl[r], h_es[r], h_sp[r], h_ov[r], h_rt[r]);
+            fclose(hrt_f); hrt_f = nullptr;
+            dbg("[%s] rowtime(%d 行)→ %s\n", tag, A_rows, hrt_path);
+            dev_free(d_est_save);
+        }
         CHECK_CUDA(cudaMemcpy(&overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));   // MODE=2 理论不再溢出(count 同表已插过);防御复查
         if (overflow) {   // 不可重试行(flop 超表上限)→ 整阵回退(与 legacy 口径一致)
             fprintf(stderr, "[hash] OVERFLOW(D5H): 某 hash 行 distinct > HASH_CAP=%d → 回退 merge\n", HASH_CAP);

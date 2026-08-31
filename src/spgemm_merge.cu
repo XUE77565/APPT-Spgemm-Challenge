@@ -497,17 +497,69 @@ __device__ __forceinline__ int dev_lower_bound(const int *arr, int lo, int hi, i
     return lo;
 }
 
+// 动态负载均衡 v2(docs/66):每行把 K 个桶均分在【乘积列实际跨度】[min,max] 上,非 [0,n)。
+// min/max = 各输入 k 的 B 行首/末列(行有序)→ O(num_k) 顺序负载、零二分。宽带阵等宽桶宽 ≫
+// bw 时全部工作落一桶(32000/5=6400 ≫ 2048),K 路切分失效 —— 本 kernel 治此病。
+// v1(值域二分求精确等 flop 切点)实测 +374% 否决:rank 评估 O(num_k·log(avgB)) × log(n) 轮,
+// 成本 ≈ merge 本身。v2 近似(跨度内均匀假设)对带状/聚集行已是 5× 均衡,开销 <1%。
+// 轻行(total < dyn_min)回退等宽 [0,n) = 旧行为逐位一致。
+__global__ void bucket_bnd_kernel(
+    const int *A_row_ptr, const int *A_col_idx,
+    const int *B_row_ptr, const int *B_col_idx,
+    int A_rows, int A_cols, int K, long long dyn_min,
+    int *bnd)   // [A_rows * (K+1)]
+{
+    int i = blockIdx.x;
+    if (i >= A_rows) return;
+    int lane = threadIdx.x;
+    int *rb = bnd + (size_t)i * (K + 1);
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int num_k = re - rs;
+    if (num_k <= 0) {   // 空行:任意合法边界(全空桶)
+        if (lane == 0) { rb[0] = 0; rb[K] = A_cols; for (int j = 1; j < K; j++) rb[j] = (int)((long long)j * A_cols / K); }
+        return;
+    }
+    int mn = 0x7fffffff, mx = -1;
+    long long total = 0;
+    for (int p = lane; p < num_k; p += 32) {
+        int k = A_col_idx[rs + p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        total += ke - ks;
+        if (ks < ke) {
+            int c0 = B_col_idx[ks], c1 = B_col_idx[ke - 1];
+            if (c0 < mn) mn = c0;
+            if (c1 > mx) mx = c1;
+        }
+    }
+    for (int off = 16; off > 0; off >>= 1) {
+        int om = __shfl_xor_sync(0xffffffff, mn, off); if (om < mn) mn = om;
+        int ox = __shfl_xor_sync(0xffffffff, mx, off); if (ox > mx) mx = ox;
+    }
+    for (int off = 16; off > 0; off >>= 1) total += __shfl_xor_sync(0xffffffff, total, off);
+    if (total < dyn_min || mx < mn) {   // 轻行/无乘积:等宽回退(= 旧 blo=b*n/K)
+        if (lane == 0) { rb[0] = 0; rb[K] = A_cols; for (int j = 1; j < K; j++) rb[j] = (int)((long long)j * A_cols / K); }
+        return;
+    }
+    if (lane == 0) {
+        long long span = (long long)mx - mn + 1;
+        rb[0] = mn;        // 桶 0 左端收紧到 min(乘积不可能 < mn)
+        rb[K] = mx + 1;    // 末桶右端 = max+1(覆盖 max;乘积不可能 > max)
+        for (int j = 1; j < K; j++) rb[j] = mn + (int)(j * span / K);
+    }
+}
+
 // (row,bucket) 一块:count 该桶内 distinct 列数(merge-count,不写值)
 __global__ void bucket_count_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int A_cols,
-    int K, int *bucket_nnz)   // [A_rows * K],行主序 [i*K + b]
+    int K, const int *bnd, int *bucket_nnz)   // [A_rows * K],行主序 [i*K + b]
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
     int lane = threadIdx.x;
     long long n = A_cols;
-    int blo = (int)(b * n / K);
-    int bhi = (int)((b + 1) * n / K);
+    int blo, bhi;   // bnd 非空 = 动态工作量边界(docs/66);空 = 等宽(旧行为)
+    if (bnd) { const int *rb = bnd + (size_t)i * (K + 1); blo = rb[b]; bhi = rb[b + 1]; }
+    else     { blo = (int)(b * n / K); bhi = (int)((b + 1) * n / K); }
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int num_k = re - rs;
     extern __shared__ __align__(8) int smem[];
@@ -557,15 +609,16 @@ __global__ void bucket_scan_kernel(int A_rows, int K, const int *bucket_nnz,
 // (row,bucket) 一块:warp-merge 该桶子区间,写 (col, val) 到全局偏移
 __global__ void bucket_merge_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
-    int A_rows, int A_cols, int K, const int *C_row_ptr, const int *bucket_off,
+    int A_rows, int A_cols, int K, const int *bnd, const int *C_row_ptr, const int *bucket_off,
     int *out_col, double *out_val)
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
     int lane = threadIdx.x;
     long long n = A_cols;
-    int blo = (int)(b * n / K);
-    int bhi = (int)((b + 1) * n / K);
+    int blo, bhi;   // bnd 非空 = 动态工作量边界(docs/66);空 = 等宽(旧行为)
+    if (bnd) { const int *rb = bnd + (size_t)i * (K + 1); blo = rb[b]; bhi = rb[b + 1]; }
+    else     { blo = (int)(b * n / K); bhi = (int)((b + 1) * n / K); }
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int num_k = re - rs;
     extern __shared__ __align__(8) int smem[];
@@ -613,14 +666,15 @@ __global__ void bucket_flop_kernel(
     const int *A_row_ptr, const int *A_col_idx,
     const int *B_row_ptr, const int *B_col_idx,
     int A_rows, int A_cols,
-    int K, int *bucket_flop)   // [A_rows * K]
+    int K, const int *bnd, int *bucket_flop)   // [A_rows * K]
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
     int lane = threadIdx.x;
     long long n = A_cols;
-    int blo = (int)(b * n / K);
-    int bhi = (int)((b + 1) * n / K);
+    int blo, bhi;   // bnd 非空 = 动态工作量边界(docs/66);空 = 等宽(旧行为)
+    if (bnd) { const int *rb = bnd + (size_t)i * (K + 1); blo = rb[b]; bhi = rb[b + 1]; }
+    else     { blo = (int)(b * n / K); bhi = (int)((b + 1) * n / K); }
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int num_k = re - rs;
     extern __shared__ __align__(8) int smem[];
@@ -644,15 +698,18 @@ __global__ void bucket_merge_flop_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
     int upper_tri,
-    int A_rows, int A_cols, int K, const long long *row_off, const int *bucket_flop_off,
-    int *out_col, double *out_val, int *bucket_real_nnz)   // [A_rows*K]
+    int A_rows, int A_cols, int K, const int *bnd, const long long *row_off, const int *bucket_flop_off,
+    int *out_col, double *out_val, int *bucket_real_nnz,   // [A_rows*K]
+    unsigned long long *rowtime = nullptr)   // MRG3_ROWTIME:每 (row,bucket) 执行周期(docs/66)
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
     int lane = threadIdx.x;
+    unsigned long long rt0 = rowtime ? clock64() : 0;   // 周期数对 DVFS 免疫(工作量的稳定度量)
     long long n = A_cols;
-    int blo = (int)(b * n / K);
-    int bhi = (int)((b + 1) * n / K);
+    int blo, bhi;   // bnd 非空 = 动态工作量边界(docs/66);空 = 等宽(旧行为)
+    if (bnd) { const int *rb = bnd + (size_t)i * (K + 1); blo = rb[b]; bhi = rb[b + 1]; }
+    else     { blo = (int)(b * n / K); bhi = (int)((b + 1) * n / K); }
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
     int num_k = re - rs;
     extern __shared__ __align__(8) int smem[];
@@ -696,7 +753,10 @@ __global__ void bucket_merge_flop_kernel(
             }
         }
     }
-    if (lane == 0) bucket_real_nnz[i * K + b] = out_idx;
+    if (lane == 0) {
+        bucket_real_nnz[i * K + b] = out_idx;
+        if (rowtime) rowtime[i * K + b] = clock64() - rt0;
+    }
 }
 
 // (C-3) compact:把每 (row,bucket) 的真实项从 gapped flop 区拷到精确 CSR(base = C_row_ptr + bucket_off_exact)。
@@ -768,6 +828,22 @@ static void merge3_product(
     }
     const int upper_tri = att ? 1 : 0;
 
+    // 动态负载均衡(docs/66):值域二分算每行 K+1 边界(轻行等宽回退)。MRG3_DYN_BND=0 关回旧行为。
+    // B 口径:!att 时 dB==dA(count 路径与 flop 路径同源);att 时只有 flop 路径跑,dB=CSC 正确。
+    static int g_dyn = -1;
+    if (g_dyn < 0) { const char *e = getenv("MRG3_DYN_BND"); g_dyn = (e && *e) ? (atoi(e) > 0 ? 1 : 0) : 1; }
+    long long dyn_min = 8192;
+    if (const char *e = getenv("MRG3_DYN_MIN")) dyn_min = atoll(e);
+    int *d_bnd = nullptr;
+    if (g_dyn) {
+        CHECK_CUDA(cudaMalloc(&d_bnd, (size_t)A_rows * (K + 1) * sizeof(int)));
+        prof("bnd", [&]{
+            bucket_bnd_kernel<<<A_rows, block32>>>(
+                dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, dyn_min, d_bnd);
+            CHECK_CUDA(cudaGetLastError());
+        });
+    }
+
     // 门控:flop_ub sizing(省 count pass ~37%)vs 精确 count(原版)。默认 flop_ub(净赢 24-32%、无回归);MRG3_FLOP_UB=0 关回精确 count。
     static int g_flop = -1;
     if (g_flop < 0) { const char *e = getenv("MRG3_FLOP_UB"); g_flop = (e && *e) ? (atoi(e) > 0 ? 1 : 0) : 1; }
@@ -784,6 +860,13 @@ static void merge3_product(
 
     if (g_flop) {
         // flop_ub path:省 count 的 merge 迭代,代价 = gapped buffer + compact
+        // MRG3_ROWTIME=path:逐 (row,bucket) 执行周期落盘(docs/66 per-row 采数;周期对 DVFS 免疫)
+        unsigned long long *d_rtime = nullptr; FILE *rtf = nullptr;
+        const char *rt_path = getenv("MRG3_ROWTIME");
+        if (rt_path && *rt_path) {
+            rtf = fopen(rt_path, "w");
+            if (rtf) CHECK_CUDA(cudaMalloc(&d_rtime, (size_t)A_rows * K * sizeof(unsigned long long)));
+        }
         int *d_bflop, *d_bflop_off;
         long long *d_row_flop, *d_row_off;   // 64 位:ocean337 上 Σflop > 2^31(Ga/band 族),int 会变负 → 灾难分配
         CHECK_CUDA(cudaMalloc(&d_bflop, (size_t)A_rows * K * sizeof(int)));
@@ -792,7 +875,7 @@ static void merge3_product(
         CHECK_CUDA(cudaMalloc(&d_row_off, (A_rows + 1) * sizeof(long long)));
         long long total_flop;
         prof("flop", [&]{   // (C-1) 每 (row,bucket) flop_ub(lower_bound+sum,无 merge 迭代)
-            bucket_flop_kernel<<<grid, block32, smem_count>>>(dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, d_bflop);
+            bucket_flop_kernel<<<grid, block32, smem_count>>>(dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, d_bnd, d_bflop);
             CHECK_CUDA(cudaGetLastError());
         });
         prof("fscan", [&]{  // 行内 scan(flop)→ bucket_flop_off + row_flop;全局 scan → row_off(gapped) + total_flop
@@ -819,9 +902,19 @@ static void merge3_product(
         prof("merge", [&]{   // (C-2) warp-merge 写 gapped 区 + 记真实数 bucket_real_nnz
             bucket_merge_flop_kernel<<<grid, block32, smem_merge>>>(
                 dA_row_ptr, dA_col_idx, dA_val, dB_row_ptr, dB_col_idx, dB_val, upper_tri,
-                A_rows, A_cols, K, d_row_off, d_bflop_off, d_gcol, d_gval, d_breal);
+                A_rows, A_cols, K, d_bnd, d_row_off, d_bflop_off, d_gcol, d_gval, d_breal, d_rtime);
             CHECK_CUDA(cudaGetLastError());
         });
+        if (d_rtime) {   // 逐桶周期 → 文本 "row bucket cycles";python 侧 join 特征做判据
+            std::vector<unsigned long long> h_rt((size_t)A_rows * K);
+            CHECK_CUDA(cudaMemcpy(h_rt.data(), d_rtime, h_rt.size() * sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+            for (int i = 0; i < A_rows; i++)
+                for (int b = 0; b < K; b++)
+                    fprintf(rtf, "%d %d %llu\n", i, b, h_rt[(size_t)i * K + b]);
+            fclose(rtf);
+            dbg("[mrg3] rowtime → %s (%d×%d)\n", rt_path, A_rows, K);
+            cudaFree(d_rtime);
+        }
         int *d_boff_ex, *d_row_nnz;
         CHECK_CUDA(cudaMalloc(&d_boff_ex, (size_t)A_rows * K * sizeof(int)));
         CHECK_CUDA(cudaMalloc(&d_row_nnz, A_rows * sizeof(int)));
@@ -856,7 +949,7 @@ static void merge3_product(
         CHECK_CUDA(cudaMalloc(&d_bucket_nnz, (size_t)A_rows * K * sizeof(int)));
         prof("count", [&]{
             bucket_count_kernel<<<grid, block32, smem_count>>>(
-                dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bucket_nnz);
+                dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bnd, d_bucket_nnz);
             CHECK_CUDA(cudaGetLastError());
         });
         // Stage 2: 行内桶偏移 + row_nnz + C_row_ptr(D2H 纳入 scan 块)
@@ -884,7 +977,7 @@ static void merge3_product(
         prof("merge", [&]{
             CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
             bucket_merge_kernel<<<grid, block32, smem_merge>>>(
-                dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, dC_row_ptr, d_bucket_off,
+                dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, d_bnd, dC_row_ptr, d_bucket_off,
                 dC_col_idx, dC_val);
             CHECK_CUDA(cudaGetLastError());
         });
@@ -900,6 +993,7 @@ static void merge3_product(
     *C_rows = A_rows; *C_cols = A_cols; *C_nnz = C_nnz_result;
 
     cudaFree(dA_buffer); cudaFree(dC_row_ptr); cudaFree(dC_buffer);   // 各 path 的临时数组已在分支内 free;dC_ci/dC_val 是 dC_buffer 别名
+    cudaFree(d_bnd);                                                  // 动态边界(docs/66;g_dyn=0 时为 null,no-op)
     cudaFree(d_csc_cp); cudaFree(d_csc_ri); cudaFree(d_csc_val);      // ATT 的 Aᵀ(AA 时 null,no-op)
 }
 

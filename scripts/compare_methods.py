@@ -54,7 +54,7 @@ def compute_only_from_prof(stderr, tag):
     total = phases.get("TOTAL(GPU)")
     if total is not None:
         return total - phases.get("h2d", 0.0) - phases.get("d2h", 0.0)
-    return sum(v for k, v in phases.items() if k not in ("h2d", "d2h"))
+    return None   # docs/66 血泪:TOTAL 缺失 = 运行未完成(SAFETY exit 等)→ 宁可 None 也不相位求和冒充时长
 
 def compute_only_from_dbg(stderr, tag):
     """[dbg ms][tag] host 时间戳 → 区间和(排除 h2d/d2h)。cuSPARSE 用此口径。"""
