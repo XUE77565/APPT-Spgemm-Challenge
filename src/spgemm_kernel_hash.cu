@@ -3140,7 +3140,11 @@ static void hash_product(
             // docs/39 路由 v4:dup≥4 → search(全局,含 bin 行)。Cube_Coup dup=7.24/TSOPF_FS dup≥4;
             // 全部 cursor 赢家 dup≤2.1(rajat 1.00/c-73 1.48/vsp 1.12/mult_dcop 1.0/brainpc2 2.1)。
             int uc = g_pb2cur;
-            if (uc == 1 && total_est > 0 && (double)total_flop / (double)total_est >= 4.0)
+            // docs/63 §6(08-31 终版):dup≥4→search 门【窄化到 n>1M】—— 全裸删实测 Cube_Coup_dt0
+            // +263%(dup 门是它的保护门);但 c-64 -11%/TSOPF_FS_b39 -27%/3Dspec2 -14% 想要行自选
+            // (现代 cursor 优于 docs/39 时代)。经验判据:唯一输家 n=2.16M,全部赢家 n<700k。
+            if (uc == 1 && A_rows > 1000000 && total_est > 0
+                && (double)total_flop / (double)total_est >= 4.0)
                 uc = 0;
             hash_dense_direct_kernel<<<dense_nr, 1024, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
