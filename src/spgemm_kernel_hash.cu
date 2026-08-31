@@ -684,11 +684,14 @@ __global__ void hash_dense_direct_kernel(
     const int *span_lo /*nullable*/,
     const int *row_flop = nullptr, const int *row_maxbl = nullptr,
     int *smap_base = nullptr, const int *smap_off = nullptr, int smir_bias = 0,
-    int use_cursor = 1)
+    int use_cursor = 1,
+    unsigned long long *rowtime = nullptr,   // DD_ROWTIME:逐行执行周期(docs/66 采数)
+    int *rowmode = nullptr)                  // 0=search 路径 / 1=cursor 路径(同数组落盘)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
     int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
+    unsigned long long rt0 = rowtime ? clock64() : 0;
     extern __shared__ __align__(8) unsigned char wsmem[];
     double *dval = (double*)wsmem;
     unsigned char *dflag = wsmem + (size_t)PB2_W * sizeof(double);
@@ -722,6 +725,7 @@ __global__ void hash_dense_direct_kernel(
     if (PB2_STAGE < 1) return;
 
     int avgB = (row_flop && a_len > 0) ? row_flop[i] / a_len : 0;
+    if (rowmode && tid == 0) rowmode[i] = (avgB >= 64 && use_cursor == 1) ? 1 : 0;   // DD_ROWTIME 采数
     if (avgB < 64 || use_cursor != 1) {   // docs/39 路由 v3 判据收回 avgB(host 级 dup 门见下)
         // 混合路由(docs/30):avgB(=flop/a_len,平均 B 行长)< 64 的行走旧固定窗搜索路径 ——
         // 游标镜像/复位是每窗 O(a_len) 全局往返,开销/工作量 ∝ a_len×窗数/flop = 1/avgB;
@@ -770,7 +774,10 @@ __global__ void hash_dense_direct_kernel(
             out += dpref[w - 1] + dflag[w - 1];
             __syncthreads();
         }
-        if (tid == 0 && out != cap) row_nnz[i] = out;
+        if (tid == 0) {
+            if (out != cap) row_nnz[i] = out;
+            if (rowtime) rowtime[i] = clock64() - rt0;   // search 路径出口
+        }
         return;
     }
     int win_lo = lo0;
@@ -850,8 +857,10 @@ __global__ void hash_dense_direct_kernel(
         __syncthreads();
         win_lo = next;
     }
-    if (tid == 0 && out != cap)
-        row_nnz[i] = out;
+    if (tid == 0) {
+        if (out != cap) row_nnz[i] = out;
+        if (rowtime) rowtime[i] = clock64() - rt0;       // cursor 路径出口
+    }
 }
 
 // dense 行集合的 Σest / Σrow_nnz / Σflop(方案5:tmp 缩容 + est 下溢检查改 hash 侧口径 + dup 门)
@@ -2407,6 +2416,17 @@ static void hash_product(
     }
     int *d_est_save = nullptr;   // est 快照(dense 置零前;rowtime 分析用;0 = 该路径未走 bucketing)
     if (d_rt) { d_est_save = decltype(d_est_save)(dev_alloc(A_rows * sizeof(int))); CHECK_CUDA(cudaMemset(d_est_save, 0, (size_t)A_rows * sizeof(int))); }
+    // DD_ROWTIME=path:dense_direct 逐行周期+路径模式(docs/66 §8 cursor/search 判据采数)
+    unsigned long long *d_ddrt = nullptr; int *d_ddmode = nullptr;
+    FILE *dd_f = nullptr; const char *dd_path = getenv("DD_ROWTIME");
+    if (dd_path && *dd_path) {
+        dd_f = fopen(dd_path, "w");
+        if (dd_f) {
+            d_ddrt = decltype(d_ddrt)(dev_alloc(A_rows * sizeof(unsigned long long)));
+            d_ddmode = decltype(d_ddmode)(dev_alloc(A_rows * sizeof(int)));
+            CHECK_CUDA(cudaMemset(d_ddrt, 0, (size_t)A_rows * sizeof(unsigned long long)));
+        }
+    }
     // 重试区(行级重试输出;compact 末段读)+ 重试中间缓冲(docs/21 Fix0:此前从不释放,每调用泄漏
     // r_slots×32B + rt_total×12B,warmup 多轮累加 → rajat 类 OOM 崩溃的帮凶)
     const int *d_retry_rows = nullptr; int d_retry_n = 0;
@@ -3169,9 +3189,19 @@ static void hash_product(
             hash_dense_direct_kernel<<<dense_nr, 1024, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr,
-                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, uc);
+                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, uc, d_ddrt, d_ddmode);
             CHECK_CUDA(cudaGetLastError());
         });
+        if (d_ddrt) {   // docs/66 §8:逐行周期 + 路径模式落盘(cursor/search 判据采数)
+            std::vector<unsigned long long> h_rt(A_rows);
+            std::vector<int> h_md(A_rows);
+            CHECK_CUDA(cudaMemcpy(h_rt.data(), d_ddrt, (size_t)A_rows * sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpy(h_md.data(), d_ddmode, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToHost));
+            for (int r = 0; r < A_rows; r++)
+                if (h_rt[r]) fprintf(dd_f, "%d %llu %d\n", r, h_rt[r], h_md[r]);   // 仅 dense 行(cyc=0 剔)
+            fclose(dd_f); dd_f = nullptr;
+            dbg("[%s] dd_rowtime → %s\n", tag, dd_path);
+        }
     }
     // D5H 数值 pass:bins 1-10 MODE=2 直写 dC(小行 count-sort 有序;大行无序 → 原地 csort)
     if (g_d5h_on) {
