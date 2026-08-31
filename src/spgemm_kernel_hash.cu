@@ -87,11 +87,12 @@ __global__ void count_flop_span_kernel(
 #define HASH_CAP 16384         // 重行桶 hash 表最大槽位(→ col+val = 128KB/块)
 #endif
 #define HASH_BLOCK 256
-#define N_BINS 18    // 0..10:hash 梯 + ultra(11) + heavy(12) + dense-iter(13) + 小跨度 dense 4 子桶(14-17,docs/37)
+#define N_BINS 19    // 0..10:hash 梯 + ultra(11) + heavy(12) + dense-iter(13) + 小跨度 dense 4 子桶(14-17,docs/37) + batch2(18,docs/67 §8)
 #define BIN_SSPAN0 14   // span≤256(64线程/3.3KB,32+行/SM —— Ocean dense bin0 同位)
 #define BIN_ULTRA 11
 #define BIN_HEAVY 12
 #define BIN_DITER 13
+#define BIN_BATCH2 18    // docs/67 §8:est 65-256 ∧ kc≤32 小行批处理(<512,4> warp-per-row)
 #define GLOBAL_HT_MAX_SLOTS (1 << 22)   // 单行全局表上限 4M 槽(50MB);est 超此 → 真溢出回退
 #define AVG_FLOP_THR 64                  // avg_product ≤ 此值 → est=精确 flop 免 MinHash(Ocean Ana1 同款门)
 #define CSORT_HT 1024   // ht≤此值的行(bin0-5)在 accumulate 内 count-sort 写有序;compact 阶段只 copy
@@ -1167,6 +1168,9 @@ __global__ void bsearch_numeric_kernel(
 // 治"1 CTA/行×256 线程伺候 ~6 个积"的每行固定开销(333SP 型 accumulate 55% 差距源);
 // 有序直写 tmp → compact 阶段走 copy 免排序。设计:`inno/hash_batched_kernel_design.md`。
 
+// docs/67 §8 模板化:<128,8>=原 bin0(est≤64);<512,4>=BIN_BATCH2(est≤256,消 web 图类
+// 55 万小行的 22k cyc/行块地板税 —— est 66-256 行独占 64-512T 块只装 ~384 乘积是浪费)。
+template<int HT, int WPB>
 __global__ void hash_spa_batched_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     const int *B_row_ptr, const int *B_col_idx, const double *B_val,
@@ -1183,22 +1187,22 @@ __global__ void hash_spa_batched_kernel(
     if (warp >= n_in_bucket) return;
     int i = bucket_rows[warp];
 
-    // 静态 SMEM:每 warp 段 = col[128] | val[128](8B 对齐,段首 512B✓) | pack_col[128] | pack_slot[128]
-    __shared__ int bsmem[BATCH_WPB][4 * BATCH_HT];
-    __shared__ int w_cnt[BATCH_WPB];
-    int *t_col = bsmem[warp & (BATCH_WPB - 1)];
+    // 静态 SMEM:每 warp 段 = col[HT] | val[HT](8B 对齐) | pack_col[HT] | pack_slot[HT]
+    __shared__ int bsmem[WPB][4 * HT];
+    __shared__ int w_cnt[WPB];
+    int *t_col = bsmem[warp & (WPB - 1)];
     // 方案4修正: HYBRID 模式下 value 在全局(L2 原子吞吐高,CAS 仍在 SMEM)
     double *t_val;
     if (global_val) {
-        t_val = global_val + (size_t)(warp) * BATCH_HT;  // 全局池,每 warp 一段
+        t_val = global_val + (size_t)(warp) * HT;  // 全局池,每 warp 一段
     } else {
-        t_val = (double*)(bsmem[warp & (BATCH_WPB - 1)] + BATCH_HT);
+        t_val = (double*)(bsmem[warp & (WPB - 1)] + HT);
     }
-    int *pack_col = bsmem[warp & (BATCH_WPB - 1)] + 2 * BATCH_HT;
-    int *pack_slot = bsmem[warp & (BATCH_WPB - 1)] + 3 * BATCH_HT;
+    int *pack_col = bsmem[warp & (WPB - 1)] + 2 * HT;
+    int *pack_slot = bsmem[warp & (WPB - 1)] + 3 * HT;
 
-    if (lane == 0) w_cnt[warp & (BATCH_WPB - 1)] = 0;
-    for (int s = lane; s < BATCH_HT; s += 32) { t_col[s] = -1; t_val[s] = 0.0; }
+    if (lane == 0) w_cnt[warp & (WPB - 1)] = 0;
+    for (int s = lane; s < HT; s += 32) { t_col[s] = -1; t_val[s] = 0.0; }
     __syncwarp();
 
     int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
@@ -1210,13 +1214,13 @@ __global__ void hash_spa_batched_kernel(
             int j = B_col_idx[q];
             if (upper_tri && j < i) continue;
             double v = a * B_val[q];
-            unsigned slot = ((unsigned)(j * 2654435761u)) & (BATCH_HT - 1);
+            unsigned slot = ((unsigned)(j * 2654435761u)) & (HT - 1);
             int probes = 0;                             // 有界探测:必终止
             while (true) {
                 int old = atomicCAS(&t_col[slot], -1, j);
                 if (old == -1 || old == j) { atomicAdd(&t_val[slot], v); break; }
-                slot = (slot + 1) & (BATCH_HT - 1);
-                if (++probes >= BATCH_HT) {
+                slot = (slot + 1) & (HT - 1);
+                if (++probes >= HT) {
                     atomicExch(overflow_flag, 1);
                     if (!atomicExch(&row_ovf[i], 1)) { int p = atomicAdd(ovf_cnt, 1); ovf_rows[p] = i; }
                     break;
@@ -1229,16 +1233,16 @@ __global__ void hash_spa_batched_kernel(
     // extract:pack 非空槽 → count-rank 排序 → 有序写 tmp(rank 是 0..n-1 置换)
     long long base = row_off[i];
     int cap = est[i];                                   // SAFETY:mh 低估时 n 可超 est → 守卫
-    for (int s = lane; s < BATCH_HT; s += 32) {
+    for (int s = lane; s < HT; s += 32) {
         int c = t_col[s];
         if (c >= 0) {
-            int pos = atomicAdd(&w_cnt[warp & (BATCH_WPB - 1)], 1);
-            if (pos < BATCH_HT) { pack_col[pos] = c; pack_slot[pos] = s; }
+            int pos = atomicAdd(&w_cnt[warp & (WPB - 1)], 1);
+            if (pos < HT) { pack_col[pos] = c; pack_slot[pos] = s; }
         }
     }
     __syncwarp();
-    int n = w_cnt[warp & (BATCH_WPB - 1)];
-    if (n > BATCH_HT) n = BATCH_HT;                     // pack 溢出截断(此时必已置 overflow)
+    int n = w_cnt[warp & (WPB - 1)];
+    if (n > HT) n = HT;                     // pack 溢出截断(此时必已置 overflow)
     for (int idx = lane; idx < n; idx += 32) {
         int c = pack_col[idx];
         int rank = 0;
@@ -1996,7 +2000,8 @@ __global__ void compute_bucket_kernel(
     int n_cols = 0,        // DIM2:span 护栏(DIM2=0 时传 0 关闭)
     int span_factor = 16,  // SPANF:重行 span 门系数(默认 16 = v4)
     int occgate = 0,      // docs/67 占用轴(est≥span/16):Ga 族 3.6% 占用行的 O(span) 窗税实锤
-    int ladder = 0)       // docs/67 §6 自制双梯:两侧实测成本律逐行比较(取代手调门的方向)
+    int ladder = 0,       // docs/67 §6 自制双梯:两侧实测成本律逐行比较(取代手调门的方向)
+    int batch2 = 0)       // docs/67 §8:est 65-256 小行批处理门(BIN_BATCH2)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
@@ -2076,6 +2081,9 @@ __global__ void compute_bucket_kernel(
         } else if (e <= 64) {
             int rk = A_row_ptr[i + 1] - A_row_ptr[i];
             bid = (rk <= 32) ? 0 : bi;
+        } else if (e <= 256 && batch2) {   // docs/67 §8:est 65-256 小行批处理(web 图 22k cyc/行块地板税)
+            int rk = A_row_ptr[i + 1] - A_row_ptr[i];
+            bid = (rk <= 32) ? BIN_BATCH2 : bi;
         } else {
             bid = bi;
         }
@@ -2601,7 +2609,9 @@ static void hash_product(
         if (g_occgate < 0) { const char *e = getenv("OCCGATE"); g_occgate = (e && *e) ? atoi(e) : 0; }   // 强制 hash 双簇 −8~17%);默认关待电池
         static int g_ladder = -1;    // docs/67 §6 自制双梯:两侧成本律逐行比较(86% oracle 一致方向)
         if (g_ladder < 0) { const char *e = getenv("LADDER"); g_ladder = (e && *e) ? atoi(e) : 0; }      // 默认关
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf, g_occgate, g_ladder);
+        static int g_batch2 = -1;    // docs/67 §8:est 65-256 小行批处理(web 图地板税,BIN_BATCH2)
+        if (g_batch2 < 0) { const char *e = getenv("BATCH2"); g_batch2 = (e && *e) ? atoi(e) : 0; }      // 默认关
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf, g_occgate, g_ladder, g_batch2);
         if (d_rt) CHECK_CUDA(cudaMemcpy(d_est_save, d_est, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToDevice));   // est 快照:dense 路径后续会置零
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
@@ -2957,10 +2967,15 @@ static void hash_product(
                 // 小行批量: HYBRID=1 时 value 走全局 L2(Ocean 杀手锏;池句柄 d_hybrid_val 尾部统一释放,Fix#6)
                 if (g_hybrid && !d_hybrid_val)
                     d_hybrid_val = decltype(d_hybrid_val)(dev_alloc((size_t)n * BATCH_HT * sizeof(double)));
-                hash_spa_batched_kernel<<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
+                hash_spa_batched_kernel<128, 8><<<(n + BATCH_WPB - 1) / BATCH_WPB, BATCH_WPB * 32, 0, cur_s>>>(
                     dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
                     rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
                     d_ovf_rows, d_ovf_cnt, d_row_ovf, d_hybrid_val);
+            } else if (bi == BIN_BATCH2) {   // docs/67 §8:est≤256 小行批处理(<512,4>,消块地板税)
+                hash_spa_batched_kernel<512, 4><<<(n + 3) / 4, 128, 0, cur_s>>>(
+                    dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri,
+                    rows_ptr, n, d_off, d_est, d_tmp_key, d_tmp_val, d_row_nnz, d_overflow,
+                    d_ovf_rows, d_ovf_cnt, d_row_ovf);
             } else if (bi == BIN_ULTRA) {
                 // ultra(est≤EST_ULTRA_THR):线性,免 hash
                 hash_ultra_kernel<<<(n + 255) / 256, 256, 0, cur_s>>>(

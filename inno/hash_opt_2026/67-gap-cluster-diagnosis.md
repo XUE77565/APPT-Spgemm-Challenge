@@ -107,3 +107,13 @@ wash 不受伤)。v28 候选就绪度:高(净窗 refresh 终审待过)。
 **web 图类疾病**(in-2004 6.84×/web-Google/路网):修法 = 扩 batched kernel est 上限
 (现 est≤64 ∧ kc≤32,恰好卡在此群行下方)→ warp-per-row 批处理消地板。
 相位参考:accumulate 14.7 / compact 14.6-22.7(波动)/ retry 7.7 / dd 28.9 / dc 22.6。
+
+## 9. BATCH2 v1 首测否决(09-01,任务 #13)
+
+`<512,4>` warp-per-row(est 65-256 ∧ kc≤32 → BIN_BATCH2):nnz ✓ 但 in-2004 **+13.8%**/
+web-Google +5.5%,留守 kc>32 行周期 24k→32.8k。机理:建表/extract 清零 = 512×2 槽 ÷ 32 lane
+= 32 迭代/线程,是 per-row 64T 块(2-8 迭代)的 4-8× —— 原 batched 赢在表小,HT=512 后
+init 主导,地板税换形未消。env BATCH2 默认关留档。
+**修正方向(若再攻)**:per-row 块内多行子分块(hash_spa 的 G 组按行分配,4 行/256T 块,
+每行 64T 组 = init 量不变 + 块启动 4 行摊),或 int4 向量化 init(仅治标)。
+in-2004 类的真解未变:小行处理的地板税,需要"多行共块"而非"大表 warp 行"。
