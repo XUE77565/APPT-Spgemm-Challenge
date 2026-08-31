@@ -1995,7 +1995,8 @@ __global__ void compute_bucket_kernel(
     int *bucket_id, int *counts,
     int n_cols = 0,        // DIM2:span 护栏(DIM2=0 时传 0 关闭)
     int span_factor = 16,  // SPANF:重行 span 门系数(默认 16 = v4)
-    int occgate = 0)       // docs/67 占用轴(est≥span/16):Ga 族 3.6% 占用行的 O(span) 窗税实锤
+    int occgate = 0,      // docs/67 占用轴(est≥span/16):Ga 族 3.6% 占用行的 O(span) 窗税实锤
+    int ladder = 0)       // docs/67 §6 自制双梯:两侧实测成本律逐行比较(取代手调门的方向)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
@@ -2034,6 +2035,20 @@ __global__ void compute_bucket_kernel(
     // = "hash 伺候不了的大表行"(docs/24 §门控三版)
     const long long fl64 = (long long)flop[i];
     const bool dup_ok = (fl64 < 8LL * e) || (fl64 >= 16384 && fl64 < 64LL * e);   // DIM2-s:超重行 dup<64
+    // docs/67 §6 自制双梯(LADDER=1):diter 候选行按两侧【实测成本律】裁决,取代手调门的方向。
+    //   t_dense ≈ 30109·⌈span/5400⌉ + 2.55·flop       (120k 行 × 7 阵,R²=0.896)
+    //   t_hash  ≈ 8.1·ht + 1.89·flop + 1038·kc − 50225 (大表行 R²=0.926;kc=输入链数,每链 1038 周期)
+    // oracle(69k 配对行):86% diter 行 hash 更快;OCCGATE 一致率 69%,残留 1.94e9 周期(est 8k/占用 16% 类)。
+    bool ladder_dense_ok = true;
+    if (ladder) {
+        int W = (int)(((long long)sl0 + 5399) / 5400);
+        long long td = 30109LL * W + 255LL * fl64 / 100;
+        int tgt = (e <= 4096) ? 2 * e : e;
+        int ht_l = 32; while (ht_l < tgt && ht_l < HASH_CAP) ht_l <<= 1;
+        long long kc_n = (long long)(A_row_ptr[i + 1] - A_row_ptr[i]);
+        long long th = 811LL * ht_l / 100 + 1038LL * kc_n + 189LL * fl64 / 100 - 50225LL;
+        ladder_dense_ok = (td <= th);   // dense 便宜才进窗;否则留 hash 梯
+    }
     if (false) {}
     // SPANF(docs/62 实验):重行 span 门系数 env 化(默认 16 = v4 原值)。
     // Ocean-A(docs/64 机制 A,OR-退化):v4 全门命中 ∨ 双梯分支(dim2=dense_bin≤hash_bin ∧
@@ -2045,7 +2060,8 @@ __global__ void compute_bucket_kernel(
              ((flop[i] >= diter_thr && e >= 2048 &&
                (long long)span_factor * flop[i] >= (long long)span_len[i])
               || (dim2 && flop[i] >= 4096 && e <= HASH_CAP))
-             && (!occgate || 16LL * e >= (long long)sl0)) bid = BIN_DITER;   // docs/67 占用轴:est≥span/16
+             && (!occgate || 16LL * e >= (long long)sl0)      // docs/67 占用轴:est≥span/16
+             && ladder_dense_ok) bid = BIN_DITER;
     else if (e > HASH_CAP) bid = BIN_HEAVY;          // heavy:全局表(2026-08-25,不再回退 merge)
     else {
         int bi = 0, ht = 32;
@@ -2583,7 +2599,9 @@ static void hash_product(
         if (g_spanf < 0) { const char *e = getenv("SPANF"); g_spanf = (e && *e) ? atoi(e) : 16; }   // docs/62:重行 span 门系数(默认 16 = v4;净窗实验 4)
         static int g_occgate = -1;   // docs/67 占用轴:est≥span/16(Ga 族 3.6% 占用 O(span) 窗税实锤,
         if (g_occgate < 0) { const char *e = getenv("OCCGATE"); g_occgate = (e && *e) ? atoi(e) : 0; }   // 强制 hash 双簇 −8~17%);默认关待电池
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf, g_occgate);
+        static int g_ladder = -1;    // docs/67 §6 自制双梯:两侧成本律逐行比较(86% oracle 一致方向)
+        if (g_ladder < 0) { const char *e = getenv("LADDER"); g_ladder = (e && *e) ? atoi(e) : 0; }      // 默认关
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf, g_occgate, g_ladder);
         if (d_rt) CHECK_CUDA(cudaMemcpy(d_est_save, d_est, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToDevice));   // est 快照:dense 路径后续会置零
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
