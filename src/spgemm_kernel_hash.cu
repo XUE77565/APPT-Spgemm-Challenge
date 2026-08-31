@@ -1994,7 +1994,8 @@ __global__ void compute_bucket_kernel(
     const int *span_len,   // 每行真实列跨度(docs/24:替代 n 近似)
     int *bucket_id, int *counts,
     int n_cols = 0,        // DIM2:span 护栏(DIM2=0 时传 0 关闭)
-    int span_factor = 16)  // SPANF:重行 span 门系数(默认 16 = v4)
+    int span_factor = 16,  // SPANF:重行 span 门系数(默认 16 = v4)
+    int occgate = 0)       // docs/67 占用轴(est≥span/16):Ga 族 3.6% 占用行的 O(span) 窗税实锤
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= A_rows) return;
@@ -2043,7 +2044,8 @@ __global__ void compute_bucket_kernel(
     else if (diter_thr > 0 && dup_ok &&
              ((flop[i] >= diter_thr && e >= 2048 &&
                (long long)span_factor * flop[i] >= (long long)span_len[i])
-              || (dim2 && flop[i] >= 4096 && e <= HASH_CAP))) bid = BIN_DITER;
+              || (dim2 && flop[i] >= 4096 && e <= HASH_CAP))
+             && (!occgate || 16LL * e >= (long long)sl0)) bid = BIN_DITER;   // docs/67 占用轴:est≥span/16
     else if (e > HASH_CAP) bid = BIN_HEAVY;          // heavy:全局表(2026-08-25,不再回退 merge)
     else {
         int bi = 0, ht = 32;
@@ -2579,7 +2581,9 @@ static void hash_product(
         if (g_dim2 < 0) { const char *e = getenv("DIM2"); g_dim2 = (e && *e) ? atoi(e) : 0; }   // docs/61:双维路由基建(默认关 —— c-big straggler 实测挂 v4 span 门 19491/19578,路由无解需窗口内核经济学升级)
         static int g_spanf = -1;
         if (g_spanf < 0) { const char *e = getenv("SPANF"); g_spanf = (e && *e) ? atoi(e) : 16; }   // docs/62:重行 span 门系数(默认 16 = v4;净窗实验 4)
-        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf);
+        static int g_occgate = -1;   // docs/67 占用轴:est≥span/16(Ga 族 3.6% 占用 O(span) 窗税实锤,
+        if (g_occgate < 0) { const char *e = getenv("OCCGATE"); g_occgate = (e && *e) ? atoi(e) : 0; }   // 强制 hash 双簇 −8~17%);默认关待电池
+        compute_bucket_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, dA_rp, A_rows, EST_ULTRA_THR, d_flop, g_diter, d_span_len, d_bkid, d_cnt, g_dim2 ? A_cols : 0, g_spanf, g_occgate);
         if (d_rt) CHECK_CUDA(cudaMemcpy(d_est_save, d_est, (size_t)A_rows * sizeof(int), cudaMemcpyDeviceToDevice));   // est 快照:dense 路径后续会置零
         thrust::exclusive_scan(thrust::device_ptr<int>(d_cnt),
                                thrust::device_ptr<int>(d_cnt + N_BINS),
