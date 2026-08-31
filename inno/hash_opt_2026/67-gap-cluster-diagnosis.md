@@ -51,9 +51,20 @@ in-2004(6.84× 最大单点)
    每乘积 2.55。F2 +85% 复算闭合(span<窗宽地板 → 30k 税 vs 小表 hash);Ga 病 = 21 窗
    ×30k=63 万税 > 40 万有用工作。OCCGATE 即此律的零阶判据(span≤16·est ⟺ 30k·span/5400
    ≲ ~100·est)。
-3. **hash 侧无线性律(R²≤0.17,ht 段非单调)**:成本分 bin 分段(块宽梯 64/256/512T、
-   count-sort O(d²/W)、负载因子、kc 长链)→ 下一步分 bin 段拟 `t_hash(bin, ht, flop, kc)`;
-   配对采数 = DITER_MIN_FLOP=∞ + HASH_ROWTIME(同批行两侧成本)。
+3. **hash 侧分段律 + 自制双梯 v0(dac89e7,LADDER env 默认关)**:
+   配对采数(9 阵 hashside + dense 侧,69,213 对行):
+   - oracle:86% diter 候选行 hash 更快;OCCGATE 一致率 69%(残留 1.94e9 周期)
+   - t_hash ≈ 8.1·ht + 1.89·flop + 1038·kc − 50225(大表均匀总体 R²=0.926)
+     —— **kc 第三轴实锤**(每输入链 1038 周期;3Dspec2 kc=117 → 12 万/行)
+   - **LADDER v0 电池(交替 ×2)**:Ga41 −6.2/Si41 −4.9/crankseg_2 −8.9/**Ge99 −6.4/
+     crankseg_1 −6.8(OCCGATE 漏抓的双复现赢)**/3Dspec2 −29.4/mult_dcop wash;
+     **但 c-64 +23% / c-58 +7% / brainpc2 +4~9% 回归**
+   - **⚠ 周期和 oracle ≠ 墙钟(并发干扰盲区)**:c-64 est-8k/占用 16% 行周期和说 hash 快
+     3.44×,搬过去墙钟 +23% —— dense_direct(1024T 大块)与 hash bin(64-512T)的 SM 重叠
+     结构随行群迁移而变,逐行周期和不捕捉。**入血泪纪律第八条候选:成本律 oracle 须墙钟电池
+     终审;判据修法 = 边距(th<0.8·td 才搬)或 10 阵墙钟结局重标定,均待净窗。**
+   - 现状:**OCCGATE 保持 v28 首选**(电池全绿无回归);LADDER 是方向验证(Ge99/crankseg_1
+     证明成本律能抓 OCCGATE 漏的),修好盲区后接管。
 4. touched-reset(docs/63 §2)= 梯子之后的内核工程选项(税消而非避让)。
 5. Ocean 对照:同结构行 Ocean 全家 52ms(我们 compute 112)。
 
