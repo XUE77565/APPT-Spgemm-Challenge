@@ -117,3 +117,14 @@ init 主导,地板税换形未消。env BATCH2 默认关留档。
 **修正方向(若再攻)**:per-row 块内多行子分块(hash_spa 的 G 组按行分配,4 行/256T 块,
 每行 64T 组 = init 量不变 + 块启动 4 行摊),或 int4 向量化 init(仅治标)。
 in-2004 类的真解未变:小行处理的地板税,需要"多行共块"而非"大表 warp 行"。
+
+## 10. in-2004 补测 + framing 更正(09-01)
+
+- **相位重对账**:in-2004 的 dense_count 22.6 + dense_direct 28.9 = 51ms(56%)属 1.1 万
+  diter 行;55 万小行仅 accumulate 14.7 + compact 14.6-22.7。此前 framing 高估了小行地板税占比。
+- **OCCGATE on in-2004**:搬走 1794/11389(15.7%),留守行占用 p50=1.4(71% = dense 正当域);
+  墙钟 **−3.5% 双复现**(192.9/193.0 vs 199.9/199.6)。OCCGATE 战绩更新:**13 阵 0 反例**。
+- Ocean 小行源码精读(AccumulatorHash.cuh):warp=行=块、32T 无 barrier、init 亦全清
+  (无惰性魔法)——我们的差距不在单个 kernel 形状,分布式于 est 工作流/binning/ESC 全链。
+- BATCH2 v1 否决教训不变:大表 warp 行 init 反主导;in-2004 真解 = 小行 accumulate+compact
+  (29ms)+dense 相位经济学的长期工作。
