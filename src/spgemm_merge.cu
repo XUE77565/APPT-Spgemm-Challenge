@@ -507,7 +507,8 @@ __global__ void bucket_bnd_kernel(
     const int *A_row_ptr, const int *A_col_idx,
     const int *B_row_ptr, const int *B_col_idx,
     int A_rows, int A_cols, int K, long long dyn_min,
-    int *bnd)   // [A_rows * (K+1)]
+    int *bnd,                      // [A_rows * (K+1)]
+    int *d_max_span = nullptr)     // docs/66 §7:host D2H 一个 int → dense 桶宽上限精确已知
 {
     int i = blockIdx.x;
     if (i >= A_rows) return;
@@ -545,13 +546,16 @@ __global__ void bucket_bnd_kernel(
         rb[0] = mn;        // 桶 0 左端收紧到 min(乘积不可能 < mn)
         rb[K] = mx + 1;    // 末桶右端 = max+1(覆盖 max;乘积不可能 > max)
         for (int j = 1; j < K; j++) rb[j] = mn + (int)(j * span / K);
+        if (d_max_span) atomicMax(d_max_span, (int)span);
     }
 }
 
-// (row,bucket) 一块:count 该桶内 distinct 列数(merge-count,不写值)
+// (row,bucket) 一块:count 该桶内 distinct 列数。小跨度桶走 flags 直计(docs/66 §7:
+// O(flop) 幂等置位 + O(span) popcount,替代 O(distinct×num_k) 的 k 段扫描 merge 迭代),
+// 跨度放不下回退 merge-count。smem_bytes = 实际 launch 的动态 SMEM(运行时定 flags 上限)。
 __global__ void bucket_count_kernel(
     const int *A_row_ptr, const int *A_col_idx, int A_rows, int A_cols,
-    int K, const int *bnd, int *bucket_nnz)   // [A_rows * K],行主序 [i*K + b]
+    int K, const int *bnd, int smem_bytes, int *bucket_nnz)   // [A_rows * K],行主序 [i*K + b]
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
@@ -572,6 +576,23 @@ __global__ void bucket_count_kernel(
         seg_end[p] = dev_lower_bound(A_col_idx, ks, ke, bhi);
     }
     __syncwarp();
+    {   // flags 直计分支:seg 区后剩余 SMEM 全给 flags(1B/列)
+        unsigned char *flags = (unsigned char*)(smem + 2 * num_k);
+        long usable = (long)smem_bytes - 8L * num_k;
+        if (usable > 0 && bhi - blo <= usable) {
+            for (int c = lane; c < bhi - blo; c += 32) flags[c] = 0;
+            __syncwarp();
+            for (int p = lane; p < num_k; p += 32)
+                for (int pos = seg_ptr[p]; pos < seg_end[p]; pos++)
+                    flags[A_col_idx[pos] - blo] = 1;
+            __syncwarp();
+            int cnt = 0;
+            for (int c = lane; c < bhi - blo; c += 32) cnt += (flags[c] != 0);
+            for (int off = 16; off > 0; off >>= 1) cnt += __shfl_xor_sync(0xffffffff, cnt, off);
+            if (lane == 0) bucket_nnz[i * K + b] = cnt;
+            return;
+        }
+    }
     int cnt = 0;
     while (true) {
         int mymin = 0x7fffffff;
@@ -610,7 +631,9 @@ __global__ void bucket_scan_kernel(int A_rows, int K, const int *bucket_nnz,
 __global__ void bucket_merge_kernel(
     const int *A_row_ptr, const int *A_col_idx, const double *A_val,
     int A_rows, int A_cols, int K, const int *bnd, const int *C_row_ptr, const int *bucket_off,
-    int *out_col, double *out_val)
+    int *out_col, double *out_val,
+    int dmode = 0,        // 0=merge 模式(处理 L<128 或 L>dcap 的桶);1=dense 模式(128≤L≤dcap)
+    int dcap = 0)         // host 由 bnd 的 max_span 定的桶宽上限(docs/66 §7)
 {
     int i = blockIdx.x, b = blockIdx.y;
     if (i >= A_rows) return;
@@ -634,6 +657,36 @@ __global__ void bucket_merge_kernel(
     }
     __syncwarp();
     int base = C_row_ptr[i] + bucket_off[i * K + b];
+    {   // docs/66 §7 dense 直写(精确 CSR 版):小跨度桶免 k 段扫描,32 lane 连续段顺序发射
+        int L = bhi - blo;
+        bool eligible = (L >= 128 && L <= dcap);
+        if (eligible && dmode == 0) return;   // 归 dense launch(双 launch 各司其职,防双跑)
+        if (eligible) {
+            unsigned char *dfl = (unsigned char*)(smem + 2 * num_k);
+            double *dval = (double*)(((uintptr_t)(smem + 2 * num_k) + L + 7) & ~(uintptr_t)7);
+            for (int c = lane; c < L; c += 32) { dfl[c] = 0; dval[c] = 0.0; }
+            __syncwarp();
+            for (int p = lane; p < num_k; p += 32) {
+                double w = weight[p];
+                for (int pos = seg_ptr[p]; pos < seg_end[p]; pos++) {
+                    int c = A_col_idx[pos] - blo;
+                    atomicAdd(&dval[c], w * A_val[pos]);
+                    dfl[c] = 1;
+                }
+            }
+            __syncwarp();
+            int lo_c = (int)((long long)lane * L / 32), hi_c = (int)((long long)(lane + 1) * L / 32);
+            int c0 = 0;
+            for (int c = lo_c; c < hi_c; c++) c0 += (dfl[c] != 0);
+            int inc = c0;
+            for (int d = 1; d < 32; d <<= 1) { int v = __shfl_up_sync(0xffffffff, inc, d); if (lane >= d) inc += v; }
+            int t = inc - c0;
+            for (int c = lo_c; c < hi_c; c++)
+                if (dfl[c]) { out_col[base + t] = blo + c; out_val[base + t] = dval[c]; t++; }
+            return;
+        }
+        if (dmode == 1) return;   // 非合格桶(L<128 争用地板 / L>dcap 放不下)归 merge 模式 launch
+    }
     int out_idx = 0;
     for (int __guard = 0; __guard < MRG3_LOOP_CAP; ++__guard) {   // 硬上界:必终止
         int mymin = 0x7fffffff;
@@ -700,6 +753,8 @@ __global__ void bucket_merge_flop_kernel(
     int upper_tri,
     int A_rows, int A_cols, int K, const int *bnd, const long long *row_off, const int *bucket_flop_off,
     int *out_col, double *out_val, int *bucket_real_nnz,   // [A_rows*K]
+    int dmode = 0,                     // 0=merge 模式(处理 L<128 或 L>dcap 的桶);1=dense 模式(128≤L≤dcap)
+    int dcap = 0,                      // host 由 bnd 的 max_span 定的桶宽上限(docs/66 §7)
     unsigned long long *rowtime = nullptr)   // MRG3_ROWTIME:每 (row,bucket) 执行周期(docs/66)
 {
     int i = blockIdx.x, b = blockIdx.y;
@@ -725,6 +780,51 @@ __global__ void bucket_merge_flop_kernel(
     }
     __syncwarp();
     long long base = (long long)row_off[i] + bucket_flop_off[i * K + b];   // 64位:Σflop 可超 int
+    {   // docs/66 §7 dense 直写分支:小跨度桶免 k 段扫描 —— SMEM flags+val 累加 O(flop),
+        // 32 lane 连续列区间顺序发射(桶内天然有序,compact 机器零改动),real_nnz 副产物。
+        // 布局:[seg|seg_end|weight] 后 flags[L] pad8 [dval[L]]。dmode=1 只处理 128≤L≤cap 的桶
+        // (L≥128 = 原子地址地板,band128 L=51 争用集中实测 2× 劣);dmode=0 处理其余(merge)。
+        int L = bhi - blo;
+        bool eligible = (L >= 128 && L <= dcap);
+        if (eligible && dmode == 0) return;   // 归 dense launch(双 launch 各司其职,防双跑)
+        if (eligible) {
+            unsigned char *dfl = (unsigned char*)(smem + 2 * num_k);
+            double *dval = (double*)(((uintptr_t)(smem + 2 * num_k) + L + 7) & ~(uintptr_t)7);
+            for (int c = lane; c < L; c += 32) { dfl[c] = 0; dval[c] = 0.0; }
+            __syncwarp();
+            for (int p = lane; p < num_k; p += 32) {
+                double w = weight[p];
+                for (int pos = seg_ptr[p]; pos < seg_end[p]; pos++) {
+                    int c = B_col_idx[pos] - blo;
+                    atomicAdd(&dval[c], w * B_val[pos]);
+                    dfl[c] = 1;
+                }
+            }
+            __syncwarp();
+            // 32 lane 各认连续列段:先数(含 upper_tri 过滤)→ warp 前缀 → 段内顺序发射
+            int lo_c = (int)((long long)lane * L / 32), hi_c = (int)((long long)(lane + 1) * L / 32);
+            int c0 = 0;
+            for (int c = lo_c; c < hi_c; c++)
+                c0 += (dfl[c] && !(upper_tri && (blo + c) < i));
+            int inc = c0;
+            for (int d = 1; d < 32; d <<= 1) { int v = __shfl_up_sync(0xffffffff, inc, d); if (lane >= d) inc += v; }
+            int ex = inc - c0;                       // 段起点的桶内偏移
+            int t = ex;
+            for (int c = lo_c; c < hi_c; c++)
+                if (dfl[c] && !(upper_tri && (blo + c) < i)) {
+                    out_col[base + t] = blo + c;
+                    out_val[base + t] = dval[c];
+                    t++;
+                }
+            int tot = __shfl_sync(0xffffffff, inc, 31);
+            if (lane == 0) {
+                bucket_real_nnz[i * K + b] = tot;
+                if (rowtime) rowtime[i * K + b] = clock64() - rt0;
+            }
+            return;
+        }
+        if (dmode == 1) return;   // 非合格桶(L<128 争用地板 / L>dcap 放不下)归 merge 模式 launch
+    }
     int out_idx = 0;
     for (int __guard = 0; __guard < MRG3_LOOP_CAP; ++__guard) {   // 硬上界:必终止
         int mymin = 0x7fffffff;
@@ -807,12 +907,21 @@ static void merge3_product(
         if (nn > max_row_nnz) max_row_nnz = nn;
     }
     //根据最长的可能子链来分配空间
-    size_t smem_count = (size_t)max_row_nnz * 2 * sizeof(int);
-    size_t smem_merge = (size_t)max_row_nnz * (2 * sizeof(int) + sizeof(double));   // seg_ptr+seg_end[int]+weight[double]
-    if (smem_merge > 48 * 1024) {
+    size_t smem_count = (size_t)max_row_nnz * 2 * sizeof(int);                     // 基础:count/flop kernel
+    size_t smem_merge = (size_t)max_row_nnz * (2 * sizeof(int) + sizeof(double));  // 基础:numeric merge 模式(seg+weight)
+    // docs/66 §7 dense 分支:预算【不盲定】—— bnd kernel 顺带 atomicMax 行 span → D2H 一个 int
+    // → dcap(桶宽上界)精确已知。dense launch 只在 dcap≥128(有合格桶)且 SMEM 装得下(≤48KB,
+    // 免 SetAttribute)时发射;merge 模式恒保基础 SMEM(band128 教训:盲目扩容 → occupancy
+    // 14→3 blocks/SM,flop 相位 0.85→2.0ms;空 dense launch 也有 ~5ms 块调度税)。
+    // L≥128 = 原子地址地板(band128 L=51 争用集中实测 2× 劣)。MRG3_DENSE_SPAN=0 全关。
+    static int g_dspan = -1;
+    if (g_dspan < 0) { const char *e = getenv("MRG3_DENSE_SPAN"); g_dspan = (e && *e) ? (atoi(e) > 0 ? 1 : 0) : 1; }
+    int dense_dcap = 0;            // ≥128 才有 dense launch;0 = 全 merge(旧行为)
+    size_t smem_count_d = 0, smem_merge_d = 0;
+    if (smem_merge > 48 * 1024)
         CHECK_CUDA(cudaFuncSetAttribute(bucket_merge_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_merge));
+    if (smem_count > 48 * 1024)
         CHECK_CUDA(cudaFuncSetAttribute(bucket_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem_count));
-    }
 
     dim3 grid(A_rows, K), block32(32);
 
@@ -835,13 +944,34 @@ static void merge3_product(
     long long dyn_min = 8192;
     if (const char *e = getenv("MRG3_DYN_MIN")) dyn_min = atoll(e);
     int *d_bnd = nullptr;
+    int *d_max_span = nullptr;   // docs/66 §7:bnd 顺带 atomicMax 行 span → host 精确 dense 桶宽
+    if (g_dyn && g_dspan) {
+        CHECK_CUDA(cudaMalloc(&d_max_span, sizeof(int)));
+        CHECK_CUDA(cudaMemset(d_max_span, 0, sizeof(int)));
+    }
     if (g_dyn) {
         CHECK_CUDA(cudaMalloc(&d_bnd, (size_t)A_rows * (K + 1) * sizeof(int)));
         prof("bnd", [&]{
             bucket_bnd_kernel<<<A_rows, block32>>>(
-                dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, dyn_min, d_bnd);
+                dA_row_ptr, dA_col_idx, dB_row_ptr, dB_col_idx, A_rows, A_cols, K, dyn_min, d_bnd, d_max_span);
             CHECK_CUDA(cudaGetLastError());
         });
+        // docs/66 §7:D2H 一个 int(~10μs)→ dcap 精确;只在可能 dense 时付这笔同步
+        if (d_max_span) {
+            int hmaxs = 0;
+            CHECK_CUDA(cudaMemcpy(&hmaxs, d_max_span, sizeof(int), cudaMemcpyDeviceToHost));
+            long long L1 = ((long long)hmaxs + K - 1) / K;            // 动态行桶宽上界
+            long long L2 = ((long long)A_cols + K - 1) / K;            // 等宽回退行桶宽
+            long long L = L1 > L2 ? L1 : L2;
+            if (L >= 128 && smem_merge + 9 * L + 16 <= 48 * 1024) {
+                dense_dcap = (int)L;
+                smem_merge_d = smem_merge + 9 * L + 16;                // numeric dense launch
+                smem_count_d = smem_count + L;                         // count flags(1B/col)
+                if (smem_count_d > 48 * 1024) smem_count_d = 48 * 1024;
+                dbg("[mrg3] dense dcap=%d(Σspan_max=%d)merge_d=%zuKB\n", dense_dcap, hmaxs, smem_merge_d / 1024);
+            }
+            cudaFree(d_max_span);
+        }
     }
 
     // 门控:flop_ub sizing(省 count pass ~37%)vs 精确 count(原版)。默认 flop_ub(净赢 24-32%、无回归);MRG3_FLOP_UB=0 关回精确 count。
@@ -900,9 +1030,17 @@ static void merge3_product(
         CHECK_CUDA(cudaMalloc(&d_gval, (size_t)total_flop * sizeof(double)));
         CHECK_CUDA(cudaMalloc(&d_breal, (size_t)A_rows * K * sizeof(int)));
         prof("merge", [&]{   // (C-2) warp-merge 写 gapped 区 + 记真实数 bucket_real_nnz
+            // numeric:双 launch(count 路径同构;dmode/dcap 详见 kernel 注释)
             bucket_merge_flop_kernel<<<grid, block32, smem_merge>>>(
                 dA_row_ptr, dA_col_idx, dA_val, dB_row_ptr, dB_col_idx, dB_val, upper_tri,
-                A_rows, A_cols, K, d_bnd, d_row_off, d_bflop_off, d_gcol, d_gval, d_breal, d_rtime);
+                A_rows, A_cols, K, d_bnd, d_row_off, d_bflop_off, d_gcol, d_gval, d_breal, 0, dense_dcap, d_rtime);
+            CHECK_CUDA(cudaGetLastError());
+            if (dense_dcap) {
+                bucket_merge_flop_kernel<<<grid, block32, smem_merge_d>>>(
+                    dA_row_ptr, dA_col_idx, dA_val, dB_row_ptr, dB_col_idx, dB_val, upper_tri,
+                    A_rows, A_cols, K, d_bnd, d_row_off, d_bflop_off, d_gcol, d_gval, d_breal, 1, dense_dcap, d_rtime);
+                CHECK_CUDA(cudaGetLastError());
+            }
             CHECK_CUDA(cudaGetLastError());
         });
         if (d_rtime) {   // 逐桶周期 → 文本 "row bucket cycles";python 侧 join 特征做判据
@@ -948,8 +1086,12 @@ static void merge3_product(
         int *d_bucket_nnz;
         CHECK_CUDA(cudaMalloc(&d_bucket_nnz, (size_t)A_rows * K * sizeof(int)));
         prof("count", [&]{
-            bucket_count_kernel<<<grid, block32, smem_count>>>(
-                dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bnd, d_bucket_nnz);
+            {   // count:单 launch,SMEM 带 flags 余量(纯置位 dense,无原子争用地板问题)
+                size_t scnt = dense_dcap ? smem_count_d : smem_count;
+                bucket_count_kernel<<<grid, block32, scnt>>>(
+                    dA_row_ptr, dA_col_idx, A_rows, A_cols, K, d_bnd, dense_dcap ? (int)scnt : 0, d_bucket_nnz);
+                CHECK_CUDA(cudaGetLastError());
+            }
             CHECK_CUDA(cudaGetLastError());
         });
         // Stage 2: 行内桶偏移 + row_nnz + C_row_ptr(D2H 纳入 scan 块)
@@ -976,9 +1118,18 @@ static void merge3_product(
         double *dC_val     = (double*)(dC_base + C_rp_al + C_col_idx_aligned);
         prof("merge", [&]{
             CHECK_CUDA(cudaMemcpy(dC_base, dC_row_ptr, C_row_ptr_size, cudaMemcpyDeviceToDevice));
+            // numeric:双 launch —— merge 模式(基础 SMEM)处理 L<128/L>dcap 的桶;
+            // dense 模式(扩容 SMEM)处理 128≤L≤dcap 的桶。各桶恰被一个 launch 处理。
             bucket_merge_kernel<<<grid, block32, smem_merge>>>(
                 dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, d_bnd, dC_row_ptr, d_bucket_off,
-                dC_col_idx, dC_val);
+                dC_col_idx, dC_val, 0, dense_dcap);
+            CHECK_CUDA(cudaGetLastError());
+            if (dense_dcap) {
+                bucket_merge_kernel<<<grid, block32, smem_merge_d>>>(
+                    dA_row_ptr, dA_col_idx, dA_val, A_rows, A_cols, K, d_bnd, dC_row_ptr, d_bucket_off,
+                    dC_col_idx, dC_val, 1, dense_dcap);
+                CHECK_CUDA(cudaGetLastError());
+            }
             CHECK_CUDA(cudaGetLastError());
         });
         cudaFree(d_bucket_nnz); cudaFree(d_bucket_off); cudaFree(d_row_nnz);
