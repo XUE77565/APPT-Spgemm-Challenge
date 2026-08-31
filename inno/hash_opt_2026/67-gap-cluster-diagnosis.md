@@ -98,3 +98,12 @@ Ge99 p10=12.1/p50=15.3/p90=30;crankseg_1 p50=23/p90=24.7 —— 与 c-64 留 den
 
 OCCGATE 逐行决策累计 **11 阵无反例**(4 周期 + 4 墙钟 + c-64 周期终审 + Ge99/crankseg_1
 wash 不受伤)。v28 候选就绪度:高(净窗 refresh 终审待过)。
+
+## 8. in-2004 真病定标(09-01 凌晨,周期法)
+
+55.2 万 hash 计时行(9668 ovf)特征中位:kc=14 / flop=384 / **est=256** / span=306,762 /
+**cyc=26,310** —— est 66-103 的小行全部付 ~22k 周期/行【地板税】(块启动+建表+extract
+固定成本;384 乘积 = 57 cyc/乘积)。compact 15-23ms 为次生(55 万段分段排序)。
+**web 图类疾病**(in-2004 6.84×/web-Google/路网):修法 = 扩 batched kernel est 上限
+(现 est≤64 ∧ kc≤32,恰好卡在此群行下方)→ warp-per-row 批处理消地板。
+相位参考:accumulate 14.7 / compact 14.6-22.7(波动)/ retry 7.7 / dd 28.9 / dc 22.6。
