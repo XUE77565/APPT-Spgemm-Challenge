@@ -52,3 +52,12 @@ sync 比闲置贵**。已回滚(工作树 = c680fe9 状态)。
 **对 §2 主设计的修正**:prefix 非 3Dspec2 主税(替换它无感)→ 68.9ms 的主税在别处
 (clear?accumulate 的 lower_bound?待 nsys 分解),touched-reset 的预期收益需重新评估后
 再实施。低密度行 profile 应先用 nsys/相位内分解定位真税源,勿再凭模型动手。
+
+## 6. 路由规则实验(08-31):dup≥4→search 一刀切两头不讨好,回滚
+
+废除全局规则(让行自选 avgB 路由)的 A/B:**Cube_Coup_dt0 +262.6%**(110.8→401.8 灾难,
+dup 规则的存在理由实证)/ **TSOPF_FS_b39_c7 −27.1%**(25.3→18.4,现代 cursor 比 docs/39
+时代的更适合它)/ 3Dspec2 −14%(同日交替强制对照:search 121.2 vs cursor 103.8)。
+判据困境:Cube_Coup 与 TSOPF 同为 dup≥4 且行 avgB≥64,一个要 search 一个要 cursor,
+无手头特征可分。**已回滚**(工作树 = 裸 dup 规则);留档:per-row 判据需采集
+(avgB 分布 × 两路径逐行计时)后重设计,dup 全局门是 Cube_Coup 的保护门勿再裸删。
