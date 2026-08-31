@@ -27,3 +27,4 @@ compare/_last_run.log
 compare/methods_cmp_run.log
 compare/hash_vs_merge_run.log
 compare/dense_baseline_run.log
+compare/hashside/
