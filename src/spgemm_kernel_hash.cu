@@ -686,7 +686,8 @@ __global__ void hash_dense_direct_kernel(
     int *smap_base = nullptr, const int *smap_off = nullptr, int smir_bias = 0,
     int use_cursor = 1,
     unsigned long long *rowtime = nullptr,   // DD_ROWTIME:逐行执行周期(docs/66 采数)
-    int *rowmode = nullptr)                  // 0=search 路径 / 1=cursor 路径(同数组落盘)
+    int *rowmode = nullptr,                  // 0=search 路径 / 1=cursor 路径(同数组落盘)
+    int avgB_thr_param = 0)                  // PB2_AVGB 复审门(docs/66 §8;0 = 默认 64)
 {
     int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
     if (i >= A_rows) return;
@@ -726,7 +727,11 @@ __global__ void hash_dense_direct_kernel(
 
     int avgB = (row_flop && a_len > 0) ? row_flop[i] / a_len : 0;
     if (rowmode && tid == 0) rowmode[i] = (avgB >= 64 && use_cursor == 1) ? 1 : 0;   // DD_ROWTIME 采数
-    if (avgB < 64 || use_cursor != 1) {   // docs/39 路由 v3 判据收回 avgB(host 级 dup 门见下)
+    // docs/39 路由 v3 判据收回 avgB(host 级 dup 门见下);PB2_AVGB 复审门(docs/66 §8:
+    // docs/39 时代判据未经逐行验证,0 = 全 cursor)。默认 64 = 原行为。
+    int avgB_thr = 64;
+    if (avgB_thr_param > 0) avgB_thr = avgB_thr_param;
+    if (avgB < avgB_thr || use_cursor != 1) {
         // 混合路由(docs/30):avgB(=flop/a_len,平均 B 行长)< 64 的行走旧固定窗搜索路径 ——
         // 游标镜像/复位是每窗 O(a_len) 全局往返,开销/工作量 ∝ a_len×窗数/flop = 1/avgB;
         // TSOPF(avgB≈16)游标版 +22% 实锤,mult_dcop(avgB≈4000)游标 -42%。旧路径 = 52b89da 行为。
@@ -3177,22 +3182,19 @@ static void hash_product(
             CHECK_CUDA(cudaFuncSetAttribute(hash_dense_direct_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)wsm));
             static int g_pb2cur = -1;
             if (g_pb2cur < 0) { const char *e = getenv("PB2_CURSOR"); g_pb2cur = (e && *e) ? atoi(e) : 1; }
-            // docs/39 路由 v4:dup≥4 → search(全局,含 bin 行)。Cube_Coup dup=7.24/TSOPF_FS dup≥4;
-            // 全部 cursor 赢家 dup≤2.1(rajat 1.00/c-73 1.48/vsp 1.12/mult_dcop 1.0/brainpc2 2.1)。
+            // docs/66 §8 终审:dup≥4→search 门删除。三代证据:①逐行周期 cursor 六阵全胜 1.24-6.3×
+            // (mult_dcop/3Dspec2/brainpc2/TSOPF/c-58/c-64),无特征门可让 search 赢;②交替矩阵级
+            // cursor 5/6 不劣;③"Cube_Coup +263% 灾难"为幻影 —— 其 DD_ROWTIME 0 行,hash_dense_direct
+            // 对它零调用,uc 惰性(强制 cursor/search 两版 675-831ms 打平 = 同执行纯噪声)。
+            // docs/39 v4 与 docs/63 §6 的门均测于污染窗(web-Google 路由不变 ±70% 铁证)。
+            // PB2_CURSOR=0 仍可强制 search(实验用);2 = 兼容别名(恒 cursor)。
             int uc = (g_pb2cur == 0) ? 0 : 1;
-            // docs/63 §6(08-31 终版):dup≥4→search 门【窄化到 n>1M】—— 全裸删实测 Cube_Coup_dt0
-            // +263%(dup 门是它的保护门);但 c-64 -11%/TSOPF_FS_b39 -27%/3Dspec2 -14% 想要行自选
-            // (现代 cursor 优于 docs/39 时代)。经验判据:唯一输家 n=2.16M,全部赢家 n<700k。
-            // ⚠ docs/66 §8 复核:上段"三赢"测于 load11-34 污染窗(该 session 路由不变的 web-Google
-            // 都 +69.6%);逐行周期(负载免疫)cursor 6 阵全胜 1.24-6.3×,交替矩阵级 cursor 5/6 不劣。
-            // PB2_CURSOR=2 = 强制 cursor 无视 dup 门(Cube_Coup 终审用)。
-            if (uc == 1 && g_pb2cur != 2 && A_rows > 1000000 && total_est > 0
-                && (double)total_flop / (double)total_est >= 4.0)
-                uc = 0;
+            static int g_pb2avgb = -1;   // docs/66 §8 复审:avgB<64→search 门(docs/39 v3 遗产)
+            if (g_pb2avgb < 0) { const char *e = getenv("PB2_AVGB"); g_pb2avgb = (e && *e) ? atoi(e) : 0; }
             hash_dense_direct_kernel<<<dense_nr, 1024, wsm>>>(
                 dA_rp, dA_ci, dA_val, dB_rp, dB_ci, dB_val, upper_tri, A_rows, A_cols,
                 dC_rp, dC_ci, d_val, d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr,
-                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, uc, d_ddrt, d_ddmode);
+                d_flop, d_maxbl, d_smap, d_smap_off, sm_tot, uc, d_ddrt, d_ddmode, g_pb2avgb);
             CHECK_CUDA(cudaGetLastError());
         });
         if (d_ddrt) {   // docs/66 §8:逐行周期 + 路径模式落盘(cursor/search 判据采数)
