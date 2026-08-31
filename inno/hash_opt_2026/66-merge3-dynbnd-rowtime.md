@@ -111,3 +111,12 @@ docs/63 §6 的"search 三赢"(c-64 −11%/TSOPF −27%/3Dspec2 −14%)是 load 
 的 A/B 结论一律未定论,逐行周期数据优先于墙钟。**
 生产含义:<1M 行阵生产态本已 cursor(无动作);唯一 >1M dup 阵 Cube_Coup(2.16M)被 dup 门
 强切 search —— PB2_CURSOR=2(强制 cursor)终审中,胜则删 dup 门(commit 已加 override)。
+
+### §8b 终审收官(08-31 晚)
+
+- **dup≥4→search 门已删**(c6ce195):Cube_Coup DD 文件 0 字节(feat 完整 2.16M 行 = 跑完)
+  → hash_dense_direct 对它**零调用**,uc 惰性;强制 cursor/search 终审 675-831ms 打平(同执行
+  纯噪声)="+263% 灾难"为幻影的直接实证。uc = 恒 cursor(PB2_CURSOR=0 留实验)。
+- **PB2_AVGB 复审:全中性**(3Dspec2/TSOPF/brainpc2/c-64 四阵 ±1%,交替×3)→
+  avgB<64→search 分支(docs/39 v3)无害保留,默认 64 不变。
+- **路由问题全部清零**:uc 恒 cursor + avgB 分支中性 = hash_dense_direct 路由定稿。

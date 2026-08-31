@@ -280,6 +280,69 @@ __global__ void est_fill_kernel(const int *row_flop, int n, int *est, int A_rows
     if (i < A_rows) { int f = row_flop[i]; est[i] = f < n ? f : n; }
 }
 
+// Ocean-C v1(docs/64 机制 C):采样行精确 distinct(SMEM 开放寻址计数)→ est/exact 定点比值。
+// 一行一块;行太轻(est<512)/太重(distinct 装不下 8192 表)→ 写 0 = 无效样本。
+// host 取 q05 → 数据驱动 expand 替换手调 1.15/1.4(Ana2 的 safe=avg−z·√var 同哲学)。
+#define OC_TAB 8192
+__global__ void oc_sample_kernel(
+    const int *A_row_ptr, const int *A_col_idx, const int *B_row_ptr, const int *B_col_idx,
+    const int *est, const int *row_flop, int A_rows, int stride,
+    int *ratio_fp)   // [S] = est_i * 4096 / exact_i(定点);0 = 无效
+{
+    int i = blockIdx.x * stride;
+    int tid = threadIdx.x;
+    if (i >= A_rows) { if (tid == 0) ratio_fp[blockIdx.x] = 0; return; }
+    int e = est[i];
+    if (tid == 0) ratio_fp[blockIdx.x] = 0;   // 默认无效,成功路径覆写
+    if (e < 512 || e > 4096) return;          // 重试易发中段;e≤4096 留 2× 欠估余量防样本自剔偏置
+    __shared__ int tab[OC_TAB];
+    for (int s = tid; s < OC_TAB; s += blockDim.x) tab[s] = -1;
+    __syncthreads();
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    int cnt = 0;
+    bool full = false;
+    for (int p = rs; p < re && !full; p++) {
+        int k = A_col_idx[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + tid; q < ke; q += blockDim.x) {
+            int col = B_col_idx[q];
+            unsigned slot = ((unsigned)col * 2654435761u) & (OC_TAB - 1);
+            int probes = 0;
+            while (true) {
+                int old = atomicCAS(&tab[slot], -1, col);
+                if (old == -1) { cnt++; break; }
+                if (old == col) break;
+                slot = (slot + 1) & (OC_TAB - 1);
+                if (++probes >= OC_TAB) { full = true; break; }
+            }
+            if (full) break;
+        }
+    }
+    for (int off = 16; off > 0; off >>= 1) cnt += __shfl_xor_sync(0xffffffff, cnt, off);
+    __syncthreads();
+    __shared__ int warp_tot[9];   // [8]=满表 OR 共识(任意线程满 → 整行无效)
+    if (tid == 0) warp_tot[8] = 0;
+    __syncthreads();
+    if ((tid & 31) == 0) warp_tot[tid >> 5] = cnt;
+    if ((tid & 31) == 0 && full) warp_tot[8] = 1;
+    __syncthreads();
+    if (tid == 0) {
+        int distinct = 0;
+        for (int w = 0; w < (blockDim.x >> 5); w++) distinct += warp_tot[w];
+        if (warp_tot[8] == 0 && distinct > 64 && row_flop[i] > 0)
+            ratio_fp[blockIdx.x] = (int)((long long)e * 4096 / distinct);
+    }
+}
+
+// Ocean-C est 统一缩放(en/ed 定点);flop 紧界仍成立(est ≤ flop 恒真)
+__global__ void oc_rescale_kernel(int *est, const int *row_flop, int A_rows, int en, int ed) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= A_rows) return;
+    long long e2 = (long long)est[i] * en / ed;
+    int f = row_flop[i];
+    est[i] = (int)(e2 > f ? f : e2);
+}
+
 // PIPEFUSE step-1(docs/58):count_flop 后不再回传 host —— device 侧规约 total_flop + avg_product
 // 门,construct/merge 无条件背靠背 launch(门命中时自退化),host 读数推迟到 binning 已有同步。
 // 动机:reduce 的 host 空档是 DVFS toll 源之一(345MHz 冷频率下小 kernel 全家变慢)。
@@ -2243,6 +2306,13 @@ static void hash_product(
     }
     const int upper_tri = att ? 1 : 0;
 
+    // Ocean-C v1(docs/64 机制 C):采样行精确计数 → est/exact q05 → 数据驱动 expand 替换
+    // 手调 1.15/1.4(Ana2 的 safe=avg−z·√var 同哲学)。默认关;开时 mh_merge 给 1.0 原始
+    // 估计,est_scan 前统一缩放。适用面:!att ∧ A_nnz≥10万(小阵本就 1.4)∧ 行数≥4096。
+    static int g_ocx = -1;
+    if (g_ocx < 0) { const char *e = getenv("OCEAN_C"); g_ocx = (e && *e) ? atoi(e) : 0; }
+    const bool oc_on = g_ocx && !att && A_nnz >= 100000 && A_rows >= 4096;
+
     // Stage 1: row_off 由 est 的 scan 给出(64 位:ocean337 上 Σest 可超 2^31,TSOPF 教训)
     long long *d_off; d_off = decltype(d_off)(dev_alloc((A_rows + 1) * sizeof(long long)));
 
@@ -2341,6 +2411,7 @@ static void hash_product(
         if (g_adapt_expand < 0) { const char *e = getenv("ADAPT_EXPAND"); g_adapt_expand = (e && *e) ? atoi(e) : 0; }   // 08-30 裁决:进程内比较天然有偏(v3 在 F2/Flan 上误判,惩罚落在比较点之后的相位)→ 自适应移 harness 层(compare_methods 双 expand 取优);binary 默认固定 1.15
         if (g_adapt_expand && (g_ovf_hint_expand == 1 || g_ovf_hint_expand == 4)) est_expand = 1.4;
         if (const char *e = getenv("HASH_EXPAND")) est_expand = atof(e);
+        if (oc_on && !getenv("HASH_EXPAND")) est_expand = 1.0;   // OCEAN_C:原始估计,采样后统一缩放
         dbg("[%s] est_expand=%.2f(total_flop=%lld)\n", tag, est_expand, total_flop);
         // MHSAMP(docs/57,Ocean Ana2 3% 采样同哲学):dense_win 候选先 stride 采样 merge → 投影
         // Σest 过 DENSE_MIN_FRAC 门 → 判定 dense-注定:全量 merge 免,d_est=min(flop,n)
@@ -2387,6 +2458,42 @@ static void hash_product(
             });
         }
         dev_free(d_mh);
+    }
+    // Ocean-C 采样块:est 就绪 → 精确计数 S 行 → q05 → 缩放(est_scan 前)。无效样本(行轻/
+    // 满表)过多则放弃(nv<16)。插入排序求分位(S≤64,免 <algorithm>)。
+    if (oc_on) {
+        int S = 64, stride = A_rows / S; if (stride < 1) stride = 1;
+        S = (A_rows + stride - 1) / stride;
+        if (S > 64) S = 64;
+        int *d_ratio = decltype(d_ratio)(dev_alloc((size_t)S * sizeof(int)));
+        prof("oc_samp", [&]{
+            oc_sample_kernel<<<S, 256>>>(dA_rp, dA_ci, dB_rp, dB_ci, d_est, d_flop, A_rows, stride, d_ratio);
+            CHECK_CUDA(cudaGetLastError());
+        });
+        std::vector<int> hr(S);
+        CHECK_CUDA(cudaMemcpy(hr.data(), d_ratio, (size_t)S * sizeof(int), cudaMemcpyDeviceToHost));
+        int v[64], nv = 0;
+        for (int x : hr) if (x > 0 && nv < 64) v[nv++] = x;
+        if (nv >= 16) {
+            for (int a = 1; a < nv; a++) { int x = v[a], b = a - 1; while (b >= 0 && v[b] > x) { v[b + 1] = v[b]; b--; } v[b + 1] = x; }
+            int q05 = v[nv / 20];                       // 小 n 时取最小比值 = 最保守方向
+            double ex = 4096.0 / q05 * 1.02;            // 覆盖 95% 样本行 + 2% 余量
+            if (ex < 1.02) ex = 1.02; if (ex > 1.5) ex = 1.5;
+            int en = (int)(ex * 4096);
+            prof("oc_rescale", [&]{
+                oc_rescale_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, d_flop, A_rows, en, 4096);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            dbg("[%s] OCEAN_C: n=%d/%d q05=%.3f → expand=%.3f\n", tag, nv, S, q05 / 4096.0, ex);
+        } else {   // 弃样(样本<16):回 1.15 当量缩放 —— est 停在 1.0 原始比生产 1.15 更紧,欠估
+                   // 风险全交 retry(首烟 c-62/pwtk 教训),保守回生产当量
+            prof("oc_rescale", [&]{
+                oc_rescale_kernel<<<(A_rows + 255) / 256, 256>>>(d_est, d_flop, A_rows, (int)(1.15 * 4096), 4096);
+                CHECK_CUDA(cudaGetLastError());
+            });
+            dbg("[%s] OCEAN_C: 有效样本 %d<16 → 回 1.15 当量\n", tag, nv);
+        }
+        dev_free(d_ratio);
     }
     long long total_est = 0;
     prof("est_scan", [&]{
