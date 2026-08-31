@@ -59,12 +59,18 @@ in-2004(6.84× 最大单点)
    - **LADDER v0 电池(交替 ×2)**:Ga41 −6.2/Si41 −4.9/crankseg_2 −8.9/**Ge99 −6.4/
      crankseg_1 −6.8(OCCGATE 漏抓的双复现赢)**/3Dspec2 −29.4/mult_dcop wash;
      **但 c-64 +23% / c-58 +7% / brainpc2 +4~9% 回归**
-   - **⚠ 周期和 oracle ≠ 墙钟(并发干扰盲区)**:c-64 est-8k/占用 16% 行周期和说 hash 快
-     3.44×,搬过去墙钟 +23% —— dense_direct(1024T 大块)与 hash bin(64-512T)的 SM 重叠
-     结构随行群迁移而变,逐行周期和不捕捉。**入血泪纪律第八条候选:成本律 oracle 须墙钟电池
-     终审;判据修法 = 边距(th<0.8·td 才搬)或 10 阵墙钟结局重标定,均待净窗。**
-   - 现状:**OCCGATE 保持 v28 首选**(电池全绿无回归);LADDER 是方向验证(Ge99/crankseg_1
-     证明成本律能抓 OCCGATE 漏的),修好盲区后接管。
+   - **⚠ 周期和 oracle ≠ 墙钟 —— 三处记账失真(2×2 补全后定位)**:
+     c-64 纯hash 107.1 vs 混跑 85.4(+21.6%):accumulate 0.5→23.9 / **compact+sort 0.9→10.8**
+     (dense 行直写终态 C 免 compact,t_hash 没记这笔账≈12 cyc/est 槽)/ retry +1.4;
+     且 est-8k 行的 hash 块 192KB SMEM → 1 块/SM,accumulate 墙钟 ≈ 2× 逐行活跃周期和;
+     kc 项在高链数超线性(Ga kc=395 实测 307k/行 vs 线性预测 721k)。
+   - **守卫三阵定谳**:c-58 真偏好混跑(+13%,同病);brainpc2/mult_dcop 路由无关
+     (dd 仅 7-12ms/238ms;LADDER 电池的"+4-9%" = 通胀基线噪声)。
+   - **正确全局图**:Ga/crankseg/Ge99/3Dspec2→hash 优;c-64/c-58→混跑优;brainpc2/mult_dcop→无关。
+     OCCGATE 的 1/16 占用线恰好切在 3.6%(输家)与 15%(赢家)之间 = 全绿之谜。
+     LADDER 增量价值 = 6-15% 占用带(Ge99/crankseg_1),需 kc-aware 经济学。
+   - **决定:今晚不修 v1 系数**(10 个噪声墙钟点拟合 = 拟合噪声,用户纪律);净窗做正经
+     标定设计:分 ht 段 × 含 compact 摊账 × 多迁移率采点。OCCGATE 保持 v28 唯一候选。
 4. touched-reset(docs/63 §2)= 梯子之后的内核工程选项(税消而非避让)。
 5. Ocean 对照:同结构行 Ocean 全家 52ms(我们 compute 112)。
 
