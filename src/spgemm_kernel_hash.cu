@@ -657,6 +657,60 @@ __global__ void hash_dense_window_kernel(
 #define DENSE_CNT_W 65536   // 计数窗口(docs/45 bitmap 回退:atomicOr 在窄列范围争用 = gupta3 +53% 教训)
 
 // count pass:窗口扫描标 flag + 块归约;窗口划分与数值 pass 不同也无妨( disjoint cover 计数同)。
+// docs/70 位图 symbolic(Ocean denseSymbolicKernel 同构):span 一次位图【单遍】,
+// 免窗口免每窗 per-k lower_bound 重搜(旧窗式的税 = 窗数×num_k×2×log 探测/行,Ga41 ≈16.5 万/行)。
+// SMEM = span/32 字(dynamic,~220KB 档位 → span≤1.76M 全覆盖);QUERY_BITMAP 先读后 or
+// 降争用(gupta3 教训);upper_tri 过滤同口径。BCNT=1 启用,span 超帽回退旧窗式。
+__global__ void hash_dense_bcnt_kernel(
+    const int *A_row_ptr, const int *A_col_idx,
+    const int *B_row_ptr, const int *B_col_idx,
+    int upper_tri, int A_rows, int n,
+    int *row_nnz,
+    const int *bucket_rows,
+    const int *span_lo,
+    const int *span_len)
+{
+    int i = bucket_rows ? bucket_rows[blockIdx.x] : blockIdx.x;
+    if (i >= A_rows) return;
+    int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, nw = blockDim.x >> 5;
+    extern __shared__ __align__(8) uint32_t bmp[];   // [words] 位图
+    int lo0 = span_lo ? span_lo[i] : 0;
+    int span = span_len ? span_len[i] : (n - lo0);
+    int words = (span + 31) >> 5;
+    for (int w = tid; w < words; w += blockDim.x) bmp[w] = 0;
+    __syncthreads();
+    int rs = A_row_ptr[i], re = A_row_ptr[i + 1];
+    // 单遍乘积:每 k 的【整条】B 行(无窗口切片,无 lower_bound)
+    for (int p = rs + warp; p < re; p += nw) {
+        int k = A_col_idx[p];
+        int ks = B_row_ptr[k], ke = B_row_ptr[k + 1];
+        for (int q = ks + lane; q < ke; q += 32) {
+            int col = B_col_idx[q];
+            if (col < lo0 || col >= lo0 + span) continue;      // 位图界外(理论不达,防御)
+            if (upper_tri && col < i) continue;
+            int bit = col - lo0;
+            uint32_t m = 1u << (bit & 31);
+            int w = bit >> 5;
+            if ((bmp[w] & m) == 0) atomicOr(&bmp[w], m);        // QUERY_BITMAP:先读后 or 降争用
+        }
+    }
+    __syncthreads();
+    // 计数:向量化 popcount(4 字/iter)
+    __shared__ int wcnt[32];
+    int cnt = 0;
+    int w4 = words & ~3;
+    const uint4 *b4 = (const uint4*)bmp;
+    for (int j4 = tid; j4 < (w4 >> 2); j4 += blockDim.x) {
+        uint4 v = b4[j4];
+        cnt += __popc(v.x) + __popc(v.y) + __popc(v.z) + __popc(v.w);
+    }
+    for (int w = w4 + tid; w < words; w += blockDim.x) cnt += __popc(bmp[w]);
+    for (int off = 16; off; off >>= 1) cnt += __shfl_down_sync(0xffffffff, cnt, off);
+    if (lane == 0) wcnt[warp] = cnt;
+    __syncthreads();
+    if (tid == 0) { int s = 0; for (int x = 0; x < nw; x++) s += wcnt[x]; row_nnz[i] = s; }
+}
+
 __global__ void hash_dense_count_kernel(
     const int *A_row_ptr, const int *A_col_idx,
     const int *B_row_ptr, const int *B_col_idx,
@@ -720,6 +774,11 @@ __global__ void hash_dense_count_kernel(
 #define PB2_STAGE 4
 #endif
 // dense 行 a_len 采集/散射(全局 cursor 区偏移构造)
+__global__ void span_gather_kernel(const int *rows, int nr, const int *span_len, int *out) {
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j < nr) out[j] = span_len[rows[j]];   // docs/70 BCNT:dense 行 span 收集
+}
+
 __global__ void alen_gather_kernel(const int *rows, int nr, const int *A_rp, int *alen) {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     if (j < nr) { int r = rows ? rows[j] : j; alen[j] = A_rp[r + 1] - A_rp[r]; }
@@ -2753,6 +2812,32 @@ static void hash_product(
                 }
                 if (csm > 48 * 1024)
                     CHECK_CUDA(cudaFuncSetAttribute(hash_dense_count_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)csm));
+                // docs/70 位图 symbolic(BCNT=1):span 一次位图单遍,免窗免 lower_bound 重搜。
+                // 需 dense 行最大 span 定统一 SMEM(小 span 阵不牺牲 occupancy);超帽回退旧窗式。
+                static int g_bcnt = -1;
+                if (g_bcnt < 0) { const char *e = getenv("BCNT"); g_bcnt = (e && *e) ? atoi(e) : 0; }
+                bool bcnt_launched = false;
+                if (g_bcnt && dense_rows) {
+                    int *d_sp = decltype(d_sp)(dev_alloc(dense_nr * sizeof(int)));
+                    span_gather_kernel<<<(dense_nr + 255) / 256, 256>>>(dense_rows, dense_nr, d_span_len, d_sp);
+                    int hmax_span = 0;
+                    {   auto mx = thrust::max_element(thrust::device_ptr<int>(d_sp), thrust::device_ptr<int>(d_sp + dense_nr));
+                      CHECK_CUDA(cudaMemcpy(&hmax_span, mx.get(), sizeof(int), cudaMemcpyDeviceToHost)); }
+                    size_t bsm = (size_t)(((unsigned)hmax_span + 31) >> 5) * 4 + 8;
+                    dbg("[%s] BCNT: max_span=%d smem=%zuKB\n", tag, hmax_span, bsm / 1024);
+                    if (bsm <= 200 * 1024) {
+                        CHECK_CUDA(cudaFuncSetAttribute(hash_dense_bcnt_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)bsm));
+                        prof("dense_count", [&]{
+                            hash_dense_bcnt_kernel<<<dense_nr, 512, bsm>>>(
+                                dA_rp, dA_ci, dB_rp, dB_ci, upper_tri, A_rows, A_cols,
+                                d_row_nnz, dense_rows, d_span_lo, d_span_len);
+                            CHECK_CUDA(cudaGetLastError());
+                        });
+                        bcnt_launched = true;
+                    }
+                    dev_free(d_sp);
+                }
+                if (!bcnt_launched)
                 hash_dense_count_kernel<<<dense_nr, 512, csm>>>(
                     dA_rp, dA_ci, dB_rp, dB_ci, upper_tri, A_rows, A_cols,
                     d_row_nnz, dense_rows, dense_rows ? d_span_lo : nullptr, d_flop, d_maxbl, cnt_w);
@@ -2840,8 +2925,11 @@ static void hash_product(
                 d5h_rows += n;
                 CHECK_CUDA(cudaGetLastError());
             }
-            if (false) {   // 见上:dense_sum launch 确定性 invalid-configuration,已绕过
-                // Σnnz(count 后)供下溢检查改口径
+            {   // docs/69 §7 修复:Σnnz(count 后)供下溢检查 —— 原 if(false) 封存致 d5h_nnz_sum
+                // 恒 0 → D5H 行输出全记到 hash 侧 → 下溢检查误回退(F2 实锤,nnz 红旗抓的)。
+                // 封存疑为 Fix#8(grid=0)之前的 invalid-config 残留;n==0 continue 守卫已在。
+                // ⚠ 口径近似:bins 1-10 的 MODE=1 溢出行(交 retry)nnz 不在此和内 → 检查偏保守,
+                // 极端欠估仍可回退(安全方向,非误放行)。
                 unsigned long long *d_s3 = decltype(d_s3)(dev_alloc(sizeof(long long)));
                 CHECK_CUDA(cudaMemset(d_s3, 0, sizeof(long long)));
                 for (int bi = 1; bi <= 10; bi++) {
@@ -3229,7 +3317,10 @@ static void hash_product(
     if ((dense_nr > 0 || d5h_rows > 0)
             ? ((long long)C_nnz_result - dense_nnz_sum - d5h_nnz_sum > tmp_slots)
             : ((long long)C_nnz_result > total_est)) {
-        fprintf(stderr, "[hash] est underflow: C_nnz=%d > total_est=%d → 回退 merge\n", C_nnz_result, total_est);
+        fprintf(stderr, "[hash] est underflow: C_nnz=%d > total_est=%lld → 回退 merge"
+                        " [组件: dense_nr=%d dense_sum=%lld d5h_rows=%d d5h_sum=%lld tmp_slots=%lld hash侧=%lld]\n",
+                C_nnz_result, total_est, dense_nr, dense_nnz_sum, d5h_rows, d5h_nnz_sum,
+                tmp_slots, (long long)C_nnz_result - dense_nnz_sum - d5h_nnz_sum);
         *C_buffer_out = nullptr; *C_rows = A_rows; *C_cols = A_cols; *C_nnz = -1;
         dev_free(rtc); dev_free(rtv); dev_free(rk); dev_free(rv); dev_free(rk2); dev_free(rv2); dev_free(rct);   // docs/21 Fix0
         dev_free(d_rht); dev_free(d_rtab); dev_free(d_rslot); dev_free(d_roff); dev_free(d_rsb); dev_free(d_rse);
