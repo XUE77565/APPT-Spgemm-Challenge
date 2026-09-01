@@ -46,3 +46,19 @@
    —— 砍每窗 5400 串行(docs/63 §5 块并行版回归的教训 = 字级并行才便宜)
 3. 窗宽分档(远)
 4. 与 D5H 解封协同:bitmap symbolic = counting 更便宜 → dup 门可放宽 → precise 覆盖面扩大
+
+## 5. BCNT(位图 symbolic)实测定谳(09-02,交替 ×2,nnz 全对)
+
+| 阵 | 中位 Δ | 备注 |
+|---|---|---|
+| Ga41As41H72 | **−7.6%** | 双复现 |
+| Si41Ge41H72 | −4.1% | |
+| c-58 | −4.6% | |
+| crankseg_2 | −2.4% | |
+| c-64 | +1.5% | 已知噪声带内 |
+| brainpc2 | 完美镜像 | wash |
+
+**BCNT = 真赢零回归**(首版电池的脚本 bug:def 侧读陈旧文件,已修正重跑)。
+与 OCCGATE 互补(OCCGATE 搬低占用行→hash;BCNT 加速留守 dense 行 count)。
+组合电池跑批中;后续阶梯:②位图 count 替 MODE=1 复活 D5H 经济学;③Ocean denseNumeric
+克隆(位图+值数组单遍+前缀发射)覆盖中带 span。
