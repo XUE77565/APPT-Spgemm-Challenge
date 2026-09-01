@@ -62,3 +62,13 @@
 与 OCCGATE 互补(OCCGATE 搬低占用行→hash;BCNT 加速留守 dense 行 count)。
 组合电池跑批中;后续阶梯:②位图 count 替 MODE=1 复活 D5H 经济学;③Ocean denseNumeric
 克隆(位图+值数组单遍+前缀发射)覆盖中带 span。
+
+### §5b 组合效应(OCCGATE=1 基线上 BCNT 增量)
+
+- Ga41/Si41:−0.5%(OCCGATE 已搬走大半 dense 行,count 相位缩水,增量小但方向稳)
+- crankseg_2:wash
+- **in-2004:−9.1%**(190.7/189.8 vs 209.7/207.5 紧双复现)—— 留守 71% 占用 dense 行
+  的 count 相位(22.6ms)被位图化 ✓ 预测命中
+
+**v28 候选栈**:OCCGATE(17 阵验证)+ BCNT(增量 = in-2004 类高占用 dense 阵 −9%
++ 非 OCCGATE 阵 −4~8%),两者零回归可叠加。均默认关待净窗终审。
