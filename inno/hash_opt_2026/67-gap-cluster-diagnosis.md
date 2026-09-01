@@ -150,3 +150,18 @@ v28 预期:7 墙钟赢 × 平均 ~9%(3Dspec2 −32%)≈ geomean −0.8~1.2%,赢�
 (捕获一次、每轮单 API replay,消 host 去调度间隙)→ compute-only 对 CPU 负载近免疫;
 亦为论文测量口径卖点。障碍:管线内 mid-flight D2H(est_scan total/MHSAMP/桶宽)破坏
 捕获,需分段图或去同步化。净窗三件套(排水器/v28 脚本/calib 脚本)继续守望。
+
+## 13. v28 发现扫全表(09-01,load42,零 nnz 红旗,336 阵全)
+
+**geomean 1.4651 → 1.4345(−2.1%)**,赢 32→28。轨迹 v23 1.5008 → v27 1.4651 → v28 1.4345。
+
+- **大赢(远超电池预测 = 新 binary 全量改动 vs v27 老 binary 的累积)**:3Dspec2 −62.6%
+  (比值 4.60→1.72)/in-2004 −61.8%(6.84→2.62)/dielFilterV3 −61/Ga41 −56/Si41 −56/
+  F1 −55/crankseg_2 −52/crankseg_1 −50/inline_1 −48/pkustk14 −47/Ga19 −46/nd24k −41/
+  webbase-1M −37/F2 −37/Ge99 −35;42 阵赢 >8%
+- **净翻赢 4**:SiO2 / TSOPF_FS_b39_c7(cursor 全域的故事)/ c-64b / case39
+- **掉出的 8 赢**:a5esindl/bbmat/bcsstk36/ex11/fp/oilpan/pattern1/rajat25 —— 全部
+  小阵(0.8-7ms)或高方差族 = load42 污染画像(fp +13.8% 单值 vs 电池交替中性)
+- **10 DNF 补齐**(TSOPF_b300/c-73/73b/cage15/rajat×6 = 600s 超时于 load42,长超时全过)
+- ⚠ 口径:OCCGATE=1 单值 + 双 expand 取优;**终审 = 净窗复验**(8 掉赢 + 高方差 5 +
+  35 小阵污染带 ~48 阵清单已可从本表导出)
