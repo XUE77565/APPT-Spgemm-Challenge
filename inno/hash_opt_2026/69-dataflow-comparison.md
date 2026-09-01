@@ -34,3 +34,15 @@ Ocean 的 Ana2 门 = compaction<1.5(dup 低,counting 便宜)才付两遍。
 - [ ] compact+sort 内部拷贝 vs 排序的拆分(需仪器化或 nsys)
 - [ ] D5H 当年失败的矩阵集与 dup 分布(确定正确的门参数)
 - [ ] Ocean precise 工作流在 ocean337 上的实际占比(可从其 config/log 反推)
+
+## 5. D5H 首轮 profiling(09-02,交替 ×2,响应"先 profiling 再策略")
+
+| 阵 | D5H=1 | 默认 | 判定 |
+|---|---|---|---|
+| **F2** | **6.34**(hash_count 2.5+直写,cmp 消失) | 40.0 | **−84% = 6.3×;6.34 vs Ocean 7.5 = 反超!** |
+| 333SP | 64.0 | 58.9 | +8.5%(矩阵级 dup<8 门太粗 → 333SP 边缘高 dup 付贵 counting) |
+| nd24k | 275.8 | 275.9 | wash(有 dense 行 → 互斥封印;长尾阵全被封的证据) |
+
+**结论**:precise 工作流做对 = F2 样板(counting 便宜的两遍直写完胜 est+compact);
+门的粒度错误(矩阵级 → 应行/bin 级 dup 门);互斥封印挡住全部带 dense 行的长尾阵。
+17 阵长尾电池跑批中(bet2ezkag)→ 出 D5H 赢家集 + 与 dup 分布对照定门参数。
